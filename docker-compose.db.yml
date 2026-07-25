@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: lartifactory-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: artifactory
+      POSTGRES_USER: artifactory
+      POSTGRES_PASSWORD: artifactory
+    ports:
+      - "5432:5432"
+    volumes:
+      - artifactory-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U artifactory -d artifactory" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  artifactory-db-data:
