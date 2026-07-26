@@ -27,10 +27,19 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Root level="ALL">
+        <!-- Application logger always logs; set ARTIFACTORY_LOG_ALL (e.g. to "ALL" or "INFO") to also enable every third-party logger via the Root logger below. -->
+        <Logger name="net.luis.artifactory" level="ALL" additivity="false">
             <!--<AppenderRef ref="ConsoleTrace"/>-->
             <!--<AppenderRef ref="ConsoleDebug"/>-->
             <AppenderRef ref="ConsoleInfo"/>
+            <AppenderRef ref="ConsoleWarn"/>
+            <AppenderRef ref="ConsoleError"/>
+            <AppenderRef ref="ConsoleFatal"/>
+        </Logger>
+        <Root level="${env:ARTIFACTORY_LOG_ALL:-OFF}">
+            <!--<AppenderRef ref="ConsoleTrace"/>-->
+            <!--<AppenderRef ref="ConsoleDebug"/>-->
+            <!--<AppenderRef ref="ConsoleInfo"/>-->
             <AppenderRef ref="ConsoleWarn"/>
             <AppenderRef ref="ConsoleError"/>
             <AppenderRef ref="ConsoleFatal"/>

@@ -25,10 +25,18 @@ dependencies {
 	
 	// Utility
 	implementation(libs.apache.commons.lang3)
+	implementation(libs.google.guava) {
+		exclude(group = "org.checkerframework")
+		exclude(group = "com.google.code.findbugs")
+		exclude(group = "com.google.errorprone")
+		exclude(group = "com.google.j2objc")
+	}
 	
 	// Javalin
 	implementation(libs.javalin)
-	implementation(libs.javalin.bundle)
+	implementation(libs.javalin.bundle) {
+		exclude(group = "ch.qos.logback", module = "logback-classic")
+	}
 	
 	// OpenAPI
 	implementation(libs.javalin.openapi.plugin)
@@ -72,7 +80,7 @@ tasks.register<JavaExec>("run") {
 	args = listOf()
 	environment("ARTIFACTORY_PORT", "8080")
 	environment("ARTIFACTORY_DB_URL", "jdbc:postgresql://localhost:5432/artifactory")
-	environment("ARTIFACTORY_DB_USER", "artifactory")
+	environment("ARTIFACTORY_DB_USERNAME", "artifactory")
 	environment("ARTIFACTORY_DB_PASSWORD", "artifactory")
 }
 

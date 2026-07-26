@@ -8,6 +8,7 @@ jspecify = "1.0.0"
 hikari = "6.3.0"
 postgresql = "42.7.11"
 apache-commons-lang3 = "3.20.0"
+google-guava = "33.6.0-jre"
 
 [libraries]
 lutils = { module = "net.luis:LUtils", version.ref = "lutils" }
@@ -24,3 +25,4 @@ jspecify = { module = "org.jspecify:jspecify", version.ref = "jspecify" }
 hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 apache-commons-lang3 = { module = "org.apache.commons:commons-lang3", version.ref = "apache-commons-lang3" }
+google-guava = { module = "com.google.guava:guava", version.ref = "google-guava" }
