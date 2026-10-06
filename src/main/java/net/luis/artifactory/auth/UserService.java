@@ -103,7 +103,7 @@ public class UserService {
 	public @Nullable AccessLevel permissionLevel(@NonNull String repository, @NonNull String username) throws SqlException {
 		List<PermissionEntity> permissions = this.database.from(PERMISSIONS).select().where(SqlCondition.allOf(
 			Sql.equalTo(PERMISSION_USERNAME, username),
-			Sql.in(PERMISSION_REPOSITORY, repository, "*")
+			SqlCondition.anyOf(Sql.equalTo(PERMISSION_REPOSITORY, repository), Sql.equalTo(PERMISSION_REPOSITORY, "*"))
 		)).fetch();
 		
 		AccessLevel best = null;

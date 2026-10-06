@@ -132,6 +132,71 @@ public class ArtifactService {
 	/**
 	 * Writes the file to the response, supports HEAD and range requests.<br>
 	 */
+	/**
+	 * Parses a single byte range header, returns null if absent, unsupported or not satisfiable.<br>
+	 */
+	private static long @Nullable [] parseRange(@Nullable String header, long size) {
+		if (header == null || !header.startsWith("bytes=") || header.contains(",") || size == 0) {
+			return null;
+		}
+		String spec = header.substring("bytes=".length()).strip();
+		int dash = spec.indexOf('-');
+		if (dash < 0) {
+			return null;
+		}
+		try {
+			String startText = spec.substring(0, dash).strip();
+			String endText = spec.substring(dash + 1).strip();
+			long start;
+			long end;
+			if (startText.isEmpty()) {
+				long suffix = Long.parseLong(endText);
+				start = Math.max(0, size - suffix);
+				end = size - 1;
+			} else {
+				start = Long.parseLong(startText);
+				end = endText.isEmpty() ? size - 1 : Math.min(Long.parseLong(endText), size - 1);
+			}
+			return start <= end && start < size ? new long[] { start, end } : null;
+		} catch (NumberFormatException e) {
+			return null;
+		}
+	}
+	
+	private static final class BoundedInputStream extends java.io.FilterInputStream {
+		
+		private long remaining;
+		
+		private BoundedInputStream(@NonNull InputStream input, long limit) {
+			super(input);
+			this.remaining = limit;
+		}
+		
+		@Override
+		public int read() throws IOException {
+			if (this.remaining <= 0) {
+				return -1;
+			}
+			int value = super.read();
+			if (value >= 0) {
+				this.remaining--;
+			}
+			return value;
+		}
+		
+		@Override
+		public int read(byte @NonNull [] buffer, int offset, int length) throws IOException {
+			if (this.remaining <= 0) {
+				return -1;
+			}
+			int read = super.read(buffer, offset, (int) Math.min(length, this.remaining));
+			if (read > 0) {
+				this.remaining -= read;
+			}
+			return read;
+		}
+	}
+	
 	public void serve(@NonNull Context ctx, @NonNull FileEntity file) throws IOException {
 		this.serve(ctx, file, file.contentType());
 	}
@@ -159,8 +224,15 @@ public class ArtifactService {
 			ctx.status(200);
 			return;
 		}
-		if (ctx.header("Range") != null) {
-			ctx.writeSeekableStream(this.blobStore.open(file.sha256()), contentType, file.size());
+		long[] range = parseRange(ctx.header("Range"), file.size());
+		if (range != null) {
+			long length = range[1] - range[0] + 1;
+			InputStream input = this.blobStore.open(file.sha256());
+			input.skipNBytes(range[0]);
+			ctx.status(206).contentType(contentType);
+			ctx.header("Content-Range", "bytes " + range[0] + "-" + range[1] + "/" + file.size());
+			ctx.header("Content-Length", String.valueOf(length));
+			ctx.result(new BoundedInputStream(input, length));
 			return;
 		}
 		ctx.contentType(contentType);
