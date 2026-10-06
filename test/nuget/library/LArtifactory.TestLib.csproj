@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net8.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<PackageId>LArtifactory.TestLib</PackageId>
+		<Version>1.0.0</Version>
+		<Authors>LArtifactory</Authors>
+		<Description>Test package for the LArtifactory NuGet repository</Description>
+		<PackageTags>lartifactory test</PackageTags>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+	</PropertyGroup>
+
+</Project>
