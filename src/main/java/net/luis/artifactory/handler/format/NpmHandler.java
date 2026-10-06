@@ -42,7 +42,7 @@ public class NpmHandler extends FormatHandler {
 	}
 	
 	@Override
-	protected @NonNull String challenge(@NonNull RepositoryEntity repository) {
+	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		return "Bearer realm=\"" + repository.name() + "\"";
 	}
 	
@@ -124,7 +124,7 @@ public class NpmHandler extends FormatHandler {
 		switch (first) {
 			case "ping" -> json(ctx, 200, Json.object());
 			case "whoami" -> {
-				Principal principal = this.services.auth().requireAuthenticated(ctx, this.challenge(repository));
+				Principal principal = this.services.auth().requireAuthenticated(ctx, this.challenge(ctx, repository));
 				ObjectNode root = Json.object();
 				root.put("username", principal.username());
 				json(ctx, 200, root);

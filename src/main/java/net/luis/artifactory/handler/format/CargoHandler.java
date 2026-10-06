@@ -40,8 +40,8 @@ public class CargoHandler extends FormatHandler {
 	}
 	
 	@Override
-	protected @NonNull String challenge(@NonNull RepositoryEntity repository) {
-		return "Cargo login_url=\"" + "/cargo/" + repository.name() + "/me\"";
+	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+		return "Cargo login_url=\"" + this.repositoryUrl(ctx, repository) + "/me\"";
 	}
 	
 	/**

@@ -38,12 +38,12 @@ public abstract class FormatHandler {
 	 */
 	public abstract void handle(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception;
 	
-	protected @NonNull String challenge(@NonNull RepositoryEntity repository) {
+	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		return "Basic realm=\"" + repository.name() + "\"";
 	}
 	
 	protected @Nullable Principal authorize(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull AccessLevel level) throws SqlException {
-		return this.services.auth().authorize(ctx, repository, level, this.challenge(repository));
+		return this.services.auth().authorize(ctx, repository, level, this.challenge(ctx, repository));
 	}
 	
 	protected static @Nullable String username(@Nullable Principal principal) {
