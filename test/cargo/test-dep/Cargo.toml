@@ -1,0 +1,14 @@
+[package]
+name = "lartifactory-test-dep"
+version = "0.1.0"
+edition = "2021"
+description = "Test crate depending on another crate of the LArtifactory cargo registry"
+license = "MIT"
+publish = ["lartifactory"]
+
+[features]
+default = ["fancy"]
+fancy = ["base/extra"]
+
+[dependencies]
+base = { package = "lartifactory-test-crate", version = "0.1", registry = "lartifactory" }

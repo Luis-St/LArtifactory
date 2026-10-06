@@ -1,0 +1,8 @@
+[package]
+name = "lartifactory-cargo-consumer"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+lartifactory-test-dep = { version = "0.1", registry = "lartifactory" }
