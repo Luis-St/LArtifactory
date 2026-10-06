@@ -1,0 +1,8 @@
+{
+	"name": "lartifactory-npm-consumer",
+	"version": "1.0.0",
+	"private": true,
+	"dependencies": {
+		"@lartifactory/test-lib": "^1.0.0"
+	}
+}

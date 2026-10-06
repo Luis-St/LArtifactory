@@ -1,0 +1,8 @@
+{
+	"name": "@lartifactory/test-lib",
+	"version": "1.0.0",
+	"description": "Test package for the LArtifactory npm repository",
+	"main": "index.js",
+	"license": "MIT",
+	"keywords": ["lartifactory", "test"]
+}
