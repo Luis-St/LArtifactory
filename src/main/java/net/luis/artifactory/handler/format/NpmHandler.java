@@ -206,6 +206,9 @@ public class NpmHandler extends FormatHandler {
 				pkg.set("keywords", manifest.get("keywords"));
 			}
 			pkg.putObject("links");
+			String publisher = Objects.requireNonNullElse(entry.getValue().getLast().createdBy(), "unknown");
+			pkg.putObject("publisher").put("username", publisher).put("email", "");
+			pkg.putArray("maintainers").addObject().put("username", publisher).put("email", "");
 			ObjectNode score = object.putObject("score");
 			score.put("final", 1.0);
 			score.putObject("detail").put("quality", 1.0).put("popularity", 1.0).put("maintenance", 1.0);
