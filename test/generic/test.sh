@@ -31,6 +31,13 @@ FILES="$(curl -sS -u "lat-reader:$READER_TOKEN" "$ARTIFACTORY_URL/api/repositori
 check_contains "file api lists the file" "\"path\":\"docs/hello.txt\"" "$FILES"
 check_contains "file api lists the uploader" "\"createdBy\":\"lat-ci\"" "$FILES"
 
+check_status "admin makes the repository public" 200 -u "$ADMIN_USER:$ADMIN_PASSWORD" -H 'Content-Type: application/json' -X PATCH -d '{"publicRead":true}' "$ARTIFACTORY_URL/api/repositories/generic-local"
+check_status "anonymous download from a public repository" 200 "$REPO_URL/docs/hello.txt"
+check_status "anonymous upload to a public repository is still rejected" 401 -T "$FILE" "$REPO_URL/docs/anonymous.txt"
+check_contains "public repository is listed for anonymous users" '"name":"generic-local"' "$(curl -sS "$ARTIFACTORY_URL/api/repositories")"
+check_status "admin makes the repository private again" 200 -u "$ADMIN_USER:$ADMIN_PASSWORD" -H 'Content-Type: application/json' -X PATCH -d '{"publicRead":false}' "$ARTIFACTORY_URL/api/repositories/generic-local"
+check_status "anonymous download from a private repository is rejected again" 401 "$REPO_URL/docs/hello.txt"
+
 check_status "writer can not delete" 403 -u "lat-ci:$CI_TOKEN" -X DELETE "$REPO_URL/docs/hello.txt"
 check_status "admin deletes a file" 204 -H "Authorization: Bearer $ADMIN_TOKEN" -X DELETE "$REPO_URL/docs/hello.txt"
 check_status "deleted file is gone" 404 -u "lat-reader:$READER_TOKEN" "$REPO_URL/docs/hello.txt"
