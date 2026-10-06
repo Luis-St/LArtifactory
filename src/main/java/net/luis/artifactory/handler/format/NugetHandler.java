@@ -64,11 +64,14 @@ public class NugetHandler extends FormatHandler {
 		if (!read) {
 			throw HttpError.methodNotAllowed();
 		}
+		if (segments.equals(List.of("v3", "index.json")) || segments.equals(List.of("index.json"))) {
+			// The service index only contains urls, nuget clients fetch it without credentials before pushing with an api key
+			this.serviceIndex(ctx, repository);
+			return;
+		}
 		this.authorize(ctx, repository, AccessLevel.READ);
 		
-		if (segments.equals(List.of("v3", "index.json")) || segments.equals(List.of("index.json"))) {
-			this.serviceIndex(ctx, repository);
-		} else if (segments.size() == 3 && segments.getFirst().equals("v3-flatcontainer") && segments.get(2).equals("index.json")) {
+		if (segments.size() == 3 && segments.getFirst().equals("v3-flatcontainer") && segments.get(2).equals("index.json")) {
 			this.versionList(ctx, repository, segments.get(1).toLowerCase(Locale.ROOT));
 		} else if (segments.size() == 4 && segments.getFirst().equals("v3-flatcontainer")) {
 			this.flatFile(ctx, repository, segments.get(1).toLowerCase(Locale.ROOT), segments.get(2).toLowerCase(Locale.ROOT), segments.get(3).toLowerCase(Locale.ROOT));
