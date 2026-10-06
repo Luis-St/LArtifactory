@@ -1,0 +1,9 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "LArtifactory_Test.Pkg"
+version = "1.0.0"
+description = "Test package for the LArtifactory PyPI repository"
+requires-python = ">=3.8"
