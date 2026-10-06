@@ -95,6 +95,8 @@ public class Application {
 				ctx.attribute("request_start", System.nanoTime());
 			});
 			
+			config.routes.before(dispatcher::handleMappedHost);
+			
 			config.routes.after(ctx -> {
 				Long start = ctx.attribute("request_start");
 				if (start != null) {

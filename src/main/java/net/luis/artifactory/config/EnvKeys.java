@@ -5,6 +5,7 @@ public final class EnvKeys {
 	// Core
 	public static final String PORT = "ARTIFACTORY_PORT";
 	public static final String BASE_URL = "ARTIFACTORY_BASE_URL";
+	public static final String HOST_REPOSITORIES = "ARTIFACTORY_HOST_REPOSITORIES";
 	
 	// Storage
 	public static final String STORAGE_PATH = "ARTIFACTORY_STORAGE_PATH";

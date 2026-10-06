@@ -51,6 +51,9 @@ public abstract class FormatHandler {
 	}
 	
 	protected @NonNull String repositoryUrl(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+		if (Boolean.TRUE.equals(ctx.attribute(RepositoryDispatcher.HOST_MAPPED_ATTRIBUTE))) {
+			return Requests.baseUrl(ctx, this.services.config());
+		}
 		return Requests.baseUrl(ctx, this.services.config()) + "/" + this.type().id() + "/" + repository.name();
 	}
 	
