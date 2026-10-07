@@ -4,6 +4,7 @@ import io.javalin.Javalin;
 import io.javalin.compression.CompressionStrategy;
 import io.javalin.config.SizeUnit;
 import io.javalin.http.HandlerType;
+import io.javalin.http.staticfiles.Location;
 import io.javalin.json.JavalinJackson3;
 import io.javalin.openapi.plugin.OpenApiPlugin;
 import io.javalin.openapi.plugin.swagger.SwaggerPlugin;
@@ -87,6 +88,14 @@ public class Application {
 			));
 			config.registerPlugin(new SwaggerPlugin());
 			
+			// Web ui (built from ui/ into the classpath), client side routing uses the url hash
+			config.staticFiles.add(staticFiles -> {
+				staticFiles.hostedPath = "/ui";
+				staticFiles.directory = "/ui";
+				staticFiles.location = Location.CLASSPATH;
+			});
+			config.spaRoot.addFile("/ui", "/ui/index.html", Location.CLASSPATH);
+			
 			config.routes.before(ctx -> {
 				String traceId = UUID.randomUUID().toString();
 				MDC.put("trace_id", traceId);
@@ -109,7 +118,13 @@ public class Application {
 			
 			config.routes.exception(HttpError.class, (e, ctx) -> {
 				ctx.status(e.status());
-				e.headers().forEach(ctx::header);
+				// The web ui handles authentication itself, a challenge would open the login dialog of the browser
+				boolean ui = "XMLHttpRequest".equals(ctx.header("X-Requested-With"));
+				e.headers().forEach((name, value) -> {
+					if (!ui || !"WWW-Authenticate".equalsIgnoreCase(name)) {
+						ctx.header(name, value);
+					}
+				});
 				if (e.body() != null && !"HEAD".equalsIgnoreCase(ctx.req().getMethod())) {
 					ctx.contentType(e.contentType() == null ? "text/plain" : e.contentType()).result(e.body());
 				} else {
@@ -126,6 +141,10 @@ public class Application {
 			
 			// Health
 			config.routes.get("/health", healthHandler::health);
+			
+			// Web ui
+			config.routes.get("/", ctx -> ctx.redirect("/ui/"));
+			config.routes.get("/ui", ctx -> ctx.redirect("/ui/"));
 			
 			// Management api
 			config.routes.get("/api/me", userAdminHandler::me);

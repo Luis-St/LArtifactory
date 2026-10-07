@@ -1,3 +1,11 @@
+FROM node:22-alpine AS ui
+
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui ./
+RUN npm run build
+
 FROM eclipse-temurin:25-jdk AS build
 
 WORKDIR /app
@@ -5,8 +13,9 @@ COPY gradlew gradlew
 COPY gradle gradle
 COPY build.gradle.kts settings.gradle.kts ./
 COPY src src
+COPY --from=ui /ui/dist ui/dist
 
-RUN chmod +x gradlew && ./gradlew shadowJar --no-daemon
+RUN chmod +x gradlew && ./gradlew shadowJar --no-daemon -PskipUi
 
 FROM eclipse-temurin:25-jre
 
