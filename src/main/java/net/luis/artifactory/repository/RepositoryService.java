@@ -10,18 +10,25 @@ import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 import static net.luis.artifactory.database.Tables.*;
 
 public class RepositoryService {
-	
+
 	public static final Pattern NAME_PATTERN = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}");
-	
+	private static final int MAX_CACHE_ENTRIES = 10_000;
+
 	private final SqlDatabase database;
 	private final ArtifactService artifactService;
-	private final Map<String, Optional<RepositoryEntity>> cache = new ConcurrentHashMap<>();
+	// Bounded LRU cache: repository lookups use request supplied names (including misses), an unbounded cache would
+	// let an attacker exhaust memory by requesting endless distinct repository names.
+	private final Map<String, Optional<RepositoryEntity>> cache = Collections.synchronizedMap(new LinkedHashMap<String, Optional<RepositoryEntity>>(256, 0.75f, true) {
+		@Override
+		protected boolean removeEldestEntry(Map.Entry<String, Optional<RepositoryEntity>> eldest) {
+			return this.size() > MAX_CACHE_ENTRIES;
+		}
+	});
 	
 	public RepositoryService(@NonNull SqlDatabase database, @NonNull ArtifactService artifactService) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");

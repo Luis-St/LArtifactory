@@ -18,8 +18,10 @@ public final class Requests {
 			return config.baseUrl();
 		}
 		
-		String proto = firstHeaderValue(ctx.header("X-Forwarded-Proto"));
-		String host = firstHeaderValue(ctx.header("X-Forwarded-Host"));
+		// X-Forwarded-* headers are client controlled, only honored when the deployment opts in (behind a trusted proxy)
+		boolean trustProxy = config.trustProxy();
+		String proto = trustProxy ? firstHeaderValue(ctx.header("X-Forwarded-Proto")) : null;
+		String host = trustProxy ? firstHeaderValue(ctx.header("X-Forwarded-Host")) : null;
 		if (proto == null) {
 			proto = ctx.scheme();
 		}
@@ -29,7 +31,7 @@ public final class Requests {
 		if (host == null) {
 			host = ctx.host();
 		}
-		String prefix = firstHeaderValue(ctx.header("X-Forwarded-Prefix"));
+		String prefix = trustProxy ? firstHeaderValue(ctx.header("X-Forwarded-Prefix")) : null;
 		return proto + "://" + host + (prefix == null ? "" : prefix.replaceAll("/+$", ""));
 	}
 	
@@ -97,5 +99,23 @@ public final class Requests {
 	
 	public static @NonNull String escapeXml(@NonNull String value) {
 		return escapeHtml(value);
+	}
+
+	/**
+	 * Redacts token secrets ({@code lat_...}) that appear in a request path (e.g. the npm logout url) so they are not written to logs.
+	 */
+	public static @NonNull String sanitizePath(@NonNull String path) {
+		if (!path.contains("lat_")) {
+			return path;
+		}
+		String[] segments = path.split("/", -1);
+		StringBuilder builder = new StringBuilder(path.length());
+		for (int i = 0; i < segments.length; i++) {
+			if (i > 0) {
+				builder.append('/');
+			}
+			builder.append(segments[i].startsWith("lat_") ? "lat_***" : segments[i]);
+		}
+		return builder.toString();
 	}
 }

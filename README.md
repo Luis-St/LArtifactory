@@ -17,6 +17,8 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_PORT`               | `8080`                                         | HTTP port                                                                   |
 | `ARTIFACTORY_BASE_URL`           | derived from the request                       | Public url used in generated links (e.g. `https://repo.example.com`)        |
 | `ARTIFACTORY_HOST_REPOSITORIES`  |                                                | Serve repositories at the root of a host, e.g. `npm.example.com=npm-local`  |
+| `ARTIFACTORY_TRUST_PROXY`        | `false`                                        | Honor `X-Forwarded-Proto/Host/Prefix` (only enable behind a trusted proxy)  |
+| `ARTIFACTORY_ENABLE_SWAGGER`     | `true`                                         | Serve the (unauthenticated) OpenAPI spec and Swagger UI                     |
 | `ARTIFACTORY_STORAGE_PATH`       | `data`                                         | Directory for the artifact files                                            |
 | `ARTIFACTORY_MAX_UPLOAD_SIZE_MB` | `1024`                                         | Maximum size of a single artifact                                           |
 | `ARTIFACTORY_ADMIN_USERNAME`     | `admin`                                        | Name of the initial administrator                                           |
@@ -26,7 +28,11 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_DB_PASSWORD`        | `artifactory`                                  | Database password                                                           |
 | `ARTIFACTORY_DB_POOL_SIZE`       | `10`                                           | HikariCP maximum pool size                                                  |
 
-Without `ARTIFACTORY_BASE_URL` the public url is derived from the `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` headers.
+Without `ARTIFACTORY_BASE_URL` the public url is derived from the request. The client controlled `X-Forwarded-Host`,
+`X-Forwarded-Proto` and `X-Forwarded-Prefix` headers are only trusted when `ARTIFACTORY_TRUST_PROXY=true` (otherwise the
+`Host` header and the request scheme are used). **Set `ARTIFACTORY_BASE_URL` in production**, or only enable
+`ARTIFACTORY_TRUST_PROXY` behind a reverse proxy that sets these headers, so generated download urls can not be
+redirected to an attacker host via a forged `Host`/`X-Forwarded-Host` header.
 The database schema is created on startup, files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
 
 ## Repositories
@@ -107,6 +113,8 @@ ARTIFACTORY_HOST_REPOSITORIES=pypi.example.com=pypi-local,npm.example.com=npm-lo
 ```
 
 All hosts point to the same server (e.g. via nginx), `/api`, `/health` and `/swagger` keep working on every host.
+The mapping matches the `Host` header; if the proxy rewrites `Host` and forwards the original in `X-Forwarded-Host`,
+set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 
 ## Authentication
 
@@ -116,6 +124,8 @@ All hosts point to the same server (e.g. via nginx), `/api`, `/health` and `/swa
   A token can be limited to a lower access level than its user and can expire.
 - Access levels per repository: `READ` (download), `WRITE` (publish, tags, yank, unlist) and `DELETE` (delete, unpublish).
   Permissions are granted per repository or for all repositories with `*`. Administrators have full access.
+- The management api (`/api/*`) requires authenticating with the user password (basic auth); tokens (including an
+  admin's token) grant repository access only and can not be used to administer users, permissions or repositories.
 - Repositories are private by default, `publicRead` allows anonymous downloads.
 
 ## Management API

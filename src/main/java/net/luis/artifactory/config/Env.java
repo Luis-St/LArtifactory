@@ -44,9 +44,23 @@ public final class Env {
 	
 	public @Nullable String optional(@NonNull String key) {
 		Objects.requireNonNull(key, "Key must not be null");
-		
+
 		String value = this.lookup.apply(key);
 		return value == null || value.isBlank() ? null : value;
+	}
+
+	public boolean bool(@NonNull String key, boolean defaultValue) {
+		Objects.requireNonNull(key, "Key must not be null");
+
+		String value = this.optional(key);
+		if (value == null) {
+			return defaultValue;
+		}
+		return switch (value.strip().toLowerCase(Locale.ROOT)) {
+			case "true", "1", "yes", "on" -> true;
+			case "false", "0", "no", "off" -> false;
+			default -> throw new ConfigException("Environment variable " + key + " must be a boolean (true/false), got: " + value);
+		};
 	}
 	
 	public int integer(@NonNull String key, int defaultValue) {

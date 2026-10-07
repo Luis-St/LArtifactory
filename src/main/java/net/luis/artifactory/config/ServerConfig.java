@@ -13,7 +13,9 @@ public record ServerConfig(
 	@NonNull Path storagePath,
 	long maxUploadSize,
 	@NonNull String adminUsername,
-	@Nullable String adminPassword
+	@Nullable String adminPassword,
+	boolean trustProxy,
+	boolean enableSwagger
 ) {
 	
 	public ServerConfig {
@@ -40,7 +42,9 @@ public record ServerConfig(
 			Path.of(env.string(EnvKeys.STORAGE_PATH, "data")).toAbsolutePath(),
 			env.integer(EnvKeys.MAX_UPLOAD_SIZE, 1024) * 1024L * 1024L,
 			env.string(EnvKeys.ADMIN_USERNAME, "admin"),
-			env.optional(EnvKeys.ADMIN_PASSWORD)
+			env.optional(EnvKeys.ADMIN_PASSWORD),
+			env.bool(EnvKeys.TRUST_PROXY, false),
+			env.bool(EnvKeys.ENABLE_SWAGGER, true)
 		);
 	}
 	

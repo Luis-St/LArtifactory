@@ -37,7 +37,8 @@ public class RepositoryDispatcher {
 		if (mapping.isEmpty()) {
 			return;
 		}
-		String host = Objects.requireNonNullElse(ctx.header("X-Forwarded-Host"), Objects.requireNonNullElse(ctx.header("Host"), ""));
+		String forwardedHost = this.services.config().trustProxy() ? ctx.header("X-Forwarded-Host") : null;
+		String host = Objects.requireNonNullElse(forwardedHost, Objects.requireNonNullElse(ctx.header("Host"), ""));
 		host = host.split(",")[0].strip().toLowerCase(Locale.ROOT);
 		int colon = host.lastIndexOf(':');
 		if (colon > 0 && !host.endsWith("]")) {
