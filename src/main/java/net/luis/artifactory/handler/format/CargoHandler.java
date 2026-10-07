@@ -29,6 +29,7 @@ import java.util.regex.Pattern;
 public class CargoHandler extends FormatHandler {
 	
 	private static final Pattern CRATE_NAME = Pattern.compile("[A-Za-z][A-Za-z0-9_-]{0,63}");
+	private static final Pattern CRATE_VERSION = Pattern.compile("[0-9A-Za-z][0-9A-Za-z.+_-]{0,127}");
 	
 	public CargoHandler(@NonNull Services services) {
 		super(services);
@@ -200,8 +201,8 @@ public class CargoHandler extends FormatHandler {
 		if (name == null || !CRATE_NAME.matcher(name).matches()) {
 			throw cargoError(400, "Invalid crate name: " + name);
 		}
-		if (version == null || version.isBlank()) {
-			throw cargoError(400, "Missing crate version");
+		if (version == null || !CRATE_VERSION.matcher(version).matches()) {
+			throw cargoError(400, "Invalid crate version: " + version);
 		}
 		String key = name.toLowerCase(Locale.ROOT);
 		List<PackageVersionEntity> existing = this.services.packages().versions(repository.name(), key);

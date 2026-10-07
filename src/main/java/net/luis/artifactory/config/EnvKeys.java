@@ -6,6 +6,8 @@ public final class EnvKeys {
 	public static final String PORT = "ARTIFACTORY_PORT";
 	public static final String BASE_URL = "ARTIFACTORY_BASE_URL";
 	public static final String HOST_REPOSITORIES = "ARTIFACTORY_HOST_REPOSITORIES";
+	public static final String TRUST_PROXY = "ARTIFACTORY_TRUST_PROXY";
+	public static final String ENABLE_API_DOCS = "ARTIFACTORY_ENABLE_API_DOCS";
 	
 	// Storage
 	public static final String STORAGE_PATH = "ARTIFACTORY_STORAGE_PATH";

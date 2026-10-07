@@ -78,14 +78,17 @@ public class Application {
 			config.jetty.multipartConfig.maxInMemoryFileSize(1, SizeUnit.MB);
 			config.jetty.multipartConfig.cacheDirectory(serverConfig.storagePath().resolve("tmp").toString());
 			
-			config.registerPlugin(new OpenApiPlugin(pluginConfig ->
-				pluginConfig.withDefinitionConfiguration((_, definition) ->
-					definition.info(info ->
-						info.title("LArtifactory").version("1.0.0").description("Artifact repository management API")
+			// The OpenAPI spec and Swagger UI are served without authentication, keep them disabled unless explicitly enabled.
+			if (serverConfig.apiDocsEnabled()) {
+				config.registerPlugin(new OpenApiPlugin(pluginConfig ->
+					pluginConfig.withDefinitionConfiguration((_, definition) ->
+						definition.info(info ->
+							info.title("LArtifactory").version("1.0.0").description("Artifact repository management API")
+						)
 					)
-				)
-			));
-			config.registerPlugin(new SwaggerPlugin());
+				));
+				config.registerPlugin(new SwaggerPlugin());
+			}
 			
 			config.routes.before(ctx -> {
 				String traceId = UUID.randomUUID().toString();
@@ -93,6 +96,7 @@ public class Application {
 				MDC.put("source_ip", ctx.ip());
 				ctx.attribute("trace_id", traceId);
 				ctx.attribute("request_start", System.nanoTime());
+				ctx.header("X-Content-Type-Options", "nosniff");
 			});
 			
 			config.routes.before(dispatcher::handleMappedHost);
@@ -103,7 +107,7 @@ public class Application {
 					MDC.put("duration_ms", String.valueOf((System.nanoTime() - start) / 1_000_000));
 				}
 				
-				LOGGER.info("{} {} {}", ctx.method(), ctx.path(), ctx.status());
+				LOGGER.info("{} {} {}", ctx.method(), net.luis.artifactory.http.Requests.sanitizePath(ctx.path()), ctx.status());
 				MDC.clear();
 			});
 			

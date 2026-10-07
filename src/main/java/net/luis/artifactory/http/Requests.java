@@ -17,19 +17,17 @@ public final class Requests {
 		if (config.baseUrl() != null) {
 			return config.baseUrl();
 		}
-		
-		String proto = firstHeaderValue(ctx.header("X-Forwarded-Proto"));
-		String host = firstHeaderValue(ctx.header("X-Forwarded-Host"));
+
+		// Forwarded headers are client-controlled; honor them only when the deployment runs behind a trusted proxy.
+		String proto = config.trustProxy() ? firstHeaderValue(ctx.header("X-Forwarded-Proto")) : null;
+		String host = config.trustProxy() ? firstHeaderValue(ctx.header("X-Forwarded-Host")) : null;
 		if (proto == null) {
 			proto = ctx.scheme();
 		}
 		if (host == null) {
-			host = ctx.header("Host");
-		}
-		if (host == null) {
 			host = ctx.host();
 		}
-		String prefix = firstHeaderValue(ctx.header("X-Forwarded-Prefix"));
+		String prefix = config.trustProxy() ? firstHeaderValue(ctx.header("X-Forwarded-Prefix")) : null;
 		return proto + "://" + host + (prefix == null ? "" : prefix.replaceAll("/+$", ""));
 	}
 	
@@ -80,6 +78,25 @@ public final class Requests {
 		return accept != null && accept.toLowerCase(Locale.ROOT).contains(mediaType.toLowerCase(Locale.ROOT));
 	}
 	
+	/**
+	 * Redacts secrets that are carried in the request path (e.g. the npm logout token) before the path is logged.<br>
+	 */
+	public static @NonNull String sanitizePath(@NonNull String path) {
+		String marker = "/-/user/token/";
+		int index = path.indexOf(marker);
+		if (index >= 0) {
+			return path.substring(0, index + marker.length()) + "***";
+		}
+		return path;
+	}
+
+	/**
+	 * Writes a server generated HTML response with a restrictive content security policy, the pages only contain links.<br>
+	 */
+	public static void html(@NonNull Context ctx, int status, @NonNull String html) {
+		ctx.status(status).header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'").html(html);
+	}
+
 	public static @NonNull String escapeHtml(@NonNull String value) {
 		StringBuilder builder = new StringBuilder(value.length());
 		for (char c : value.toCharArray()) {

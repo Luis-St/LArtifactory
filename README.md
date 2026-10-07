@@ -17,6 +17,8 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_PORT`               | `8080`                                         | HTTP port                                                                   |
 | `ARTIFACTORY_BASE_URL`           | derived from the request                       | Public url used in generated links (e.g. `https://repo.example.com`)        |
 | `ARTIFACTORY_HOST_REPOSITORIES`  |                                                | Serve repositories at the root of a host, e.g. `npm.example.com=npm-local`  |
+| `ARTIFACTORY_TRUST_PROXY`        | `false`                                        | Trust `X-Forwarded-*` headers (only enable behind a trusted reverse proxy)   |
+| `ARTIFACTORY_ENABLE_API_DOCS`    | `false`                                        | Expose the unauthenticated OpenAPI spec and Swagger UI                       |
 | `ARTIFACTORY_STORAGE_PATH`       | `data`                                         | Directory for the artifact files                                            |
 | `ARTIFACTORY_MAX_UPLOAD_SIZE_MB` | `1024`                                         | Maximum size of a single artifact                                           |
 | `ARTIFACTORY_ADMIN_USERNAME`     | `admin`                                        | Name of the initial administrator                                           |
@@ -26,8 +28,10 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_DB_PASSWORD`        | `artifactory`                                  | Database password                                                           |
 | `ARTIFACTORY_DB_POOL_SIZE`       | `10`                                           | HikariCP maximum pool size                                                  |
 
-Without `ARTIFACTORY_BASE_URL` the public url is derived from the `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` headers.
+Without `ARTIFACTORY_BASE_URL` the public url is derived from the request `Host`. The `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` headers are only honored when `ARTIFACTORY_TRUST_PROXY=true`, which must only be enabled when the server runs behind a reverse proxy that sets these headers; otherwise a client could forge the links in generated metadata. In production, set `ARTIFACTORY_BASE_URL` explicitly.
 The database schema is created on startup, files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
+
+For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user passwords created through the API must be at least 12 characters), a dedicated `ARTIFACTORY_DB_PASSWORD`, and leave `ARTIFACTORY_ENABLE_API_DOCS` disabled. Uploaded artifacts are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` so they can not execute in the browser.
 
 ## Repositories
 

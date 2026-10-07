@@ -140,7 +140,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			html.append("\n");
 		}
 		html.append("</pre>\n</body>\n</html>\n");
-		ctx.status(200).html(html.toString());
+		Requests.html(ctx, 200, html.toString());
 		return true;
 	}
 	

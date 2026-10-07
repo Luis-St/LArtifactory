@@ -200,7 +200,12 @@ public class AuthService {
 			}
 			AccessLevel level = Objects.requireNonNullElse(AccessLevel.parse(token.level()), AccessLevel.READ);
 			principal = new Principal(user.username(), user.admin(), level);
-			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+			// Never cache a token past its expiry, otherwise an expired token would keep working until the cache entry expires.
+			long expiresAt = System.currentTimeMillis() + CACHE_TTL_MILLIS;
+			if (token.expiresAt() != null) {
+				expiresAt = Math.min(expiresAt, token.expiresAt().toEpochMilli());
+			}
+			this.cache.put(cacheKey, new CacheEntry(principal, expiresAt));
 		}
 		
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {

@@ -200,6 +200,23 @@ public class ArtifactService {
 	public void serve(@NonNull Context ctx, @NonNull FileEntity file) throws IOException {
 		this.serve(ctx, file, file.contentType());
 	}
+
+	/**
+	 * Builds the {@code filename} part of a {@code Content-Disposition} header, escaping it against header injection.<br>
+	 */
+	private static @NonNull String contentDispositionFilename(@NonNull String path) {
+		String name = path.substring(path.lastIndexOf('/') + 1);
+		StringBuilder ascii = new StringBuilder();
+		for (int i = 0; i < name.length(); i++) {
+			char c = name.charAt(i);
+			ascii.append(c >= 0x20 && c < 0x7f && c != '"' && c != '\\' ? c : '_');
+		}
+		if (ascii.isEmpty()) {
+			return "";
+		}
+		String encoded = java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
+		return "; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
+	}
 	
 	public void serve(@NonNull Context ctx, @NonNull FileEntity file, @NonNull String contentType) throws IOException {
 		if (!this.blobStore.exists(file.sha256())) {
@@ -209,6 +226,9 @@ public class ArtifactService {
 		String etag = "\"" + file.sha256() + "\"";
 		ctx.header("ETag", etag);
 		ctx.header("Accept-Ranges", "bytes");
+		// Served content is user uploaded, force a download so browsers never render it (e.g. HTML/SVG) in the registry origin.
+		ctx.header("Content-Disposition", "attachment" + contentDispositionFilename(file.path()));
+		ctx.header("X-Content-Type-Options", "nosniff");
 		ctx.header("X-Checksum-Sha1", file.sha1());
 		ctx.header("X-Checksum-Sha256", file.sha256());
 		ctx.header("X-Checksum-Md5", file.md5());
