@@ -1,8 +1,9 @@
 {
   "openapi" : "3.1.0",
   "info" : {
-    "title" : "",
-    "version" : ""
+    "title" : "LArtifactory",
+    "version" : "1.0.0",
+    "description" : "Artifact repository management API"
   },
   "paths" : {
     "/api/me" : {

@@ -1,28 +1,37 @@
 #!/usr/bin/env bash
 # Maven repository: publish with Gradle (maven-publish) and Maven (deploy), resolve with Maven and Gradle.
-# Requires: gradle, mvn, java
+# Requires: mvn, java (Gradle runs through the repository's ./gradlew wrapper, falling back to a 'gradle' on PATH)
 
 fresh_work_dir maven
 MAVEN_DIR="$WORK_DIR/maven"
 RELEASES="$ARTIFACTORY_URL/maven/maven-releases"
 SNAPSHOTS="$ARTIFACTORY_URL/maven/maven-snapshots"
 GROUP_PATH="net/luis/lartifactory/test"
+
+# Drive Gradle through the repository wrapper so the tests use a Gradle version that supports the active JDK.
+# A plain 'gradle' on PATH can be too old for a newer JDK (Gradle 8.x can not run on JDK 25, for example).
+REPO_ROOT="$(cd "$TEST_DIR/.." && pwd)"
+if [[ -x "$REPO_ROOT/gradlew" ]]; then
+	GRADLE=("$REPO_ROOT/gradlew")
+else
+	GRADLE=(gradle)
+fi
 GRADLE_ARGS=(--no-daemon -q --project-cache-dir "$MAVEN_DIR/.gradle-cache" "-PartifactoryUrl=$ARTIFACTORY_URL" "-PartifactoryUser=lat-ci" "-PartifactoryPassword=$CI_TOKEN")
 export MAVEN_USER=lat-ci MAVEN_PASSWORD="$CI_TOKEN"
 MAVEN_ARGS=(-B -q -s "$MAVEN_DIR/settings.xml" "-Dartifactory.url=$ARTIFACTORY_URL")
 
 # Publish
 cd "$MAVEN_DIR/gradle-lib" || return
-check "gradle publishes gradle-lib 1.0.0" gradle "${GRADLE_ARGS[@]}" publish
-check_fails "gradle publish without credentials fails" gradle --no-daemon -q --project-cache-dir "$MAVEN_DIR/.gradle-cache" "-PartifactoryUrl=$ARTIFACTORY_URL" "-PartifactoryUser=nobody" "-PartifactoryPassword=wrong" publish
+check "gradle publishes gradle-lib 1.0.0" "${GRADLE[@]}" "${GRADLE_ARGS[@]}" publish
+check_fails "gradle publish without credentials fails" "${GRADLE[@]}" --no-daemon -q --project-cache-dir "$MAVEN_DIR/.gradle-cache" "-PartifactoryUrl=$ARTIFACTORY_URL" "-PartifactoryUser=nobody" "-PartifactoryPassword=wrong" publish
 
 sed -i 's/gradle-lib release/gradle-lib snapshot 1/' src/main/java/net/luis/lartifactory/test/gradle/GradleLib.java
-check "gradle publishes gradle-lib 1.1.0-SNAPSHOT (build 1)" gradle "${GRADLE_ARGS[@]}" -PlibVersion=1.1.0-SNAPSHOT publish
+check "gradle publishes gradle-lib 1.1.0-SNAPSHOT (build 1)" "${GRADLE[@]}" "${GRADLE_ARGS[@]}" -PlibVersion=1.1.0-SNAPSHOT publish
 sed -i 's/gradle-lib snapshot 1/gradle-lib snapshot 2/' src/main/java/net/luis/lartifactory/test/gradle/GradleLib.java
-check "gradle publishes gradle-lib 1.1.0-SNAPSHOT (build 2)" gradle "${GRADLE_ARGS[@]}" -PlibVersion=1.1.0-SNAPSHOT publish
+check "gradle publishes gradle-lib 1.1.0-SNAPSHOT (build 2)" "${GRADLE[@]}" "${GRADLE_ARGS[@]}" -PlibVersion=1.1.0-SNAPSHOT publish
 
 sed -i 's/gradle-lib snapshot 2/gradle-lib changed release/' src/main/java/net/luis/lartifactory/test/gradle/GradleLib.java
-check_fails "republishing release 1.0.0 with different content is rejected" gradle "${GRADLE_ARGS[@]}" publish
+check_fails "republishing release 1.0.0 with different content is rejected" "${GRADLE[@]}" "${GRADLE_ARGS[@]}" publish
 JAR_STATUS="$(curl -s -o /dev/null -w '%{http_code}' -u "lat-ci:$CI_TOKEN" -X PUT --data-binary "different" "$RELEASES/$GROUP_PATH/gradle-lib/1.0.0/gradle-lib-1.0.0.jar")"
 check_equals "PUT over an existing release returns 409" "409" "$JAR_STATUS"
 
@@ -63,7 +72,7 @@ check_equals "maven consumer runs with the latest snapshot" "maven-lib release /
 
 cd "$MAVEN_DIR/consumer-gradle" || return
 check_equals "gradle consumer resolves the releases and runs" "maven-lib release / gradle-lib release" \
-	"$(gradle --no-daemon -q --refresh-dependencies --project-cache-dir "$MAVEN_DIR/.gradle-cache" "-PartifactoryUrl=$ARTIFACTORY_URL" -PartifactoryUser=lat-reader "-PartifactoryPassword=$READER_TOKEN" run 2>&1 | tail -n 1)"
+	"$("${GRADLE[@]}" --no-daemon -q --refresh-dependencies --project-cache-dir "$MAVEN_DIR/.gradle-cache" "-PartifactoryUrl=$ARTIFACTORY_URL" -PartifactoryUser=lat-reader "-PartifactoryPassword=$READER_TOKEN" run 2>&1 | tail -n 1)"
 
 # Delete
 check_status "writer can not delete a version" 403 -u "lat-ci:$CI_TOKEN" -X DELETE "$RELEASES/$GROUP_PATH/maven-lib/1.0.0"

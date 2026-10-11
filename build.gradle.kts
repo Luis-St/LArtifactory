@@ -130,12 +130,29 @@ val generateOpenApi = tasks.register("generateOpenApi") {
 	
 	val source = layout.buildDirectory.file("classes/java/main/openapi-plugin/openapi-default.json")
 	val target = layout.projectDirectory.file("openapi.json")
-	
+
+	// The annotation processor only emits the paths and schemas, the api info is applied at runtime by the
+	// OpenApiPlugin in Application.java. Inject the same info here so the committed spec matches what is served.
+	// Keep the title, version and description in sync with Application.java.
+	val infoTitle = project.name
+	val infoVersion = project.version.toString()
+	val infoDescription = "Artifact repository management API"
+
 	inputs.file(source)
+	inputs.property("infoTitle", infoTitle)
+	inputs.property("infoVersion", infoVersion)
+	inputs.property("infoDescription", infoDescription)
 	outputs.file(target)
-	
+
 	doLast {
-		source.get().asFile.copyTo(target.asFile, overwrite = true)
+		val placeholder = "  \"info\" : {\n    \"title\" : \"\",\n    \"version\" : \"\"\n  },"
+		val info = "  \"info\" : {\n    \"title\" : \"$infoTitle\",\n    \"version\" : \"$infoVersion\",\n    \"description\" : \"$infoDescription\"\n  },"
+		val generated = source.get().asFile.readText()
+		require(generated.contains(placeholder)) {
+			"Could not find the expected empty info block in the generated OpenAPI spec. " +
+				"The OpenAPI tooling output changed, update generateOpenApi to keep openapi.json in sync with Application.java."
+		}
+		target.asFile.writeText(generated.replace(placeholder, info))
 	}
 }
 
