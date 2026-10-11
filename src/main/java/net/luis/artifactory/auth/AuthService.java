@@ -12,6 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Authenticates requests and checks repository permissions.<br>
@@ -30,7 +32,13 @@ public class AuthService {
 	
 	private static final String PRINCIPAL_ATTRIBUTE = "artifactory.principal";
 	private static final long CACHE_TTL_MILLIS = 60_000;
-	
+
+	// Bound the number of concurrent (deliberately expensive) password hashes so a flood of authentication attempts
+	// can not exhaust CPU, and verify a dummy hash for unknown users to keep the timing independent of user existence.
+	private static final Semaphore HASH_SLOTS = new Semaphore(Math.max(2, Runtime.getRuntime().availableProcessors()));
+	private static final long HASH_WAIT_MILLIS = 5_000;
+	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
+
 	private final UserService userService;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 	
@@ -40,6 +48,29 @@ public class AuthService {
 	
 	public void invalidateCache() {
 		this.cache.clear();
+	}
+
+	/**
+	 * Verifies a password against a stored hash while bounding the number of concurrent hash computations.<br>
+	 * Password hashing is intentionally expensive, without a bound a flood of authentication attempts could exhaust
+	 * the cpu, so this blocks briefly for a slot and returns 503 if none becomes available.<br>
+	 */
+	public boolean verifyPassword(@NonNull String password, @NonNull String storedHash) {
+		boolean acquired;
+		try {
+			acquired = HASH_SLOTS.tryAcquire(HASH_WAIT_MILLIS, TimeUnit.MILLISECONDS);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			throw HttpError.of(503, "Authentication temporarily unavailable");
+		}
+		if (!acquired) {
+			throw HttpError.of(503, "Authentication temporarily unavailable");
+		}
+		try {
+			return PasswordHasher.verify(password, storedHash);
+		} finally {
+			HASH_SLOTS.release();
+		}
 	}
 	
 	/**
@@ -175,11 +206,15 @@ public class AuthService {
 		}
 		
 		UserEntity user = this.userService.get(username);
-		if (user == null || !PasswordHasher.verify(secret, user.passwordHash())) {
+		if (user == null) {
+			this.verifyPassword(secret, DUMMY_HASH); // keep timing independent of whether the user exists
+			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+		}
+		if (!this.verifyPassword(secret, user.passwordHash())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
 		Principal principal = new Principal(user.username(), user.admin(), null);
-		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null));
 		return principal;
 	}
 	
@@ -187,7 +222,9 @@ public class AuthService {
 		String cacheKey = "token:" + UserService.hashToken(secret);
 		CacheEntry cached = this.cache.get(cacheKey);
 		Principal principal;
-		if (cached != null && cached.expiresAt() > System.currentTimeMillis()) {
+		// Re-check the token expiry on a cache hit so a token that expires within the cache window stops working
+		if (cached != null && cached.expiresAt() > System.currentTimeMillis()
+			&& (cached.tokenExpiresAt() == null || cached.tokenExpiresAt().isAfter(Instant.now()))) {
 			principal = cached.principal();
 		} else {
 			TokenEntity token = this.userService.findTokenBySecret(secret);
@@ -200,7 +237,7 @@ public class AuthService {
 			}
 			AccessLevel level = Objects.requireNonNullElse(AccessLevel.parse(token.level()), AccessLevel.READ);
 			principal = new Principal(user.username(), user.admin(), level);
-			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS));
+			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt()));
 		}
 		
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {
@@ -209,5 +246,5 @@ public class AuthService {
 		return principal;
 	}
 	
-	private record CacheEntry(@NonNull Principal principal, long expiresAt) {}
+	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant tokenExpiresAt) {}
 }

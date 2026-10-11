@@ -184,11 +184,19 @@ public class CargoHandler extends FormatHandler {
 		JsonNode payload;
 		byte[] crate;
 		try {
+			// Validate each length against the bytes actually present before allocating, a crafted length prefix
+			// would otherwise trigger a multi gigabyte allocation (OutOfMemoryError) from a tiny request body.
 			int jsonLength = buffer.getInt();
+			if (jsonLength < 0 || jsonLength > buffer.remaining()) {
+				throw cargoError(400, "Invalid publish request body");
+			}
 			byte[] json = new byte[jsonLength];
 			buffer.get(json);
 			payload = Json.parse(json);
 			int crateLength = buffer.getInt();
+			if (crateLength < 0 || crateLength > buffer.remaining()) {
+				throw cargoError(400, "Invalid publish request body");
+			}
 			crate = new byte[crateLength];
 			buffer.get(crate);
 		} catch (java.nio.BufferUnderflowException | NegativeArraySizeException | JacksonException e) {

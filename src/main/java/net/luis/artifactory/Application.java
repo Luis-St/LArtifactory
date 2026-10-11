@@ -79,14 +79,17 @@ public class Application {
 			config.jetty.multipartConfig.maxInMemoryFileSize(1, SizeUnit.MB);
 			config.jetty.multipartConfig.cacheDirectory(serverConfig.storagePath().resolve("tmp").toString());
 			
-			config.registerPlugin(new OpenApiPlugin(pluginConfig ->
-				pluginConfig.withDefinitionConfiguration((_, definition) ->
-					definition.info(info ->
-						info.title("LArtifactory").version("1.0.0").description("Artifact repository management API")
+			// The OpenAPI spec and Swagger UI are unauthenticated, they can be disabled for production deployments
+			if (serverConfig.enableSwagger()) {
+				config.registerPlugin(new OpenApiPlugin(pluginConfig ->
+					pluginConfig.withDefinitionConfiguration((_, definition) ->
+						definition.info(info ->
+							info.title("LArtifactory").version("1.0.0").description("Artifact repository management API")
+						)
 					)
-				)
-			));
-			config.registerPlugin(new SwaggerPlugin());
+				));
+				config.registerPlugin(new SwaggerPlugin());
+			}
 			
 			// Web ui (built from ui/ into the classpath), client side routing uses the url hash
 			config.staticFiles.add(staticFiles -> {
@@ -102,6 +105,8 @@ public class Application {
 				MDC.put("source_ip", ctx.ip());
 				ctx.attribute("trace_id", traceId);
 				ctx.attribute("request_start", System.nanoTime());
+				// Prevent browsers from MIME sniffing uploaded artifacts (e.g. a stored .html/.svg) into active content
+				ctx.header("X-Content-Type-Options", "nosniff");
 			});
 			
 			config.routes.before(dispatcher::handleMappedHost);
@@ -112,7 +117,7 @@ public class Application {
 					MDC.put("duration_ms", String.valueOf((System.nanoTime() - start) / 1_000_000));
 				}
 				
-				LOGGER.info("{} {} {}", ctx.method(), ctx.path(), ctx.status());
+				LOGGER.info("{} {} {}", ctx.method(), net.luis.artifactory.http.Requests.sanitizePath(ctx.path()), ctx.status());
 				MDC.clear();
 			});
 			
@@ -135,7 +140,7 @@ public class Application {
 				ctx.status(400).json(new ErrorResponse("Invalid json", e.getOriginalMessage()));
 			});
 			config.routes.exception(Exception.class, (e, ctx) -> {
-				LOGGER.error("Unhandled exception on {} {}", ctx.method(), ctx.path(), e);
+				LOGGER.error("Unhandled exception on {} {}", ctx.method(), net.luis.artifactory.http.Requests.sanitizePath(ctx.path()), e);
 				ctx.status(500).json(new ErrorResponse("Internal server error"));
 			});
 			

@@ -32,7 +32,9 @@ import java.util.zip.ZipFile;
  * Source url: {@code {base}/nuget/{repo}/v3/index.json}<br>
  */
 public class NugetHandler extends FormatHandler {
-	
+
+	private static final int MAX_NUSPEC_SIZE = 8 * 1024 * 1024;
+
 	public NugetHandler(@NonNull Services services) {
 		super(services);
 	}
@@ -372,7 +374,12 @@ public class NugetHandler extends FormatHandler {
 			}
 			byte[] data;
 			try (InputStream input = zip.getInputStream(nuspecEntry)) {
-				data = input.readAllBytes();
+				// Bound the decompressed size, a maliciously crafted (highly compressed) .nuspec entry could otherwise
+				// exhaust memory. The zip entry's declared size can be spoofed, so enforce the limit on the actual read.
+				data = input.readNBytes(MAX_NUSPEC_SIZE + 1);
+				if (data.length > MAX_NUSPEC_SIZE) {
+					throw new IllegalArgumentException(".nuspec file exceeds the maximum supported size");
+				}
 			}
 			
 			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();

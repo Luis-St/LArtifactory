@@ -22,7 +22,13 @@ public record Principal(
 		Objects.requireNonNull(username, "Username must not be null");
 	}
 	
+	/**
+	 * Whether this principal may use the administrative api.<br>
+	 * Tokens never grant administrative access, even a {@code DELETE} token of an admin user: the management api
+	 * requires authenticating with the user password (basic auth), so a leaked repository/publish token can not be
+	 * used to manage users, permissions or repositories.<br>
+	 */
 	public boolean isAdmin() {
-		return this.admin && (this.tokenLevel == null || this.tokenLevel == AccessLevel.DELETE);
+		return this.admin && this.tokenLevel == null;
 	}
 }

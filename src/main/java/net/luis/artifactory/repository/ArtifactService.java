@@ -197,6 +197,22 @@ public class ArtifactService {
 		}
 	}
 	
+	/**
+	 * Builds a {@code Content-Disposition: attachment} header with a sanitized file name (control characters and
+	 * quotes stripped to prevent header injection).<br>
+	 */
+	private static @NonNull String contentDisposition(@NonNull String path) {
+		String name = path.substring(path.lastIndexOf('/') + 1);
+		StringBuilder safe = new StringBuilder(name.length());
+		for (int i = 0; i < name.length(); i++) {
+			char c = name.charAt(i);
+			if (c >= 0x20 && c != 0x7f && c != '"' && c != '\\') {
+				safe.append(c);
+			}
+		}
+		return safe.isEmpty() ? "attachment" : "attachment; filename=\"" + safe + "\"";
+	}
+
 	public void serve(@NonNull Context ctx, @NonNull FileEntity file) throws IOException {
 		this.serve(ctx, file, file.contentType());
 	}
@@ -209,6 +225,9 @@ public class ArtifactService {
 		String etag = "\"" + file.sha256() + "\"";
 		ctx.header("ETag", etag);
 		ctx.header("Accept-Ranges", "bytes");
+		// Serve stored artifacts as downloads, not inline, so an uploaded html/svg can not execute script in this origin
+		ctx.header("X-Content-Type-Options", "nosniff");
+		ctx.header("Content-Disposition", contentDisposition(file.path()));
 		ctx.header("X-Checksum-Sha1", file.sha1());
 		ctx.header("X-Checksum-Sha256", file.sha256());
 		ctx.header("X-Checksum-Md5", file.md5());

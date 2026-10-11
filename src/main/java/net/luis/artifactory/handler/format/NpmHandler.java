@@ -169,7 +169,7 @@ public class NpmHandler extends FormatHandler {
 		String name = Json.text(body, "name", username);
 		String password = Json.text(body, "password");
 		UserEntity user = this.services.users().get(name);
-		if (password == null || user == null || !PasswordHasher.verify(password, user.passwordHash())) {
+		if (password == null || user == null || !this.services.auth().verifyPassword(password, user.passwordHash())) {
 			throw npmError(401, "Invalid username or password");
 		}
 		UserService.CreatedToken token = this.services.users().createToken(user.username(), "npm login", AccessLevel.DELETE, null);
