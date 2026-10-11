@@ -24,6 +24,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
@@ -34,6 +35,7 @@ import java.util.zip.ZipFile;
 public class NugetHandler extends FormatHandler {
 
 	private static final int MAX_NUSPEC_SIZE = 8 * 1024 * 1024;
+	private static final Pattern PACKAGE_ID = Pattern.compile("\\w+(?:[.\\-_]\\w+)*");
 
 	public NugetHandler(@NonNull Services services) {
 		super(services);
@@ -372,6 +374,9 @@ public class NugetHandler extends FormatHandler {
 			if (nuspecEntry == null) {
 				throw new IllegalArgumentException("No .nuspec file found in package");
 			}
+			if (nuspecEntry.getSize() > MAX_NUSPEC_SIZE) {
+				throw new IllegalArgumentException(".nuspec file is too large");
+			}
 			byte[] data;
 			try (InputStream input = zip.getInputStream(nuspecEntry)) {
 				// Bound the decompressed size, a maliciously crafted (highly compressed) .nuspec entry could otherwise
@@ -396,6 +401,9 @@ public class NugetHandler extends FormatHandler {
 			String version = childText(metadataElement, "version");
 			if (id == null || version == null) {
 				throw new IllegalArgumentException("Missing id or version in .nuspec");
+			}
+			if (!PACKAGE_ID.matcher(id).matches()) {
+				throw new IllegalArgumentException("Invalid package id: " + id);
 			}
 			
 			ObjectNode metadata = Json.object();

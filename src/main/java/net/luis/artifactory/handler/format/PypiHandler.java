@@ -34,6 +34,7 @@ public class PypiHandler extends FormatHandler {
 	private static final String JSON_TYPE = "application/vnd.pypi.simple.v1+json";
 	private static final Pattern NORMALIZE = Pattern.compile("[-_.]+");
 	private static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._+!-]*");
+	private static final Pattern VERSION = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.!+_-]{0,127}");
 	
 	public PypiHandler(@NonNull Services services) {
 		super(services);
@@ -119,9 +120,9 @@ public class PypiHandler extends FormatHandler {
 			html.append("    <a href=\"").append(escapeHtml(project)).append("/\">").append(escapeHtml(project)).append("</a>\n");
 		}
 		html.append("  </body>\n</html>\n");
-		ctx.status(200).html(html.toString());
+		Requests.html(ctx, 200, html.toString());
 	}
-	
+
 	private void projectPage(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String normalized) throws Exception {
 		List<FileEntity> files = this.services.artifacts().listByPackage(repository.name(), normalized);
 		if (files.isEmpty()) {
@@ -176,9 +177,9 @@ public class PypiHandler extends FormatHandler {
 			html.append(">").append(escapeHtml(fileName)).append("</a><br/>\n");
 		}
 		html.append("  </body>\n</html>\n");
-		ctx.status(200).html(html.toString());
+		Requests.html(ctx, 200, html.toString());
 	}
-	
+
 	private void projectJson(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String normalized) throws Exception {
 		List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), normalized);
 		if (versions.isEmpty()) {
@@ -229,6 +230,9 @@ public class PypiHandler extends FormatHandler {
 		}
 		String name = required(ctx, "name");
 		String version = required(ctx, "version");
+		if (!VERSION.matcher(version).matches()) {
+			throw HttpError.badRequest("Invalid version: " + version);
+		}
 		UploadedFile content = ctx.uploadedFile("content");
 		if (content == null) {
 			throw HttpError.badRequest("Missing file content");

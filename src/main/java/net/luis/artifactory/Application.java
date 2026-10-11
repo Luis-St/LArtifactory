@@ -79,8 +79,8 @@ public class Application {
 			config.jetty.multipartConfig.maxInMemoryFileSize(1, SizeUnit.MB);
 			config.jetty.multipartConfig.cacheDirectory(serverConfig.storagePath().resolve("tmp").toString());
 			
-			// The OpenAPI spec and Swagger UI are unauthenticated, they can be disabled for production deployments
-			if (serverConfig.enableSwagger()) {
+			// The OpenAPI spec and Swagger UI are served without authentication, keep them disabled unless explicitly enabled.
+			if (serverConfig.apiDocsEnabled()) {
 				config.registerPlugin(new OpenApiPlugin(pluginConfig ->
 					pluginConfig.withDefinitionConfiguration((_, definition) ->
 						definition.info(info ->
@@ -90,7 +90,7 @@ public class Application {
 				));
 				config.registerPlugin(new SwaggerPlugin());
 			}
-			
+
 			// Web ui (built from ui/ into the classpath), client side routing uses the url hash
 			config.staticFiles.add(staticFiles -> {
 				staticFiles.hostedPath = "/ui";
@@ -98,7 +98,7 @@ public class Application {
 				staticFiles.location = Location.CLASSPATH;
 			});
 			config.spaRoot.addFile("/ui", "/ui/index.html", Location.CLASSPATH);
-			
+
 			config.routes.before(ctx -> {
 				String traceId = UUID.randomUUID().toString();
 				MDC.put("trace_id", traceId);

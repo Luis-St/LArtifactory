@@ -209,6 +209,9 @@ public final class Versions {
 		int dash = value.indexOf('-');
 		String core = dash < 0 ? value : value.substring(0, dash);
 		String prerelease = dash < 0 ? null : value.substring(dash + 1);
+		if (prerelease != null && !prerelease.chars().allMatch(c -> c == '.' || c == '-' || (c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'))) {
+			throw new IllegalArgumentException("Invalid NuGet version: " + version);
+		}
 		
 		String[] parts = core.split("\\.");
 		if (parts.length < 1 || parts.length > 4) {

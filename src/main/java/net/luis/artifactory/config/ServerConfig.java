@@ -15,7 +15,7 @@ public record ServerConfig(
 	@NonNull String adminUsername,
 	@Nullable String adminPassword,
 	boolean trustProxy,
-	boolean enableSwagger
+	boolean apiDocsEnabled
 ) {
 	
 	public ServerConfig {
@@ -44,7 +44,7 @@ public record ServerConfig(
 			env.string(EnvKeys.ADMIN_USERNAME, "admin"),
 			env.optional(EnvKeys.ADMIN_PASSWORD),
 			env.bool(EnvKeys.TRUST_PROXY, false),
-			env.bool(EnvKeys.ENABLE_SWAGGER, true)
+			env.bool(EnvKeys.ENABLE_API_DOCS, false)
 		);
 	}
 	

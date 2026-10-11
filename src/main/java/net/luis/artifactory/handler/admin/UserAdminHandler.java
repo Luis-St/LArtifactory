@@ -137,8 +137,11 @@ public class UserAdminHandler {
 	}
 	
 	private static void validatePassword(String password) {
-		if (password == null || password.length() < 8) {
-			throw HttpError.badRequest("Password must have at least 8 characters");
+		if (password == null || password.length() < 12) {
+			throw HttpError.badRequest("Password must have at least 12 characters");
+		}
+		if (password.length() > 256) {
+			throw HttpError.badRequest("Password must have at most 256 characters");
 		}
 	}
 	//endregion

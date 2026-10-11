@@ -18,7 +18,7 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_BASE_URL`           | derived from the request                       | Public url used in generated links (e.g. `https://repo.example.com`)        |
 | `ARTIFACTORY_HOST_REPOSITORIES`  |                                                | Serve repositories at the root of a host, e.g. `npm.example.com=npm-local`  |
 | `ARTIFACTORY_TRUST_PROXY`        | `false`                                        | Honor `X-Forwarded-Proto/Host/Prefix` (only enable behind a trusted proxy)  |
-| `ARTIFACTORY_ENABLE_SWAGGER`     | `true`                                         | Serve the (unauthenticated) OpenAPI spec and Swagger UI                     |
+| `ARTIFACTORY_ENABLE_API_DOCS`    | `false`                                        | Serve the (unauthenticated) OpenAPI spec and Swagger UI                     |
 | `ARTIFACTORY_STORAGE_PATH`       | `data`                                         | Directory for the artifact files                                            |
 | `ARTIFACTORY_MAX_UPLOAD_SIZE_MB` | `1024`                                         | Maximum size of a single artifact                                           |
 | `ARTIFACTORY_ADMIN_USERNAME`     | `admin`                                        | Name of the initial administrator                                           |
@@ -34,6 +34,8 @@ Without `ARTIFACTORY_BASE_URL` the public url is derived from the request. The c
 `ARTIFACTORY_TRUST_PROXY` behind a reverse proxy that sets these headers, so generated download urls can not be
 redirected to an attacker host via a forged `Host`/`X-Forwarded-Host` header.
 The database schema is created on startup, files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
+
+For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user passwords created through the API must be at least 12 characters), a dedicated `ARTIFACTORY_DB_PASSWORD`, and leave `ARTIFACTORY_ENABLE_API_DOCS` disabled. Uploaded artifacts are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` so they can not execute in the browser.
 
 ## Web UI
 
