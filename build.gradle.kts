@@ -68,6 +68,42 @@ tasks.test {
 	useJUnitPlatform()
 }
 
+// Web ui, built with npm into ui/dist and packaged below /ui in the jar (skip with -PskipUi, e.g. if ui/dist was built separately)
+val npm = if (System.getProperty("os.name").lowercase().contains("windows")) "npm.cmd" else "npm"
+val skipUi = providers.gradleProperty("skipUi").isPresent
+
+val installUi = tasks.register<Exec>("installUi") {
+	description = "Installs the dependencies of the web ui"
+	group = "ui"
+	
+	workingDir = file("ui")
+	commandLine(npm, "ci", "--no-audit", "--no-fund")
+	inputs.files("ui/package.json", "ui/package-lock.json")
+	outputs.dir("ui/node_modules")
+}
+
+val buildUi = tasks.register<Exec>("buildUi") {
+	description = "Builds the web ui into ui/dist"
+	group = "ui"
+	
+	dependsOn(installUi)
+	workingDir = file("ui")
+	commandLine(npm, "run", "build")
+	inputs.dir("ui/src")
+	inputs.dir("ui/public")
+	inputs.files("ui/index.html", "ui/package.json", "ui/package-lock.json", "ui/tsconfig.json", "ui/vite.config.ts")
+	outputs.dir("ui/dist")
+}
+
+tasks.processResources {
+	if (!skipUi) {
+		dependsOn(buildUi)
+	}
+	from("ui/dist") {
+		into("ui")
+	}
+}
+
 tasks.register<JavaExec>("run") {
 	description = "Runs the application"
 	group = "api"

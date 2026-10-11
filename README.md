@@ -29,6 +29,20 @@ All configuration is read from environment variables:
 Without `ARTIFACTORY_BASE_URL` the public url is derived from the `Host`, `X-Forwarded-Host`, `X-Forwarded-Proto` and `X-Forwarded-Prefix` headers.
 The database schema is created on startup, files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
 
+## Web UI
+
+The server ships a web ui at `/ui/` (`/` redirects there). It shows an overview of the stored artifacts per repository type,
+lets you browse packages, versions and files, and covers the configuration of repositories, users, permissions and tokens,
+including copy-ready client setup snippets for every repository. Users sign in with their password or an access token.
+
+The ui is a React single page application in `ui/`, built with Vite and packaged into the jar by Gradle (requires Node.js 20.19+):
+
+```bash
+./gradlew buildUi           # build the ui into ui/dist (also part of processResources)
+./gradlew shadowJar -PskipUi # package an already built ui/dist without running npm
+cd ui && npm run dev        # development server on http://localhost:5173/ui/ proxying the api to localhost:8080
+```
+
 ## Repositories
 
 Repositories are created with the management api, every repository has one of the types below and is served at `/{type}/{repository}/`.
