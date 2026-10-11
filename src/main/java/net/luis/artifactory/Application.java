@@ -146,6 +146,8 @@ public class Application {
 			
 			// Health
 			config.routes.get("/health", healthHandler::health);
+			config.routes.get("/health/live", healthHandler::live);
+			config.routes.get("/health/ready", healthHandler::ready);
 			
 			// Web ui
 			config.routes.get("/", ctx -> ctx.redirect("/ui/"));

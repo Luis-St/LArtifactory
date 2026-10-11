@@ -181,7 +181,18 @@ curl -u ci:a-long-password -X POST https://repo.example.com/api/tokens -H 'Conte
 ```
 
 `./gradlew compileJava` also regenerates `openapi.json` from the `@OpenApi` annotations.
-Swagger UI is served at `/swagger`, the health endpoint at `/health`.
+Swagger UI is served at `/swagger`, the health endpoints below are served at `/health`.
+
+### Health probes
+
+| Path             | Checks                 | Status codes                                  | Use for                                   |
+|------------------|------------------------|-----------------------------------------------|-------------------------------------------|
+| `/health`        | database (aggregate)   | always `200` (`status` is `UP` or `DEGRADED`) | dashboards, backwards compatibility       |
+| `/health/live`   | nothing (process only) | `200`                                         | liveness probe (restart the container)    |
+| `/health/ready`  | database               | `200` when ready, `503` when not              | readiness probe (route traffic)           |
+
+Liveness never touches the database so a database outage does not cause the container to be restarted; readiness
+returns `503` while the database is unreachable so load balancers stop sending traffic until it recovers.
 
 ### Repository tests
 
