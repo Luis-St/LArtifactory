@@ -81,6 +81,7 @@ public final class Requests {
 	
 	/**
 	 * Redacts secrets that are carried in the request path (e.g. the npm logout token) before the path is logged.<br>
+	 * Both the {@code /-/user/token/{token}} tail and any {@code lat_...} token segment are masked.<br>
 	 */
 	public static @NonNull String sanitizePath(@NonNull String path) {
 		String marker = "/-/user/token/";
@@ -88,7 +89,18 @@ public final class Requests {
 		if (index >= 0) {
 			return path.substring(0, index + marker.length()) + "***";
 		}
-		return path;
+		if (!path.contains("lat_")) {
+			return path;
+		}
+		String[] segments = path.split("/", -1);
+		StringBuilder builder = new StringBuilder(path.length());
+		for (int i = 0; i < segments.length; i++) {
+			if (i > 0) {
+				builder.append('/');
+			}
+			builder.append(segments[i].startsWith("lat_") ? "lat_***" : segments[i]);
+		}
+		return builder.toString();
 	}
 
 	/**
@@ -115,23 +127,5 @@ public final class Requests {
 	
 	public static @NonNull String escapeXml(@NonNull String value) {
 		return escapeHtml(value);
-	}
-
-	/**
-	 * Redacts token secrets ({@code lat_...}) that appear in a request path (e.g. the npm logout url) so they are not written to logs.
-	 */
-	public static @NonNull String sanitizePath(@NonNull String path) {
-		if (!path.contains("lat_")) {
-			return path;
-		}
-		String[] segments = path.split("/", -1);
-		StringBuilder builder = new StringBuilder(path.length());
-		for (int i = 0; i < segments.length; i++) {
-			if (i > 0) {
-				builder.append('/');
-			}
-			builder.append(segments[i].startsWith("lat_") ? "lat_***" : segments[i]);
-		}
-		return builder.toString();
 	}
 }
