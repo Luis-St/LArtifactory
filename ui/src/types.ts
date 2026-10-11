@@ -15,6 +15,15 @@ export interface Health {
 	database: string;
 }
 
+export const REPOSITORY_CLASSES = ['LOCAL', 'REMOTE', 'VIRTUAL'] as const;
+export type RepositoryClass = (typeof REPOSITORY_CLASSES)[number];
+
+export interface RemoteInfo {
+	url: string;
+	cacheEnabled: boolean;
+	username: string | null;
+}
+
 export interface Repository {
 	name: string;
 	type: RepositoryType;
@@ -23,6 +32,9 @@ export interface Repository {
 	allowRedeploy: boolean;
 	createdAt: string;
 	url: string;
+	kind: RepositoryClass;
+	remote: RemoteInfo | null;
+	members: string[];
 }
 
 export interface PackageVersion {

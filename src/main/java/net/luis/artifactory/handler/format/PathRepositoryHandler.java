@@ -5,9 +5,13 @@ import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
 import net.luis.artifactory.database.entity.FileEntity;
+import net.luis.artifactory.database.entity.RemoteConfigEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
+import net.luis.artifactory.database.entity.VirtualMemberEntity;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.ProxyService;
+import net.luis.artifactory.repository.RepositoryClass;
 import net.luis.artifactory.storage.StoredBlob;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -58,28 +62,99 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	//region GET
 	protected void get(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, boolean directory) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
-		
+		RepositoryClass kind = this.services.repositories().classOf(repository.name());
+
 		if (!directory && !path.isEmpty()) {
-			FileEntity file = this.services.artifacts().get(repository.name(), path);
-			if (file != null) {
-				this.services.artifacts().serve(ctx, file);
+			if (this.serveResolved(ctx, repository, kind, path)) {
 				return;
 			}
-			if (this.serveVirtual(ctx, repository, path)) {
-				return;
-			}
-			String checksum = checksumExtension(path);
-			if (checksum != null) {
-				FileEntity base = this.services.artifacts().get(repository.name(), stripExtension(path));
-				if (base != null) {
-					text(ctx, 200, digest(base, checksum));
+			// Generated files (e.g. Maven metadata) and checksum sidecars only make sense for a local repository
+			if (kind == RepositoryClass.LOCAL) {
+				if (this.serveVirtual(ctx, repository, path)) {
 					return;
+				}
+				String checksum = checksumExtension(path);
+				if (checksum != null) {
+					FileEntity base = this.services.artifacts().get(repository.name(), stripExtension(path));
+					if (base != null) {
+						text(ctx, 200, digest(base, checksum));
+						return;
+					}
 				}
 			}
 		}
-		
-		if (!this.listDirectory(ctx, repository, path)) {
+
+		if (!this.listDirectory(ctx, repository, kind, path)) {
 			throw HttpError.notFound();
+		}
+	}
+
+	/**
+	 * Resolves a file according to the repository class: a local file, a cached/upstream copy for a remote repository,
+	 * or the first match across the members of a virtual repository.<br>
+	 *
+	 * @return true if the request was served
+	 */
+	private boolean serveResolved(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull RepositoryClass kind, @NonNull String path) throws Exception {
+		return switch (kind) {
+			case LOCAL -> this.serveLocal(ctx, repository, path);
+			case REMOTE -> this.serveLocal(ctx, repository, path) || this.serveRemote(ctx, repository, path);
+			case VIRTUAL -> {
+				for (VirtualMemberEntity member : this.services.repositories().virtualMembers(repository.name())) {
+					RepositoryEntity memberRepository = this.services.repositories().get(member.member());
+					if (memberRepository == null || !memberRepository.type().equals(repository.type())) {
+						continue;
+					}
+					if (this.serveLocal(ctx, memberRepository, path)) {
+						yield true;
+					}
+					// Members may be remote; virtual members are never resolved recursively to avoid cycles
+					if (this.services.repositories().classOf(memberRepository.name()) == RepositoryClass.REMOTE && this.serveRemote(ctx, memberRepository, path)) {
+						yield true;
+					}
+				}
+				yield false;
+			}
+		};
+	}
+
+	private boolean serveLocal(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
+		FileEntity file = this.services.artifacts().get(repository.name(), path);
+		if (file == null) {
+			return false;
+		}
+		this.services.artifacts().serve(ctx, file);
+		return true;
+	}
+
+	private boolean serveRemote(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
+		RemoteConfigEntity remote = this.services.repositories().remoteConfig(repository.name());
+		if (remote == null) {
+			return false;
+		}
+		ProxyService.Result result = this.services.proxy().fetch(remote, path);
+		if (result == null) {
+			return false;
+		}
+		String contentType = result.contentType() != null && !result.contentType().isBlank() ? result.contentType() : contentType(path);
+		if (remote.cacheEnabled()) {
+			StoredBlob blob = this.services.artifacts().upload(result.body());
+			FileEntity file = this.services.artifacts().putCached(repository.name(), path, blob, contentType);
+			this.services.artifacts().serve(ctx, file);
+		} else {
+			serveBytes(ctx, path, result.body(), contentType);
+		}
+		return true;
+	}
+
+	private static void serveBytes(@NonNull Context ctx, @NonNull String path, byte @NonNull [] body, @NonNull String contentType) {
+		String name = path.substring(path.lastIndexOf('/') + 1);
+		ctx.status(200).contentType(contentType);
+		ctx.header("X-Content-Type-Options", "nosniff");
+		ctx.header("Content-Disposition", "attachment; filename=\"" + name.replaceAll("[^A-Za-z0-9._-]", "_") + "\"");
+		ctx.header("Content-Length", String.valueOf(body.length));
+		if (!Requests.isHead(ctx)) {
+			ctx.result(body);
 		}
 	}
 	
@@ -105,9 +180,25 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		}
 	}
 	
-	private boolean listDirectory(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
+	private boolean listDirectory(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull RepositoryClass kind, @NonNull String path) throws Exception {
 		String prefix = path.isEmpty() ? "" : path + "/";
-		List<FileEntity> files = this.services.artifacts().list(repository.name(), prefix);
+		List<FileEntity> files;
+		if (kind == RepositoryClass.VIRTUAL) {
+			// Aggregate the (locally stored) files of all members, the first member wins on a path collision
+			Map<String, FileEntity> byPath = new LinkedHashMap<>();
+			for (VirtualMemberEntity member : this.services.repositories().virtualMembers(repository.name())) {
+				RepositoryEntity memberRepository = this.services.repositories().get(member.member());
+				if (memberRepository == null || !memberRepository.type().equals(repository.type())) {
+					continue;
+				}
+				for (FileEntity file : this.services.artifacts().list(member.member(), prefix)) {
+					byPath.putIfAbsent(file.path(), file);
+				}
+			}
+			files = new ArrayList<>(byPath.values());
+		} else {
+			files = this.services.artifacts().list(repository.name(), prefix);
+		}
 		if (files.isEmpty() && !path.isEmpty()) {
 			return false;
 		}
@@ -154,7 +245,10 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	//region PUT
 	protected void put(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
-		
+		if (this.services.repositories().classOf(repository.name()) != RepositoryClass.LOCAL) {
+			throw HttpError.badRequest("Can not publish to a remote or virtual repository");
+		}
+
 		if (this.consumeVirtualUpload(ctx, repository, path)) {
 			return;
 		}
@@ -235,6 +329,9 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	//region DELETE
 	protected void delete(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
+		if (this.services.repositories().classOf(repository.name()) != RepositoryClass.LOCAL) {
+			throw HttpError.badRequest("Can not delete from a remote or virtual repository");
+		}
 		if (path.isEmpty()) {
 			throw HttpError.badRequest("Refusing to delete the repository root, delete the repository instead");
 		}

@@ -50,7 +50,7 @@ export function RepositoryDetail({ name, params }: { name: string; params: URLSe
 		<>
 			<a className="link small back" href={href('repositories')}>← Repositories</a>
 			<PageHeader
-				title={<span className="cell-inline">{repo.name} <TypeBadge type={repo.type} /></span>}
+				title={<span className="cell-inline">{repo.name} <TypeBadge type={repo.type} />{repo.kind !== 'LOCAL' && <Badge tone="accent">{repo.kind.toLowerCase()}</Badge>}</span>}
 				subtitle={repo.description || `${TYPE_INFO[repo.type].label} repository`}
 				actions={
 					<div className="url-chip">
@@ -350,6 +350,26 @@ function Settings({ repository, onSaved }: { repository: Repository; onSaved: ()
 
 	return (
 		<div className="stack">
+			{repository.kind === 'REMOTE' && repository.remote && (
+				<Card title="Remote (proxy)">
+					<dl className="details">
+						<dt>Upstream URL</dt><dd className="mono break">{repository.remote.url}</dd>
+						<dt>Caching</dt><dd>{repository.remote.cacheEnabled ? 'Fetched artifacts are cached locally' : 'Streamed through without caching'}</dd>
+						<dt>Upstream user</dt><dd>{repository.remote.username ?? '—'}</dd>
+					</dl>
+					<p className="muted small">This repository is read-only; artifacts are fetched from the upstream on demand.</p>
+				</Card>
+			)}
+			{repository.kind === 'VIRTUAL' && (
+				<Card title="Virtual (group)">
+					<p className="muted small">Reads are resolved across these members in order, the first match wins. This repository is read-only.</p>
+					<div className="file-chips">
+						{repository.members.length === 0 ? <span className="muted">No members</span> : repository.members.map(member => (
+							<a key={member} className="file-chip" href={href('repositories', member)}>{member}</a>
+						))}
+					</div>
+				</Card>
+			)}
 			<Card title="General">
 				<form className="form" onSubmit={save}>
 					<Field label="Name"><input value={repository.name} disabled /></Field>

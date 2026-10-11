@@ -78,6 +78,17 @@ public class ArtifactService {
 	 * Records a file in the repository, replacing an existing file at the same path.<br>
 	 */
 	public @NonNull FileEntity put(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
+		return this.put(repository, path, blob, contentType, packageName, version, metadata, createdBy, true);
+	}
+
+	/**
+	 * Records a cached copy of an artifact fetched from a remote repository, without firing a publish webhook.<br>
+	 */
+	public @NonNull FileEntity putCached(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType) throws SqlException {
+		return this.put(repository, path, blob, contentType, null, null, null, "remote-cache", false);
+	}
+
+	private @NonNull FileEntity put(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify) throws SqlException {
 		FileEntity file = new FileEntity(repository, path, packageName, version, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), contentType, metadata, Instant.now(), createdBy);
 		FileEntity previous = this.get(repository, path);
 		this.database.inTransaction(transaction -> {
@@ -87,7 +98,9 @@ public class ArtifactService {
 		if (previous != null && !previous.sha256().equals(blob.sha256())) {
 			this.releaseBlobs(List.of(previous));
 		}
-		this.webhooks.dispatch(WebhookService.ARTIFACT_PUBLISHED, repository, path);
+		if (notify) {
+			this.webhooks.dispatch(WebhookService.ARTIFACT_PUBLISHED, repository, path);
+		}
 		return file;
 	}
 	

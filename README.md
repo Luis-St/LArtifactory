@@ -68,6 +68,28 @@ Repositories are created with the management api, every repository has one of th
 Released versions are immutable: uploading a different file over an existing release returns `409 Conflict`
 (Maven snapshots can always be redeployed, repositories can allow redeploys with `allowRedeploy`).
 
+### Local, remote and virtual repositories
+
+Besides normal **local** repositories (which store the artifacts you publish), repositories can be **remote**
+(proxy an upstream and optionally cache what is fetched) or **virtual** (aggregate several repositories and resolve
+reads across them in order). Remote and virtual repositories are read-only and currently support the path based
+`maven` and `generic` types.
+
+```bash
+# A remote repository proxying Maven Central, caching downloads locally
+curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \
+	-d '{"name":"maven-central","type":"maven","remote":{"url":"https://repo1.maven.org/maven2","cacheEnabled":true}}'
+
+# A virtual repository that serves releases, snapshots and the proxy under one url (first match wins)
+curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \
+	-d '{"name":"maven-all","type":"maven","members":["releases","snapshots","maven-central"]}'
+```
+
+A remote repository fetches a missing artifact from `{upstream}/{path}`; with `cacheEnabled` the fetched artifact is
+stored locally on first access. A virtual repository resolves each read against its members (local or remote) in order
+and serves the first match; it never generates or merges Maven metadata, so metadata is served from whichever member
+provides it as a real file.
+
 ### Client configuration
 
 **Gradle**

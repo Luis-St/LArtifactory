@@ -109,10 +109,22 @@ export const api = {
 
 	repositories: () => request<Repository[]>('GET', '/api/repositories'),
 	repository: (name: string) => request<Repository>('GET', `/api/repositories/${enc(name)}`),
-	createRepository: (body: { name: string; type: string; description?: string; publicRead: boolean; allowRedeploy: boolean }) =>
-		request<Repository>('POST', '/api/repositories', body),
-	updateRepository: (name: string, body: { description?: string; publicRead?: boolean; allowRedeploy?: boolean }) =>
-		request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
+	createRepository: (body: {
+		name: string;
+		type: string;
+		description?: string;
+		publicRead: boolean;
+		allowRedeploy: boolean;
+		remote?: { url: string; cacheEnabled: boolean; username?: string; password?: string };
+		members?: string[];
+	}) => request<Repository>('POST', '/api/repositories', body),
+	updateRepository: (name: string, body: {
+		description?: string;
+		publicRead?: boolean;
+		allowRedeploy?: boolean;
+		remote?: { url: string; cacheEnabled: boolean; username?: string; password?: string };
+		members?: string[];
+	}) => request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
 	deleteRepository: (name: string) => request<void>('DELETE', `/api/repositories/${enc(name)}`),
 	packages: (name: string, q?: string) => request<Package[]>('GET', `/api/repositories/${enc(name)}/packages${query({ q })}`),
 	deletePackage: (name: string, pkg: string, version?: string) =>

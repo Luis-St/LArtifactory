@@ -64,7 +64,8 @@ public class Application {
 			artifactService,
 			new PackageService(database),
 			new AuditService(database),
-			webhookService
+			webhookService,
+			new ProxyService(serverConfig.maxUploadSize())
 		);
 		
 		var healthHandler = new HealthHandler(databaseProvider);

@@ -95,6 +95,23 @@ public final class Tables {
 	public static final SqlCompositePrimaryKey<DistTagEntity> TAG_PK = DIST_TAGS.compositePrimaryKey(TAG_REPOSITORY, TAG_PACKAGE, TAG_NAME);
 	//endregion
 	
+	//region Remote (proxy) repositories
+	public static final SqlTable<RemoteConfigEntity> REMOTE_REPOSITORIES = SqlTable.create(RemoteConfigEntity.class, "remote_repositories");
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_REPOSITORY = REMOTE_REPOSITORIES.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), RemoteConfigEntity::repository, col -> col.primaryKey().notNull());
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_URL = REMOTE_REPOSITORIES.column("url", SqlTypes.STRING.configure(SqlParameter.length(1024)), RemoteConfigEntity::url, SqlColumnBuilder::notNull);
+	public static final SqlColumn<RemoteConfigEntity, Boolean> REMOTE_CACHE_ENABLED = REMOTE_REPOSITORIES.column("cache_enabled", SqlTypes.BOOLEAN, RemoteConfigEntity::cacheEnabled, SqlColumnBuilder::notNull);
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_USERNAME = REMOTE_REPOSITORIES.column("username", SqlTypes.STRING.configure(SqlParameter.length(256)), RemoteConfigEntity::username);
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_PASSWORD = REMOTE_REPOSITORIES.column("password", SqlTypes.STRING.configure(SqlParameter.length(512)), RemoteConfigEntity::password);
+	//endregion
+
+	//region Virtual (group) repositories
+	public static final SqlTable<VirtualMemberEntity> VIRTUAL_MEMBERS = SqlTable.create(VirtualMemberEntity.class, "virtual_members");
+	public static final SqlColumn<VirtualMemberEntity, String> VIRTUAL_REPOSITORY = VIRTUAL_MEMBERS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), VirtualMemberEntity::repository, col -> col.primaryKey().notNull());
+	public static final SqlColumn<VirtualMemberEntity, String> VIRTUAL_MEMBER = VIRTUAL_MEMBERS.column("member", SqlTypes.STRING.configure(SqlParameter.length(64)), VirtualMemberEntity::member, col -> col.primaryKey().notNull());
+	public static final SqlColumn<VirtualMemberEntity, Long> VIRTUAL_POSITION = VIRTUAL_MEMBERS.column("position", SqlTypes.LONG, VirtualMemberEntity::position, SqlColumnBuilder::notNull);
+	public static final SqlCompositePrimaryKey<VirtualMemberEntity> VIRTUAL_PK = VIRTUAL_MEMBERS.compositePrimaryKey(VIRTUAL_REPOSITORY, VIRTUAL_MEMBER);
+	//endregion
+
 	//region Webhooks
 	public static final SqlTable<WebhookEntity> WEBHOOKS = SqlTable.create(WebhookEntity.class, "webhooks");
 	public static final SqlColumn<WebhookEntity, String> WEBHOOK_ID = WEBHOOKS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookEntity::id, col -> col.primaryKey().notNull());
@@ -131,7 +148,7 @@ public final class Tables {
 	public static final SqlColumn<AuditEntity, String> AUDIT_DETAIL = AUDIT_LOG.column("detail", SqlTypes.TEXT, AuditEntity::detail);
 	//endregion
 
-	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS, AUDIT_LOG, WEBHOOKS, WEBHOOK_DELIVERIES);
+	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS, AUDIT_LOG, WEBHOOKS, WEBHOOK_DELIVERIES, REMOTE_REPOSITORIES, VIRTUAL_MEMBERS);
 	
 	private Tables() {}
 }
