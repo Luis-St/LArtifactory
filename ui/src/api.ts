@@ -1,4 +1,4 @@
-import type { AccessLevel, FileEntry, Health, Package, Permission, Principal, Repository, Token, User } from './types';
+import type { AccessLevel, AuditEntry, FileEntry, Health, Package, Permission, Principal, Repository, Token, User } from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -131,6 +131,9 @@ export const api = {
 	tokens: (username?: string) => request<Token[]>('GET', `/api/tokens${query({ username })}`),
 	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number; allowedIps?: string; rateLimitPerMinute?: number }) => request<Token>('POST', '/api/tokens', body),
 	deleteToken: (id: string) => request<void>('DELETE', `/api/tokens/${enc(id)}`),
+
+	audit: (filter: { repository?: string; actor?: string; action?: string; limit?: number; offset?: number } = {}) =>
+		request<AuditEntry[]>('GET', `/api/audit${query({ repository: filter.repository, actor: filter.actor, action: filter.action, limit: filter.limit?.toString(), offset: filter.offset?.toString() })}`),
 };
 
 /**

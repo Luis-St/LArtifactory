@@ -16,7 +16,8 @@ public record Services(
 	@NonNull TokenUsageService tokenUsage,
 	@NonNull RepositoryService repositories,
 	@NonNull ArtifactService artifacts,
-	@NonNull PackageService packages
+	@NonNull PackageService packages,
+	@NonNull AuditService audit
 ) {
 
 	public Services {
@@ -27,5 +28,6 @@ public record Services(
 		Objects.requireNonNull(repositories, "Repository service must not be null");
 		Objects.requireNonNull(artifacts, "Artifact service must not be null");
 		Objects.requireNonNull(packages, "Package service must not be null");
+		Objects.requireNonNull(audit, "Audit service must not be null");
 	}
 }

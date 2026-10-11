@@ -63,6 +63,17 @@ export interface Permission {
 	level: AccessLevel;
 }
 
+export interface AuditEntry {
+	id: string;
+	timestamp: string;
+	actor: string | null;
+	action: string;
+	repository: string | null;
+	target: string | null;
+	ip: string | null;
+	detail: string | null;
+}
+
 export interface Token {
 	id: string;
 	username: string;

@@ -8,6 +8,8 @@ import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.dto.request.*;
 import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
+import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.AuditService;
 import org.jspecify.annotations.NonNull;
 
 import java.time.Instant;
@@ -71,7 +73,7 @@ public class UserAdminHandler {
 		}
 	)
 	public void createUser(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		Principal admin = this.services.auth().requireAdmin(ctx);
 		CreateUserRequest request = ctx.bodyAsClass(CreateUserRequest.class);
 		if (request.username() == null || !USERNAME.matcher(request.username()).matches() || "__token__".equals(request.username())) {
 			throw HttpError.badRequest("Invalid username");
@@ -81,6 +83,7 @@ public class UserAdminHandler {
 			throw HttpError.conflict("User " + request.username() + " already exists");
 		}
 		UserEntity user = this.services.users().create(request.username(), request.password(), Boolean.TRUE.equals(request.admin()));
+		this.services.audit().record(admin.username(), AuditService.USER_CREATE, null, user.username(), Requests.clientIp(ctx, this.services.config()), user.admin() ? "admin" : null);
 		ctx.status(201).json(UserResponse.of(user));
 	}
 	
@@ -110,6 +113,14 @@ public class UserAdminHandler {
 		}
 		this.services.users().update(username, request.password(), request.admin());
 		this.services.auth().invalidateCache();
+		StringBuilder detail = new StringBuilder();
+		if (request.password() != null) {
+			detail.append("password");
+		}
+		if (request.admin() != null) {
+			detail.append(detail.isEmpty() ? "" : ", ").append("admin=").append(request.admin());
+		}
+		this.services.audit().record(principal.username(), AuditService.USER_UPDATE, null, username, Requests.clientIp(ctx, this.services.config()), detail.isEmpty() ? null : detail.toString());
 		ctx.json(UserResponse.of(Objects.requireNonNull(this.services.users().get(username))));
 	}
 	
@@ -133,6 +144,7 @@ public class UserAdminHandler {
 		}
 		this.services.users().delete(username);
 		this.services.auth().invalidateCache();
+		this.services.audit().record(principal.username(), AuditService.USER_DELETE, null, username, Requests.clientIp(ctx, this.services.config()), null);
 		ctx.status(204);
 	}
 	
@@ -176,7 +188,7 @@ public class UserAdminHandler {
 		responses = @OpenApiResponse(status = "200", content = @OpenApiContent(from = PermissionResponse.class))
 	)
 	public void setPermission(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		Principal admin = this.services.auth().requireAdmin(ctx);
 		PermissionRequest request = ctx.bodyAsClass(PermissionRequest.class);
 		AccessLevel level = AccessLevel.parse(request.level());
 		if (request.repository() == null || request.username() == null || level == null) {
@@ -189,6 +201,7 @@ public class UserAdminHandler {
 			throw HttpError.notFound("No such user: " + request.username());
 		}
 		this.services.users().setPermission(request.repository(), request.username(), level);
+		this.services.audit().record(admin.username(), AuditService.PERMISSION_SET, request.repository(), request.username(), Requests.clientIp(ctx, this.services.config()), level.name());
 		ctx.json(new PermissionResponse(request.repository(), request.username(), level.name()));
 	}
 	
@@ -205,7 +218,7 @@ public class UserAdminHandler {
 		responses = @OpenApiResponse(status = "204")
 	)
 	public void deletePermission(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		Principal admin = this.services.auth().requireAdmin(ctx);
 		String repository = ctx.queryParam("repository");
 		String username = ctx.queryParam("username");
 		if (repository == null || username == null) {
@@ -214,6 +227,7 @@ public class UserAdminHandler {
 		if (this.services.users().removePermission(repository, username) == 0) {
 			throw HttpError.notFound("No such permission");
 		}
+		this.services.audit().record(admin.username(), AuditService.PERMISSION_DELETE, repository, username, Requests.clientIp(ctx, this.services.config()), null);
 		ctx.status(204);
 	}
 	//endregion
@@ -276,6 +290,7 @@ public class UserAdminHandler {
 
 		UserService.CreatedToken token = this.services.users().createToken(username, name.length() > 128 ? name.substring(0, 128) : name, level, expiresAt, allowedIps, rateLimit);
 		TokenMetaEntity meta = new TokenMetaEntity(token.token().id(), allowedIps, rateLimit, null, null);
+		this.services.audit().record(principal.username(), AuditService.TOKEN_CREATE, null, token.token().id(), Requests.clientIp(ctx, this.services.config()), "user=" + username + ", level=" + level.name());
 		ctx.status(201).json(TokenResponse.of(token.token(), meta, token.secret()));
 	}
 	
@@ -297,6 +312,7 @@ public class UserAdminHandler {
 		this.services.users().deleteToken(token.id());
 		this.services.tokenUsage().invalidate(token.id());
 		this.services.auth().invalidateCache();
+		this.services.audit().record(principal.username(), AuditService.TOKEN_DELETE, null, token.id(), Requests.clientIp(ctx, this.services.config()), "user=" + token.username());
 		ctx.status(204);
 	}
 	

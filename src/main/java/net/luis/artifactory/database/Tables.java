@@ -95,7 +95,19 @@ public final class Tables {
 	public static final SqlCompositePrimaryKey<DistTagEntity> TAG_PK = DIST_TAGS.compositePrimaryKey(TAG_REPOSITORY, TAG_PACKAGE, TAG_NAME);
 	//endregion
 	
-	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS);
+	//region Audit log
+	public static final SqlTable<AuditEntity> AUDIT_LOG = SqlTable.create(AuditEntity.class, "audit_log");
+	public static final SqlColumn<AuditEntity, String> AUDIT_ID = AUDIT_LOG.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), AuditEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<AuditEntity, Instant> AUDIT_TIMESTAMP = AUDIT_LOG.column("timestamp", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), AuditEntity::timestamp, SqlColumnBuilder::notNull);
+	public static final SqlColumn<AuditEntity, String> AUDIT_ACTOR = AUDIT_LOG.column("actor", SqlTypes.STRING.configure(SqlParameter.length(128)), AuditEntity::actor);
+	public static final SqlColumn<AuditEntity, String> AUDIT_ACTION = AUDIT_LOG.column("action", SqlTypes.STRING.configure(SqlParameter.length(64)), AuditEntity::action, SqlColumnBuilder::notNull);
+	public static final SqlColumn<AuditEntity, String> AUDIT_REPOSITORY = AUDIT_LOG.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), AuditEntity::repository);
+	public static final SqlColumn<AuditEntity, String> AUDIT_TARGET = AUDIT_LOG.column("target", SqlTypes.STRING.configure(SqlParameter.length(1024)), AuditEntity::target);
+	public static final SqlColumn<AuditEntity, String> AUDIT_IP = AUDIT_LOG.column("ip", SqlTypes.STRING.configure(SqlParameter.length(64)), AuditEntity::ip);
+	public static final SqlColumn<AuditEntity, String> AUDIT_DETAIL = AUDIT_LOG.column("detail", SqlTypes.TEXT, AuditEntity::detail);
+	//endregion
+
+	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS, AUDIT_LOG);
 	
 	private Tables() {}
 }

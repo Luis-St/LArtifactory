@@ -41,7 +41,8 @@ For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user pass
 
 The server ships a web ui at `/ui/` (`/` redirects there). It shows an overview of the stored artifacts per repository type,
 lets you browse packages, versions and files, and covers the configuration of repositories, users, permissions and tokens,
-including copy-ready client setup snippets for every repository. Users sign in with their password or an access token.
+including copy-ready client setup snippets for every repository. Administrators also get an audit log of administrative
+actions. Users sign in with their password or an access token.
 
 The ui is a React single page application in `ui/`, built with Vite and packaged into the jar by Gradle (requires Node.js 20.19+):
 
@@ -160,6 +161,7 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | `GET` `PUT` `DELETE`    | `/api/permissions`                    | List / grant / revoke permissions                      |
 | `GET` `POST`            | `/api/tokens`                         | List / create tokens                                   |
 | `DELETE`                | `/api/tokens/{id}`                    | Revoke a token                                         |
+| `GET`                   | `/api/audit`                          | List audit log entries (admin, `?repository=&actor=&action=&limit=&offset=`) |
 
 The full api is documented in `openapi.json` and served by Swagger UI at `/swagger`.
 

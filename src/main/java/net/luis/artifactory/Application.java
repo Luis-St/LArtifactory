@@ -15,6 +15,7 @@ import net.luis.artifactory.config.*;
 import net.luis.artifactory.database.DatabaseProvider;
 import net.luis.artifactory.dto.response.ErrorResponse;
 import net.luis.artifactory.handler.HealthHandler;
+import net.luis.artifactory.handler.admin.AuditAdminHandler;
 import net.luis.artifactory.handler.admin.RepositoryAdminHandler;
 import net.luis.artifactory.handler.admin.UserAdminHandler;
 import net.luis.artifactory.handler.format.RepositoryDispatcher;
@@ -59,12 +60,14 @@ public class Application {
 			tokenUsageService,
 			new RepositoryService(database, artifactService),
 			artifactService,
-			new PackageService(database)
+			new PackageService(database),
+			new AuditService(database)
 		);
 		
 		var healthHandler = new HealthHandler(databaseProvider);
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);
 		var userAdminHandler = new UserAdminHandler(services);
+		var auditAdminHandler = new AuditAdminHandler(services);
 		var dispatcher = new RepositoryDispatcher(services);
 		
 		Javalin app = Javalin.create(config -> {
@@ -176,6 +179,7 @@ public class Application {
 			config.routes.get("/api/tokens", userAdminHandler::listTokens);
 			config.routes.post("/api/tokens", userAdminHandler::createToken);
 			config.routes.delete("/api/tokens/{id}", userAdminHandler::deleteToken);
+			config.routes.get("/api/audit", auditAdminHandler::list);
 			
 			// Repositories: /{type}/{repository}/...
 			for (RepositoryType type : RepositoryType.values()) {

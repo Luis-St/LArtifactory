@@ -11,6 +11,7 @@ import net.luis.artifactory.dto.request.UpdateRepositoryRequest;
 import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.AuditService;
 import net.luis.artifactory.repository.RepositoryService;
 import net.luis.artifactory.repository.RepositoryType;
 import org.jspecify.annotations.NonNull;
@@ -77,7 +78,7 @@ public class RepositoryAdminHandler {
 		}
 	)
 	public void create(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		Principal principal = this.services.auth().requireAdmin(ctx);
 		CreateRepositoryRequest request = ctx.bodyAsClass(CreateRepositoryRequest.class);
 		if (request.name() == null || !RepositoryService.NAME_PATTERN.matcher(request.name()).matches()) {
 			throw HttpError.badRequest("Invalid repository name, allowed: " + RepositoryService.NAME_PATTERN.pattern());
@@ -91,6 +92,7 @@ public class RepositoryAdminHandler {
 		}
 		
 		RepositoryEntity repository = this.services.repositories().create(request.name(), type, request.description(), Boolean.TRUE.equals(request.publicRead()), Boolean.TRUE.equals(request.allowRedeploy()));
+		this.services.audit().record(principal.username(), AuditService.REPOSITORY_CREATE, repository.name(), type.id(), Requests.clientIp(ctx, this.services.config()), repository.publicRead() ? "publicRead" : null);
 		ctx.status(201).json(RepositoryResponse.of(repository, Requests.baseUrl(ctx, this.services.config())));
 	}
 	
@@ -105,10 +107,11 @@ public class RepositoryAdminHandler {
 		responses = @OpenApiResponse(status = "200", content = @OpenApiContent(from = RepositoryResponse.class))
 	)
 	public void update(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		Principal principal = this.services.auth().requireAdmin(ctx);
 		RepositoryEntity repository = this.require(ctx);
 		UpdateRepositoryRequest request = ctx.bodyAsClass(UpdateRepositoryRequest.class);
 		this.services.repositories().update(repository.name(), request.description(), request.publicRead(), request.allowRedeploy());
+		this.services.audit().record(principal.username(), AuditService.REPOSITORY_UPDATE, repository.name(), null, Requests.clientIp(ctx, this.services.config()), null);
 		ctx.json(RepositoryResponse.of(Objects.requireNonNull(this.services.repositories().get(repository.name())), Requests.baseUrl(ctx, this.services.config())));
 	}
 	
@@ -122,9 +125,10 @@ public class RepositoryAdminHandler {
 		responses = @OpenApiResponse(status = "204")
 	)
 	public void delete(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		Principal principal = this.services.auth().requireAdmin(ctx);
 		RepositoryEntity repository = this.require(ctx);
 		this.services.repositories().delete(repository.name());
+		this.services.audit().record(principal.username(), AuditService.REPOSITORY_DELETE, repository.name(), repository.type(), Requests.clientIp(ctx, this.services.config()), null);
 		ctx.status(204);
 	}
 	
@@ -169,7 +173,7 @@ public class RepositoryAdminHandler {
 	)
 	public void deletePackage(@NonNull Context ctx) throws Exception {
 		RepositoryEntity repository = this.require(ctx);
-		this.services.auth().authorize(ctx, repository, AccessLevel.DELETE, "Basic realm=\"" + repository.name() + "\"");
+		Principal principal = this.services.auth().authorize(ctx, repository, AccessLevel.DELETE, "Basic realm=\"" + repository.name() + "\"");
 		String packageName = ctx.queryParam("package");
 		String version = ctx.queryParam("version");
 		if (packageName == null || packageName.isBlank()) {
@@ -194,6 +198,8 @@ public class RepositoryAdminHandler {
 		if (!deleted) {
 			throw HttpError.notFound();
 		}
+		String target = version == null ? packageName : packageName + "@" + version;
+		this.services.audit().record(principal == null ? null : principal.username(), AuditService.PACKAGE_DELETE, repository.name(), target, Requests.clientIp(ctx, this.services.config()), null);
 		ctx.status(204);
 	}
 	

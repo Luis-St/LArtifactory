@@ -2,6 +2,7 @@ import { Layout } from './components/Layout';
 import { Empty, Spinner } from './components/ui';
 import { Account } from './pages/Account';
 import { Artifacts } from './pages/Artifacts';
+import { Audit } from './pages/Audit';
 import { Login } from './pages/Login';
 import { Overview } from './pages/Overview';
 import { Permissions } from './pages/Permissions';
@@ -45,6 +46,9 @@ function Routes({ principal }: { principal: Principal }) {
 			break;
 		case 'tokens':
 			page = <Tokens />;
+			break;
+		case 'audit':
+			page = principal.admin ? <Audit /> : null;
 			break;
 		case 'account':
 			page = <Account />;
