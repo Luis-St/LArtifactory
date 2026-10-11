@@ -160,10 +160,8 @@ public class UserService {
 	}
 
 	public int deleteToken(@NonNull String id) throws SqlException {
-		return this.database.inTransaction(transaction -> {
-			transaction.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, id)).execute();
-			return transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
-		});
+		this.database.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, id)).execute();
+		return this.database.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
 	}
 
 	public int deleteTokenBySecret(@NonNull String secret) throws SqlException {

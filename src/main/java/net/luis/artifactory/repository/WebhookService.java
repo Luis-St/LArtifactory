@@ -108,10 +108,8 @@ public class WebhookService {
 	}
 
 	public int delete(@NonNull String id) throws SqlException {
-		int removed = this.database.inTransaction(transaction -> {
-			transaction.from(WEBHOOK_DELIVERIES).delete().where(Sql.equalTo(DELIVERY_WEBHOOK, id)).execute();
-			return transaction.from(WEBHOOKS).delete().where(Sql.equalTo(WEBHOOK_ID, id)).execute();
-		});
+		this.database.from(WEBHOOK_DELIVERIES).delete().where(Sql.equalTo(DELIVERY_WEBHOOK, id)).execute();
+		int removed = this.database.from(WEBHOOKS).delete().where(Sql.equalTo(WEBHOOK_ID, id)).execute();
 		this.invalidate();
 		return removed;
 	}
