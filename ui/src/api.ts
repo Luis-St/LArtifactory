@@ -1,4 +1,4 @@
-import type { AccessLevel, AuditEntry, FileEntry, Health, Package, Permission, Principal, Repository, Token, User } from './types';
+import type { AccessLevel, AuditEntry, FileEntry, Health, Package, Permission, Principal, Repository, Token, User, Webhook, WebhookDelivery } from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -134,6 +134,13 @@ export const api = {
 
 	audit: (filter: { repository?: string; actor?: string; action?: string; limit?: number; offset?: number } = {}) =>
 		request<AuditEntry[]>('GET', `/api/audit${query({ repository: filter.repository, actor: filter.actor, action: filter.action, limit: filter.limit?.toString(), offset: filter.offset?.toString() })}`),
+
+	webhooks: (repository?: string) => request<Webhook[]>('GET', `/api/webhooks${query({ repository })}`),
+	createWebhook: (body: { repository?: string; url: string; secret?: string; events: string[]; active: boolean }) => request<Webhook>('POST', '/api/webhooks', body),
+	updateWebhook: (id: string, body: { url?: string; events?: string[]; active?: boolean }) => request<Webhook>('PATCH', `/api/webhooks/${enc(id)}`, body),
+	deleteWebhook: (id: string) => request<void>('DELETE', `/api/webhooks/${enc(id)}`),
+	testWebhook: (id: string) => request<WebhookDelivery>('POST', `/api/webhooks/${enc(id)}/test`),
+	webhookDeliveries: (id: string) => request<WebhookDelivery[]>('GET', `/api/webhooks/${enc(id)}/deliveries`),
 };
 
 /**

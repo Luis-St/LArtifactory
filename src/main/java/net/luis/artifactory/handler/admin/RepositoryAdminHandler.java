@@ -14,6 +14,7 @@ import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.repository.AuditService;
 import net.luis.artifactory.repository.RepositoryService;
 import net.luis.artifactory.repository.RepositoryType;
+import net.luis.artifactory.repository.WebhookService;
 import org.jspecify.annotations.NonNull;
 
 import java.util.*;
@@ -93,6 +94,7 @@ public class RepositoryAdminHandler {
 		
 		RepositoryEntity repository = this.services.repositories().create(request.name(), type, request.description(), Boolean.TRUE.equals(request.publicRead()), Boolean.TRUE.equals(request.allowRedeploy()));
 		this.services.audit().record(principal.username(), AuditService.REPOSITORY_CREATE, repository.name(), type.id(), Requests.clientIp(ctx, this.services.config()), repository.publicRead() ? "publicRead" : null);
+		this.services.webhooks().dispatch(WebhookService.REPOSITORY_CREATED, repository.name(), type.id());
 		ctx.status(201).json(RepositoryResponse.of(repository, Requests.baseUrl(ctx, this.services.config())));
 	}
 	
@@ -129,6 +131,7 @@ public class RepositoryAdminHandler {
 		RepositoryEntity repository = this.require(ctx);
 		this.services.repositories().delete(repository.name());
 		this.services.audit().record(principal.username(), AuditService.REPOSITORY_DELETE, repository.name(), repository.type(), Requests.clientIp(ctx, this.services.config()), null);
+		this.services.webhooks().dispatch(WebhookService.REPOSITORY_DELETED, repository.name(), repository.type());
 		ctx.status(204);
 	}
 	
@@ -200,6 +203,7 @@ public class RepositoryAdminHandler {
 		}
 		String target = version == null ? packageName : packageName + "@" + version;
 		this.services.audit().record(principal == null ? null : principal.username(), AuditService.PACKAGE_DELETE, repository.name(), target, Requests.clientIp(ctx, this.services.config()), null);
+		this.services.webhooks().dispatch(WebhookService.PACKAGE_DELETED, repository.name(), target);
 		ctx.status(204);
 	}
 	

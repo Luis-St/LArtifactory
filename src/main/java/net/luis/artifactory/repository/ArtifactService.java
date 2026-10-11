@@ -27,10 +27,12 @@ public class ArtifactService {
 	
 	private final SqlDatabase database;
 	private final BlobStore blobStore;
-	
-	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore) {
+	private final WebhookService webhooks;
+
+	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore, @NonNull WebhookService webhooks) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 		this.blobStore = Objects.requireNonNull(blobStore, "Blob store must not be null");
+		this.webhooks = Objects.requireNonNull(webhooks, "Webhook service must not be null");
 	}
 	
 	public @NonNull BlobStore blobStore() {
@@ -85,6 +87,7 @@ public class ArtifactService {
 		if (previous != null && !previous.sha256().equals(blob.sha256())) {
 			this.releaseBlobs(List.of(previous));
 		}
+		this.webhooks.dispatch(WebhookService.ARTIFACT_PUBLISHED, repository, path);
 		return file;
 	}
 	
@@ -95,6 +98,7 @@ public class ArtifactService {
 		}
 		this.database.from(FILES).delete().where(SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PATH, path))).execute();
 		this.releaseBlobs(List.of(file));
+		this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, path);
 		return true;
 	}
 	
@@ -104,13 +108,19 @@ public class ArtifactService {
 			this.database.from(FILES).delete().where(SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PATH, file.path()))).execute();
 		}
 		this.releaseBlobs(files);
+		if (!files.isEmpty()) {
+			this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, prefix);
+		}
 		return files.size();
 	}
-	
+
 	public int deleteVersion(@NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		List<FileEntity> files = this.listByVersion(repository, packageName, version);
 		this.database.from(FILES).delete().where(SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PACKAGE, packageName), Sql.equalTo(FILE_VERSION, version))).execute();
 		this.releaseBlobs(files);
+		if (!files.isEmpty()) {
+			this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, packageName + "@" + version);
+		}
 		return files.size();
 	}
 	

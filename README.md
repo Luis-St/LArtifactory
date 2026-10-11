@@ -42,7 +42,7 @@ For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user pass
 The server ships a web ui at `/ui/` (`/` redirects there). It shows an overview of the stored artifacts per repository type,
 lets you browse packages, versions and files, and covers the configuration of repositories, users, permissions and tokens,
 including copy-ready client setup snippets for every repository. Administrators also get an audit log of administrative
-actions. Users sign in with their password or an access token.
+actions and can manage webhooks. Users sign in with their password or an access token.
 
 The ui is a React single page application in `ui/`, built with Vite and packaged into the jar by Gradle (requires Node.js 20.19+):
 
@@ -162,8 +162,24 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | `GET` `POST`            | `/api/tokens`                         | List / create tokens                                   |
 | `DELETE`                | `/api/tokens/{id}`                    | Revoke a token                                         |
 | `GET`                   | `/api/audit`                          | List audit log entries (admin, `?repository=&actor=&action=&limit=&offset=`) |
+| `GET` `POST`            | `/api/webhooks`                       | List / create webhooks (admin)                         |
+| `GET` `PATCH` `DELETE`  | `/api/webhooks/{id}`                  | Get / update / delete a webhook (admin)                |
+| `POST`                  | `/api/webhooks/{id}/test`             | Send a test ping and return the delivery result (admin) |
+| `GET`                   | `/api/webhooks/{id}/deliveries`       | List recent delivery attempts of a webhook (admin)     |
 
 The full api is documented in `openapi.json` and served by Swagger UI at `/swagger`.
+
+### Webhooks
+
+Webhooks notify external services when something changes. Each webhook has a target url, an optional repository scope
+(empty means all repositories), an optional set of event types (empty means all) and an optional signing secret.
+
+Events: `artifact.published`, `artifact.deleted`, `package.deleted`, `repository.created`, `repository.deleted`.
+
+Deliveries are sent asynchronously as a JSON `POST` and retried a few times; the body is
+`{"event":..., "repository":..., "target":..., "timestamp":...}`. Each request carries `X-LArtifactory-Event`,
+`X-LArtifactory-Delivery` and, when a secret is configured, `X-LArtifactory-Signature: sha256=<hmac>` (HMAC-SHA256 of
+the raw body). The last delivery attempts are recorded and can be inspected in the web UI or via the API.
 
 ```bash
 curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \

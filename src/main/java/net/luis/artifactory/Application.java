@@ -18,6 +18,7 @@ import net.luis.artifactory.handler.HealthHandler;
 import net.luis.artifactory.handler.admin.AuditAdminHandler;
 import net.luis.artifactory.handler.admin.RepositoryAdminHandler;
 import net.luis.artifactory.handler.admin.UserAdminHandler;
+import net.luis.artifactory.handler.admin.WebhookAdminHandler;
 import net.luis.artifactory.handler.format.RepositoryDispatcher;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.repository.*;
@@ -51,7 +52,8 @@ public class Application {
 		BlobStore blobStore = new BlobStore(serverConfig.storagePath(), serverConfig.maxUploadSize());
 		UserService userService = new UserService(database);
 		userService.bootstrapAdmin(serverConfig.adminUsername(), serverConfig.adminPassword());
-		ArtifactService artifactService = new ArtifactService(database, blobStore);
+		WebhookService webhookService = new WebhookService(database);
+		ArtifactService artifactService = new ArtifactService(database, blobStore, webhookService);
 		TokenUsageService tokenUsageService = new TokenUsageService(userService);
 		Services services = new Services(
 			serverConfig,
@@ -61,13 +63,15 @@ public class Application {
 			new RepositoryService(database, artifactService),
 			artifactService,
 			new PackageService(database),
-			new AuditService(database)
+			new AuditService(database),
+			webhookService
 		);
 		
 		var healthHandler = new HealthHandler(databaseProvider);
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);
 		var userAdminHandler = new UserAdminHandler(services);
 		var auditAdminHandler = new AuditAdminHandler(services);
+		var webhookAdminHandler = new WebhookAdminHandler(services);
 		var dispatcher = new RepositoryDispatcher(services);
 		
 		Javalin app = Javalin.create(config -> {
@@ -180,6 +184,13 @@ public class Application {
 			config.routes.post("/api/tokens", userAdminHandler::createToken);
 			config.routes.delete("/api/tokens/{id}", userAdminHandler::deleteToken);
 			config.routes.get("/api/audit", auditAdminHandler::list);
+			config.routes.get("/api/webhooks", webhookAdminHandler::list);
+			config.routes.post("/api/webhooks", webhookAdminHandler::create);
+			config.routes.get("/api/webhooks/{id}", webhookAdminHandler::get);
+			config.routes.patch("/api/webhooks/{id}", webhookAdminHandler::update);
+			config.routes.delete("/api/webhooks/{id}", webhookAdminHandler::delete);
+			config.routes.post("/api/webhooks/{id}/test", webhookAdminHandler::test);
+			config.routes.get("/api/webhooks/{id}/deliveries", webhookAdminHandler::deliveries);
 			
 			// Repositories: /{type}/{repository}/...
 			for (RepositoryType type : RepositoryType.values()) {
@@ -193,7 +204,8 @@ public class Application {
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 			LOGGER.info("Shutting down LArtifactory");
 			app.stop();
-			
+			webhookService.close();
+
 			try {
 				databaseProvider.close();
 			} catch (SqlException e) {

@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
 	{ id: 'users', label: 'Users', icon: 'users', admin: true },
 	{ id: 'permissions', label: 'Permissions', icon: 'permissions', admin: true },
 	{ id: 'tokens', label: 'Access tokens', icon: 'tokens' },
+	{ id: 'webhooks', label: 'Webhooks', icon: 'webhooks', admin: true },
 	{ id: 'audit', label: 'Audit log', icon: 'audit', admin: true },
 	{ id: 'account', label: 'Account', icon: 'account' },
 ];

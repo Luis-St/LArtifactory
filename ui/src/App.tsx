@@ -10,6 +10,7 @@ import { Repositories } from './pages/Repositories';
 import { RepositoryDetail } from './pages/RepositoryDetail';
 import { Tokens } from './pages/Tokens';
 import { Users } from './pages/Users';
+import { Webhooks } from './pages/Webhooks';
 import { href, useRoute } from './router';
 import { SessionProvider } from './session';
 import { REPOSITORY_TYPES, type Principal, type RepositoryType } from './types';
@@ -46,6 +47,9 @@ function Routes({ principal }: { principal: Principal }) {
 			break;
 		case 'tokens':
 			page = <Tokens />;
+			break;
+		case 'webhooks':
+			page = principal.admin ? <Webhooks /> : null;
 			break;
 		case 'audit':
 			page = principal.admin ? <Audit /> : null;

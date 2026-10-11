@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 
-export type IconName = 'overview' | 'artifacts' | 'repositories' | 'users' | 'permissions' | 'tokens' | 'account' | 'audit' | 'docs' | 'collapse' | 'expand' | 'menu';
+export type IconName = 'overview' | 'artifacts' | 'repositories' | 'users' | 'permissions' | 'tokens' | 'account' | 'audit' | 'webhooks' | 'docs' | 'collapse' | 'expand' | 'menu';
 
 const PATHS: Record<IconName, ReactNode> = {
 	overview: <><rect x="3" y="3" width="7" height="9" rx="1.5" /><rect x="14" y="3" width="7" height="5" rx="1.5" /><rect x="14" y="12" width="7" height="9" rx="1.5" /><rect x="3" y="16" width="7" height="5" rx="1.5" /></>,
@@ -11,6 +11,7 @@ const PATHS: Record<IconName, ReactNode> = {
 	tokens: <><circle cx="8" cy="15" r="4" /><path d="m10.8 12.2 8.7-8.7" /><path d="m16.5 6.5 2.5 2.5" /><path d="m14 9 2 2" /></>,
 	account: <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="10" r="3" /><path d="M6.2 18.4c1.3-2 3.4-3.2 5.8-3.2s4.5 1.2 5.8 3.2" /></>,
 	audit: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 12h6M9 16h6M9 8h2" /></>,
+	webhooks: <><path d="M9 7a3 3 0 1 1 4 2.8l2.2 3.8" /><path d="M15.5 13a3 3 0 1 1-2.9 3.8l-4.4 0" /><path d="M8.5 11.2 6.3 15A3 3 0 1 0 8 16.9" /></>,
 	docs: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M9 13h6M9 17h4" /></>,
 	collapse: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /><path d="m16 10-2 2 2 2" /></>,
 	expand: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /><path d="m14 10 2 2-2 2" /></>,

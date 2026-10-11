@@ -63,6 +63,30 @@ export interface Permission {
 	level: AccessLevel;
 }
 
+export const WEBHOOK_EVENTS = ['artifact.published', 'artifact.deleted', 'package.deleted', 'repository.created', 'repository.deleted'] as const;
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export interface Webhook {
+	id: string;
+	repository: string | null;
+	url: string;
+	hasSecret: boolean;
+	events: string[];
+	active: boolean;
+	createdAt: string;
+	createdBy: string | null;
+}
+
+export interface WebhookDelivery {
+	id: string;
+	event: string;
+	repository: string | null;
+	success: boolean;
+	statusCode: number;
+	error: string | null;
+	createdAt: string;
+}
+
 export interface AuditEntry {
 	id: string;
 	timestamp: string;

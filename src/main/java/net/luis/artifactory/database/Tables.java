@@ -95,6 +95,30 @@ public final class Tables {
 	public static final SqlCompositePrimaryKey<DistTagEntity> TAG_PK = DIST_TAGS.compositePrimaryKey(TAG_REPOSITORY, TAG_PACKAGE, TAG_NAME);
 	//endregion
 	
+	//region Webhooks
+	public static final SqlTable<WebhookEntity> WEBHOOKS = SqlTable.create(WebhookEntity.class, "webhooks");
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_ID = WEBHOOKS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_REPOSITORY = WEBHOOKS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), WebhookEntity::repository);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_URL = WEBHOOKS.column("url", SqlTypes.STRING.configure(SqlParameter.length(1024)), WebhookEntity::url, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_SECRET = WEBHOOKS.column("secret", SqlTypes.STRING.configure(SqlParameter.length(256)), WebhookEntity::secret);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_EVENTS = WEBHOOKS.column("events", SqlTypes.TEXT, WebhookEntity::events);
+	public static final SqlColumn<WebhookEntity, Boolean> WEBHOOK_ACTIVE = WEBHOOKS.column("active", SqlTypes.BOOLEAN, WebhookEntity::active, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookEntity, Instant> WEBHOOK_CREATED_AT = WEBHOOKS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), WebhookEntity::createdAt, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_CREATED_BY = WEBHOOKS.column("created_by", SqlTypes.STRING.configure(SqlParameter.length(128)), WebhookEntity::createdBy);
+	//endregion
+
+	//region Webhook deliveries
+	public static final SqlTable<WebhookDeliveryEntity> WEBHOOK_DELIVERIES = SqlTable.create(WebhookDeliveryEntity.class, "webhook_deliveries");
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_ID = WEBHOOK_DELIVERIES.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookDeliveryEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_WEBHOOK = WEBHOOK_DELIVERIES.column("webhook_id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookDeliveryEntity::webhookId, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_EVENT = WEBHOOK_DELIVERIES.column("event", SqlTypes.STRING.configure(SqlParameter.length(64)), WebhookDeliveryEntity::event, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_REPOSITORY = WEBHOOK_DELIVERIES.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), WebhookDeliveryEntity::repository);
+	public static final SqlColumn<WebhookDeliveryEntity, Boolean> DELIVERY_SUCCESS = WEBHOOK_DELIVERIES.column("success", SqlTypes.BOOLEAN, WebhookDeliveryEntity::success, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, Long> DELIVERY_STATUS = WEBHOOK_DELIVERIES.column("status_code", SqlTypes.LONG, WebhookDeliveryEntity::statusCode, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_ERROR = WEBHOOK_DELIVERIES.column("error", SqlTypes.TEXT, WebhookDeliveryEntity::error);
+	public static final SqlColumn<WebhookDeliveryEntity, Instant> DELIVERY_CREATED_AT = WEBHOOK_DELIVERIES.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), WebhookDeliveryEntity::createdAt, SqlColumnBuilder::notNull);
+	//endregion
+
 	//region Audit log
 	public static final SqlTable<AuditEntity> AUDIT_LOG = SqlTable.create(AuditEntity.class, "audit_log");
 	public static final SqlColumn<AuditEntity, String> AUDIT_ID = AUDIT_LOG.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), AuditEntity::id, col -> col.primaryKey().notNull());
@@ -107,7 +131,7 @@ public final class Tables {
 	public static final SqlColumn<AuditEntity, String> AUDIT_DETAIL = AUDIT_LOG.column("detail", SqlTypes.TEXT, AuditEntity::detail);
 	//endregion
 
-	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS, AUDIT_LOG);
+	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS, AUDIT_LOG, WEBHOOKS, WEBHOOK_DELIVERIES);
 	
 	private Tables() {}
 }

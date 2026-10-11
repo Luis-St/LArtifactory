@@ -17,7 +17,8 @@ public record Services(
 	@NonNull RepositoryService repositories,
 	@NonNull ArtifactService artifacts,
 	@NonNull PackageService packages,
-	@NonNull AuditService audit
+	@NonNull AuditService audit,
+	@NonNull WebhookService webhooks
 ) {
 
 	public Services {
@@ -29,5 +30,6 @@ public record Services(
 		Objects.requireNonNull(artifacts, "Artifact service must not be null");
 		Objects.requireNonNull(packages, "Package service must not be null");
 		Objects.requireNonNull(audit, "Audit service must not be null");
+		Objects.requireNonNull(webhooks, "Webhook service must not be null");
 	}
 }
