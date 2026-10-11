@@ -9,6 +9,7 @@ import io.javalin.json.JavalinJackson3;
 import io.javalin.openapi.plugin.OpenApiPlugin;
 import io.javalin.openapi.plugin.swagger.SwaggerPlugin;
 import net.luis.artifactory.auth.AuthService;
+import net.luis.artifactory.auth.TokenUsageService;
 import net.luis.artifactory.auth.UserService;
 import net.luis.artifactory.config.*;
 import net.luis.artifactory.database.DatabaseProvider;
@@ -50,10 +51,12 @@ public class Application {
 		UserService userService = new UserService(database);
 		userService.bootstrapAdmin(serverConfig.adminUsername(), serverConfig.adminPassword());
 		ArtifactService artifactService = new ArtifactService(database, blobStore);
+		TokenUsageService tokenUsageService = new TokenUsageService(userService);
 		Services services = new Services(
 			serverConfig,
 			userService,
-			new AuthService(userService),
+			new AuthService(userService, tokenUsageService, serverConfig),
+			tokenUsageService,
 			new RepositoryService(database, artifactService),
 			artifactService,
 			new PackageService(database)

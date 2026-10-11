@@ -70,5 +70,9 @@ export interface Token {
 	level: AccessLevel;
 	createdAt: string;
 	expiresAt: string | null;
+	allowedIps: string | null;
+	rateLimit: number;
+	lastUsedAt: string | null;
+	lastUsedIp: string | null;
 	token: string | null;
 }

@@ -1,8 +1,10 @@
 package net.luis.artifactory.auth;
 
 import io.javalin.http.Context;
+import net.luis.artifactory.config.ServerConfig;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
+import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.storage.BlobStore;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
@@ -40,10 +42,14 @@ public class AuthService {
 	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
 
 	private final UserService userService;
+	private final TokenUsageService tokenUsage;
+	private final ServerConfig config;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
-	
-	public AuthService(@NonNull UserService userService) {
+
+	public AuthService(@NonNull UserService userService, @NonNull TokenUsageService tokenUsage, @NonNull ServerConfig config) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
+		this.tokenUsage = Objects.requireNonNull(tokenUsage, "Token usage service must not be null");
+		this.config = Objects.requireNonNull(config, "Config must not be null");
 	}
 	
 	public void invalidateCache() {
@@ -161,27 +167,27 @@ public class AuthService {
 			String value = space < 0 ? authorization : authorization.substring(space + 1).strip();
 			
 			if ("Basic".equalsIgnoreCase(scheme)) {
-				return this.basic(value);
+				return this.basic(ctx, value);
 			}
 			if ("Bearer".equalsIgnoreCase(scheme) || "token".equalsIgnoreCase(scheme)) {
-				return this.requireToken(value, null);
+				return this.requireToken(ctx, value, null);
 			}
 			if (space < 0) {
-				return this.requireToken(value, null); // Cargo sends the raw token
+				return this.requireToken(ctx, value, null); // Cargo sends the raw token
 			}
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-		
+
 		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
 			String apiKey = ctx.header(header);
 			if (apiKey != null && !apiKey.isBlank()) {
-				return this.requireToken(apiKey.strip(), null);
+				return this.requireToken(ctx, apiKey.strip(), null);
 			}
 		}
 		return null;
 	}
-	
-	private @NonNull Principal basic(@NonNull String encoded) throws SqlException {
+
+	private @NonNull Principal basic(@NonNull Context ctx, @NonNull String encoded) throws SqlException {
 		String decoded;
 		try {
 			decoded = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
@@ -196,7 +202,7 @@ public class AuthService {
 		String secret = decoded.substring(colon + 1);
 		
 		if ("__token__".equals(username) || secret.startsWith("lat_")) {
-			return this.requireToken(secret, "__token__".equals(username) ? null : username);
+			return this.requireToken(ctx, secret, "__token__".equals(username) ? null : username);
 		}
 		
 		String cacheKey = "basic:" + BlobStore.sha256Hex(decoded);
@@ -214,18 +220,21 @@ public class AuthService {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
 		Principal principal = new Principal(user.username(), user.admin(), null);
-		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null));
+		// Password principals carry no token, the empty token id is never read (the basic cache key is separate)
+		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null, ""));
 		return principal;
 	}
 	
-	private @NonNull Principal requireToken(@NonNull String secret, @Nullable String expectedUser) throws SqlException {
+	private @NonNull Principal requireToken(@NonNull Context ctx, @NonNull String secret, @Nullable String expectedUser) throws SqlException {
 		String cacheKey = "token:" + UserService.hashToken(secret);
 		CacheEntry cached = this.cache.get(cacheKey);
 		Principal principal;
+		String tokenId;
 		// Re-check the token expiry on a cache hit so a token that expires within the cache window stops working
 		if (cached != null && cached.expiresAt() > System.currentTimeMillis()
 			&& (cached.tokenExpiresAt() == null || cached.tokenExpiresAt().isAfter(Instant.now()))) {
 			principal = cached.principal();
+			tokenId = cached.tokenId();
 		} else {
 			TokenEntity token = this.userService.findTokenBySecret(secret);
 			if (token == null || (token.expiresAt() != null && token.expiresAt().isBefore(Instant.now()))) {
@@ -237,16 +246,19 @@ public class AuthService {
 			}
 			AccessLevel level = Objects.requireNonNullElse(AccessLevel.parse(token.level()), AccessLevel.READ);
 			principal = new Principal(user.username(), user.admin(), level);
+			tokenId = token.id();
 			// Never cache a token past its expiry: the read path re-checks tokenExpiresAt on every hit so a token
 			// that expires within the cache window stops working immediately.
-			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt()));
+			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt(), token.id()));
 		}
-		
+
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
+		// Enforce the token ip allowlist and rate limit on every request (also on cache hits), and record the usage
+		this.tokenUsage.enforceAndRecord(tokenId, Requests.clientIp(ctx, this.config));
 		return principal;
 	}
-	
-	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant tokenExpiresAt) {}
+
+	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant tokenExpiresAt, @NonNull String tokenId) {}
 }

@@ -129,7 +129,7 @@ export const api = {
 	deletePermission: (repository: string, username: string) => request<void>('DELETE', `/api/permissions${query({ repository, username })}`),
 
 	tokens: (username?: string) => request<Token[]>('GET', `/api/tokens${query({ username })}`),
-	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number }) => request<Token>('POST', '/api/tokens', body),
+	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number; allowedIps?: string; rateLimitPerMinute?: number }) => request<Token>('POST', '/api/tokens', body),
 	deleteToken: (id: string) => request<void>('DELETE', `/api/tokens/${enc(id)}`),
 };
 

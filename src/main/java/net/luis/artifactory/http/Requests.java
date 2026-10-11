@@ -32,6 +32,19 @@ public final class Requests {
 		return proto + "://" + host + (prefix == null ? "" : prefix.replaceAll("/+$", ""));
 	}
 	
+	/**
+	 * Resolves the client ip of a request, honoring {@code X-Forwarded-For} only when the deployment trusts the proxy.<br>
+	 */
+	public static @NonNull String clientIp(@NonNull Context ctx, @NonNull ServerConfig config) {
+		if (config.trustProxy()) {
+			String forwarded = firstHeaderValue(ctx.header("X-Forwarded-For"));
+			if (forwarded != null) {
+				return forwarded;
+			}
+		}
+		return ctx.ip();
+	}
+
 	private static @Nullable String firstHeaderValue(@Nullable String value) {
 		if (value == null || value.isBlank()) {
 			return null;

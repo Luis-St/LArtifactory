@@ -137,7 +137,9 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 - Users authenticate with their password (basic auth) or with tokens.
 - Tokens are created with `POST /api/tokens` and can be used as password (basic auth, any user name or `__token__`),
   as bearer token (npm), as `X-NuGet-ApiKey` (NuGet) or as raw `Authorization` header (Cargo).
-  A token can be limited to a lower access level than its user and can expire.
+  A token can be limited to a lower access level than its user and can expire. Tokens may additionally be restricted
+  to an IP allowlist (`allowedIps`, a comma or whitespace separated list of IPs or CIDR ranges) and to a per minute
+  request rate limit (`rateLimitPerMinute`); the server records when and from which IP each token was last used.
 - Access levels per repository: `READ` (download), `WRITE` (publish, tags, yank, unlist) and `DELETE` (delete, unpublish).
   Permissions are granted per repository or for all repositories with `*`. Administrators have full access.
 - The management api (`/api/*`) requires authenticating with the user password (basic auth); tokens (including an

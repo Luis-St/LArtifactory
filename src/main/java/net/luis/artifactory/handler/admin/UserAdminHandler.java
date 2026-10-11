@@ -231,7 +231,9 @@ public class UserAdminHandler {
 	public void listTokens(@NonNull Context ctx) throws Exception {
 		Principal principal = this.services.auth().requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		String username = this.targetUser(principal, ctx.queryParam("username"));
-		ctx.json(this.services.users().listTokens(username).stream().map(token -> TokenResponse.of(token, null)).toList());
+		List<TokenEntity> tokens = this.services.users().listTokens(username);
+		Map<String, TokenMetaEntity> meta = this.services.users().tokenMeta(tokens.stream().map(TokenEntity::id).toList());
+		ctx.json(tokens.stream().map(token -> TokenResponse.of(token, meta.get(token.id()), null)).toList());
 	}
 	
 	@OpenApi(
@@ -260,9 +262,21 @@ public class UserAdminHandler {
 		}
 		Instant expiresAt = request.expiresInDays() == null || request.expiresInDays() <= 0 ? null : Instant.now().plus(request.expiresInDays(), ChronoUnit.DAYS);
 		String name = request.name() == null || request.name().isBlank() ? "token" : request.name().strip();
-		
-		UserService.CreatedToken token = this.services.users().createToken(username, name.length() > 128 ? name.substring(0, 128) : name, level, expiresAt);
-		ctx.status(201).json(TokenResponse.of(token.token(), token.secret()));
+
+		String allowedIps = request.allowedIps() == null || request.allowedIps().isBlank() ? null : request.allowedIps().strip();
+		if (allowedIps != null) {
+			if (allowedIps.length() > 2048) {
+				throw HttpError.badRequest("Allowed IPs must have at most 2048 characters");
+			}
+			if (!TokenUsageService.validAllowList(allowedIps)) {
+				throw HttpError.badRequest("Allowed IPs must be a comma or whitespace separated list of IPs or CIDR ranges");
+			}
+		}
+		long rateLimit = request.rateLimitPerMinute() == null || request.rateLimitPerMinute() <= 0 ? 0 : request.rateLimitPerMinute();
+
+		UserService.CreatedToken token = this.services.users().createToken(username, name.length() > 128 ? name.substring(0, 128) : name, level, expiresAt, allowedIps, rateLimit);
+		TokenMetaEntity meta = new TokenMetaEntity(token.token().id(), allowedIps, rateLimit, null, null);
+		ctx.status(201).json(TokenResponse.of(token.token(), meta, token.secret()));
 	}
 	
 	@OpenApi(
@@ -281,6 +295,7 @@ public class UserAdminHandler {
 			throw HttpError.notFound("No such token");
 		}
 		this.services.users().deleteToken(token.id());
+		this.services.tokenUsage().invalidate(token.id());
 		this.services.auth().invalidateCache();
 		ctx.status(204);
 	}

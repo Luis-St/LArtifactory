@@ -28,6 +28,15 @@ public final class Tables {
 	public static final SqlColumn<TokenEntity, Instant> TOKEN_CREATED_AT = TOKENS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenEntity::createdAt, SqlColumnBuilder::notNull);
 	public static final SqlColumn<TokenEntity, Instant> TOKEN_EXPIRES_AT = TOKENS.column("expires_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenEntity::expiresAt);
 	//endregion
+
+	//region Token metadata (settings and usage, keyed by token id)
+	public static final SqlTable<TokenMetaEntity> TOKEN_META = SqlTable.create(TokenMetaEntity.class, "token_meta");
+	public static final SqlColumn<TokenMetaEntity, String> TOKEN_META_ID = TOKEN_META.column("token_id", SqlTypes.STRING.configure(SqlParameter.length(36)), TokenMetaEntity::tokenId, col -> col.primaryKey().notNull());
+	public static final SqlColumn<TokenMetaEntity, String> TOKEN_META_ALLOWED_IPS = TOKEN_META.column("allowed_ips", SqlTypes.TEXT, TokenMetaEntity::allowedIps);
+	public static final SqlColumn<TokenMetaEntity, Long> TOKEN_META_RATE_LIMIT = TOKEN_META.column("rate_limit", SqlTypes.LONG, TokenMetaEntity::rateLimit, SqlColumnBuilder::notNull);
+	public static final SqlColumn<TokenMetaEntity, Instant> TOKEN_META_LAST_USED_AT = TOKEN_META.column("last_used_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenMetaEntity::lastUsedAt);
+	public static final SqlColumn<TokenMetaEntity, String> TOKEN_META_LAST_USED_IP = TOKEN_META.column("last_used_ip", SqlTypes.STRING.configure(SqlParameter.length(64)), TokenMetaEntity::lastUsedIp);
+	//endregion
 	
 	//region Repositories
 	public static final SqlTable<RepositoryEntity> REPOSITORIES = SqlTable.create(RepositoryEntity.class, "repositories");
@@ -86,7 +95,7 @@ public final class Tables {
 	public static final SqlCompositePrimaryKey<DistTagEntity> TAG_PK = DIST_TAGS.compositePrimaryKey(TAG_REPOSITORY, TAG_PACKAGE, TAG_NAME);
 	//endregion
 	
-	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS);
+	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, TOKEN_META, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS);
 	
 	private Tables() {}
 }

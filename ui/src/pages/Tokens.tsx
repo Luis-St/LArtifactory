@@ -38,7 +38,7 @@ export function Tokens() {
 			{tokens.data && (tokens.data.length === 0 ? <Empty title="No tokens">Create a token to use with your package manager.</Empty> : (
 				<div className="table-wrap">
 					<table className="table">
-						<thead><tr><th>Name</th><th>Level</th><th>Created</th><th>Expires</th><th /></tr></thead>
+						<thead><tr><th>Name</th><th>Level</th><th>Restrictions</th><th>Last used</th><th>Created</th><th>Expires</th><th /></tr></thead>
 						<tbody>
 							{tokens.data.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(token => {
 								const expired = token.expiresAt !== null && token.expiresAt < now;
@@ -46,6 +46,16 @@ export function Tokens() {
 									<tr key={token.id}>
 										<td><strong>{token.name}</strong> <span className="muted small mono">{token.id.substring(0, 8)}</span></td>
 										<td><Badge tone={token.level === 'DELETE' ? 'danger' : token.level === 'WRITE' ? 'warning' : 'neutral'}>{token.level}</Badge></td>
+										<td className="small">
+											{token.allowedIps && <div title={token.allowedIps}>IP allowlist</div>}
+											{token.rateLimit > 0 && <div className="muted">{token.rateLimit}/min</div>}
+											{!token.allowedIps && token.rateLimit === 0 && <span className="muted">None</span>}
+										</td>
+										<td className="muted small">
+											{token.lastUsedAt
+												? <span title={`${formatDate(token.lastUsedAt)}${token.lastUsedIp ? ` from ${token.lastUsedIp}` : ''}`}>{formatRelative(token.lastUsedAt)}</span>
+												: <span className="muted">Never</span>}
+										</td>
 										<td className="muted" title={formatDate(token.createdAt)}>{formatRelative(token.createdAt)}</td>
 										<td>{token.expiresAt ? (expired ? <Badge tone="danger">expired</Badge> : <span className="muted" title={formatDate(token.expiresAt)}>{formatRelative(token.expiresAt)}</span>) : <span className="muted">Never</span>}</td>
 										<td className="actions"><Button small variant="ghost" className="danger-text" onClick={() => setRevoking(token)}>Revoke</Button></td>
@@ -93,6 +103,8 @@ function CreateTokenDialog({ owner, maxLevel, onClose, onCreated }: { owner: str
 	const levels = ACCESS_LEVELS.slice(0, ACCESS_LEVELS.indexOf(maxLevel) + 1);
 	const [level, setLevel] = useState<AccessLevel>(levels.includes('WRITE') ? 'WRITE' : 'READ');
 	const [expires, setExpires] = useState('90');
+	const [allowedIps, setAllowedIps] = useState('');
+	const [rateLimit, setRateLimit] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 
@@ -101,7 +113,14 @@ function CreateTokenDialog({ owner, maxLevel, onClose, onCreated }: { owner: str
 		setBusy(true);
 		setError(undefined);
 		try {
-			onCreated(await api.createToken({ name: name.trim(), username: owner, level, expiresInDays: expires ? Number(expires) : undefined }));
+			onCreated(await api.createToken({
+				name: name.trim(),
+				username: owner,
+				level,
+				expiresInDays: expires ? Number(expires) : undefined,
+				allowedIps: allowedIps.trim() || undefined,
+				rateLimitPerMinute: rateLimit.trim() ? Number(rateLimit) : undefined,
+			}));
 		} catch (e) {
 			setError(errorText(e));
 			setBusy(false);
@@ -127,6 +146,12 @@ function CreateTokenDialog({ owner, maxLevel, onClose, onCreated }: { owner: str
 						<option value="365">1 year</option>
 						<option value="">Never</option>
 					</select>
+				</Field>
+				<Field label="Allowed IPs" hint="Optional comma/space separated IPs or CIDR ranges, e.g. 10.0.0.0/8 203.0.113.5">
+					<input value={allowedIps} onChange={event => setAllowedIps(event.target.value)} placeholder="Any address" maxLength={2048} />
+				</Field>
+				<Field label="Rate limit" hint="Optional maximum requests per minute, empty or 0 means unlimited">
+					<input type="number" min={0} value={rateLimit} onChange={event => setRateLimit(event.target.value)} placeholder="Unlimited" />
 				</Field>
 				{error && <ErrorBox error={error} />}
 				<div className="modal-footer">

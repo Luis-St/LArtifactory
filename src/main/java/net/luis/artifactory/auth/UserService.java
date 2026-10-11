@@ -63,7 +63,11 @@ public class UserService {
 	}
 	
 	public void delete(@NonNull String username) throws SqlException {
+		List<TokenEntity> tokens = this.database.from(TOKENS).select().where(Sql.equalTo(TOKEN_USERNAME, username)).fetch();
 		this.database.inTransaction(transaction -> {
+			for (TokenEntity token : tokens) {
+				transaction.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, token.id())).execute();
+			}
 			transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_USERNAME, username)).execute();
 			transaction.from(PERMISSIONS).delete().where(Sql.equalTo(PERMISSION_USERNAME, username)).execute();
 			return transaction.from(USERS).delete().where(Sql.equalTo(USER_NAME, username)).execute();
@@ -138,19 +142,64 @@ public class UserService {
 	 * Creates a new token and returns the plain secret, the secret is not stored and can not be retrieved later.<br>
 	 */
 	public @NonNull CreatedToken createToken(@NonNull String username, @NonNull String name, @NonNull AccessLevel level, @Nullable Instant expiresAt) throws SqlException {
+		return this.createToken(username, name, level, expiresAt, null, 0);
+	}
+
+	/**
+	 * Creates a new token together with its {@link TokenMetaEntity settings} (ip allowlist and rate limit) atomically.<br>
+	 */
+	public @NonNull CreatedToken createToken(@NonNull String username, @NonNull String name, @NonNull AccessLevel level, @Nullable Instant expiresAt, @Nullable String allowedIps, long rateLimit) throws SqlException {
 		String secret = "lat_" + PasswordHasher.randomSecret(32);
 		TokenEntity token = new TokenEntity(UUID.randomUUID().toString(), username, name, hashToken(secret), level.name(), Instant.now(), expiresAt);
-		this.database.from(TOKENS).insert(token).execute();
+		TokenMetaEntity meta = new TokenMetaEntity(token.id(), allowedIps, Math.max(0, rateLimit), null, null);
+		this.database.inTransaction(transaction -> {
+			transaction.from(TOKENS).insert(token).execute();
+			return transaction.from(TOKEN_META).insert(meta).execute();
+		});
 		return new CreatedToken(token, secret);
 	}
-	
+
 	public int deleteToken(@NonNull String id) throws SqlException {
-		return this.database.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
+		return this.database.inTransaction(transaction -> {
+			transaction.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, id)).execute();
+			return transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
+		});
 	}
-	
+
 	public int deleteTokenBySecret(@NonNull String secret) throws SqlException {
-		return this.database.from(TOKENS).delete().where(Sql.equalTo(TOKEN_HASH, hashToken(secret))).execute();
+		TokenEntity token = this.findTokenBySecret(secret);
+		if (token == null) {
+			return 0;
+		}
+		return this.deleteToken(token.id());
 	}
+
+	//region Token metadata
+	public @Nullable TokenMetaEntity getTokenMeta(@NonNull String id) throws SqlException {
+		return this.database.from(TOKEN_META).select().where(Sql.equalTo(TOKEN_META_ID, id)).fetchOneOrNull();
+	}
+
+	public @NonNull Map<String, TokenMetaEntity> tokenMeta(@NonNull Collection<String> ids) throws SqlException {
+		Map<String, TokenMetaEntity> result = new HashMap<>();
+		for (String id : ids) {
+			TokenMetaEntity meta = this.getTokenMeta(id);
+			if (meta != null) {
+				result.put(id, meta);
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * Records that a token was used, replacing the previous usage row for the token.<br>
+	 */
+	public void recordTokenUsage(@NonNull String id, @NonNull Instant at, @Nullable String ip) throws SqlException {
+		this.database.inTransaction(transaction -> {
+			transaction.from(TOKEN_META).update().set(TOKEN_META_LAST_USED_AT, at).where(Sql.equalTo(TOKEN_META_ID, id)).execute();
+			return transaction.from(TOKEN_META).update().set(TOKEN_META_LAST_USED_IP, ip).where(Sql.equalTo(TOKEN_META_ID, id)).execute();
+		});
+	}
+	//endregion
 	
 	public static @NonNull String hashToken(@NonNull String secret) {
 		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
