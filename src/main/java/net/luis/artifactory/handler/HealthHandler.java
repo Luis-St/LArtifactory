@@ -17,22 +17,21 @@ public class HealthHandler {
 	}
 	
 	@OpenApi(
-		summary = "Health check",
+		summary = "Health check, responds with 503 if the database is unreachable",
 		operationId = "healthCheck",
 		path = "/health",
 		methods = HttpMethod.GET,
 		tags = "Health",
-		responses = @OpenApiResponse(
-			status = "200",
-			content = @OpenApiContent(from = HealthResponse.class)
-		)
+		responses = {
+			@OpenApiResponse(status = "200", content = @OpenApiContent(from = HealthResponse.class)),
+			@OpenApiResponse(status = "503", content = @OpenApiContent(from = HealthResponse.class))
+		}
 	)
 	public void health(@NonNull Context ctx) {
 		Objects.requireNonNull(ctx, "Context must not be null");
 		
+		// The server can not serve anything without the database, so report it as unavailable for load balancers and orchestrators
 		boolean dbHealthy = this.databaseProvider.isHealthy();
-		String dbStatus = dbHealthy ? "UP" : "DOWN";
-		String overallStatus = dbHealthy ? "UP" : "DEGRADED";
-		ctx.json(new HealthResponse(overallStatus, dbStatus));
+		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN"));
 	}
 }

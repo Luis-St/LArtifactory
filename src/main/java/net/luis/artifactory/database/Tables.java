@@ -10,15 +10,12 @@ import java.util.List;
 
 public final class Tables {
 	
-	//region Users
 	public static final SqlTable<UserEntity> USERS = SqlTable.create(UserEntity.class, "users");
 	public static final SqlColumn<UserEntity, String> USER_NAME = USERS.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), UserEntity::username, col -> col.primaryKey().notNull());
 	public static final SqlColumn<UserEntity, String> USER_PASSWORD_HASH = USERS.column("password_hash", SqlTypes.STRING.configure(SqlParameter.length(256)), UserEntity::passwordHash, SqlColumnBuilder::notNull);
 	public static final SqlColumn<UserEntity, Boolean> USER_ADMIN = USERS.column("admin", SqlTypes.BOOLEAN, UserEntity::admin, SqlColumnBuilder::notNull);
 	public static final SqlColumn<UserEntity, Instant> USER_CREATED_AT = USERS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), UserEntity::createdAt, SqlColumnBuilder::notNull);
-	//endregion
 	
-	//region Tokens
 	public static final SqlTable<TokenEntity> TOKENS = SqlTable.create(TokenEntity.class, "tokens");
 	public static final SqlColumn<TokenEntity, String> TOKEN_ID = TOKENS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), TokenEntity::id, col -> col.primaryKey().notNull());
 	public static final SqlColumn<TokenEntity, String> TOKEN_USERNAME = TOKENS.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), TokenEntity::username, SqlColumnBuilder::notNull);
@@ -27,9 +24,14 @@ public final class Tables {
 	public static final SqlColumn<TokenEntity, String> TOKEN_LEVEL = TOKENS.column("level", SqlTypes.STRING.configure(SqlParameter.length(16)), TokenEntity::level, SqlColumnBuilder::notNull);
 	public static final SqlColumn<TokenEntity, Instant> TOKEN_CREATED_AT = TOKENS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenEntity::createdAt, SqlColumnBuilder::notNull);
 	public static final SqlColumn<TokenEntity, Instant> TOKEN_EXPIRES_AT = TOKENS.column("expires_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenEntity::expiresAt);
-	//endregion
 	
-	//region Repositories
+	public static final SqlTable<SessionEntity> SESSIONS = SqlTable.create(SessionEntity.class, "sessions");
+	public static final SqlColumn<SessionEntity, String> SESSION_ID = SESSIONS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), SessionEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<SessionEntity, String> SESSION_USERNAME = SESSIONS.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), SessionEntity::username, SqlColumnBuilder::notNull);
+	public static final SqlColumn<SessionEntity, String> SESSION_HASH = SESSIONS.column("secret_hash", SqlTypes.STRING.configure(SqlParameter.length(64)), SessionEntity::secretHash, col -> col.notNull().unique());
+	public static final SqlColumn<SessionEntity, Instant> SESSION_CREATED_AT = SESSIONS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SessionEntity::createdAt, SqlColumnBuilder::notNull);
+	public static final SqlColumn<SessionEntity, Instant> SESSION_EXPIRES_AT = SESSIONS.column("expires_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SessionEntity::expiresAt, SqlColumnBuilder::notNull);
+	
 	public static final SqlTable<RepositoryEntity> REPOSITORIES = SqlTable.create(RepositoryEntity.class, "repositories");
 	public static final SqlColumn<RepositoryEntity, String> REPOSITORY_NAME = REPOSITORIES.column("name", SqlTypes.STRING.configure(SqlParameter.length(64)), RepositoryEntity::name, col -> col.primaryKey().notNull());
 	public static final SqlColumn<RepositoryEntity, String> REPOSITORY_TYPE = REPOSITORIES.column("type", SqlTypes.STRING.configure(SqlParameter.length(16)), RepositoryEntity::type, SqlColumnBuilder::notNull);
@@ -37,17 +39,13 @@ public final class Tables {
 	public static final SqlColumn<RepositoryEntity, Boolean> REPOSITORY_PUBLIC_READ = REPOSITORIES.column("public_read", SqlTypes.BOOLEAN, RepositoryEntity::publicRead, SqlColumnBuilder::notNull);
 	public static final SqlColumn<RepositoryEntity, Boolean> REPOSITORY_ALLOW_REDEPLOY = REPOSITORIES.column("allow_redeploy", SqlTypes.BOOLEAN, RepositoryEntity::allowRedeploy, SqlColumnBuilder::notNull);
 	public static final SqlColumn<RepositoryEntity, Instant> REPOSITORY_CREATED_AT = REPOSITORIES.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), RepositoryEntity::createdAt, SqlColumnBuilder::notNull);
-	//endregion
 	
-	//region Permissions
 	public static final SqlTable<PermissionEntity> PERMISSIONS = SqlTable.create(PermissionEntity.class, "permissions");
 	public static final SqlColumn<PermissionEntity, String> PERMISSION_REPOSITORY = PERMISSIONS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), PermissionEntity::repository, col -> col.primaryKey().notNull());
 	public static final SqlColumn<PermissionEntity, String> PERMISSION_USERNAME = PERMISSIONS.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), PermissionEntity::username, col -> col.primaryKey().notNull());
 	public static final SqlColumn<PermissionEntity, String> PERMISSION_LEVEL = PERMISSIONS.column("level", SqlTypes.STRING.configure(SqlParameter.length(16)), PermissionEntity::level, SqlColumnBuilder::notNull);
 	public static final SqlCompositePrimaryKey<PermissionEntity> PERMISSION_PK = PERMISSIONS.compositePrimaryKey(PERMISSION_REPOSITORY, PERMISSION_USERNAME);
-	//endregion
 	
-	//region Files
 	public static final SqlTable<FileEntity> FILES = SqlTable.create(FileEntity.class, "files");
 	public static final SqlColumn<FileEntity, String> FILE_REPOSITORY = FILES.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), FileEntity::repository, col -> col.primaryKey().notNull());
 	public static final SqlColumn<FileEntity, String> FILE_PATH = FILES.column("path", SqlTypes.STRING.configure(SqlParameter.length(1024)), FileEntity::path, col -> col.primaryKey().notNull());
@@ -63,9 +61,7 @@ public final class Tables {
 	public static final SqlColumn<FileEntity, Instant> FILE_CREATED_AT = FILES.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), FileEntity::createdAt, SqlColumnBuilder::notNull);
 	public static final SqlColumn<FileEntity, String> FILE_CREATED_BY = FILES.column("created_by", SqlTypes.STRING.configure(SqlParameter.length(128)), FileEntity::createdBy);
 	public static final SqlCompositePrimaryKey<FileEntity> FILE_PK = FILES.compositePrimaryKey(FILE_REPOSITORY, FILE_PATH);
-	//endregion
 	
-	//region Package versions
 	public static final SqlTable<PackageVersionEntity> PACKAGE_VERSIONS = SqlTable.create(PackageVersionEntity.class, "package_versions");
 	public static final SqlColumn<PackageVersionEntity, String> VERSION_REPOSITORY = PACKAGE_VERSIONS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), PackageVersionEntity::repository, col -> col.primaryKey().notNull());
 	public static final SqlColumn<PackageVersionEntity, String> VERSION_PACKAGE = PACKAGE_VERSIONS.column("package_name", SqlTypes.STRING.configure(SqlParameter.length(256)), PackageVersionEntity::packageName, col -> col.primaryKey().notNull());
@@ -75,18 +71,19 @@ public final class Tables {
 	public static final SqlColumn<PackageVersionEntity, Instant> VERSION_CREATED_AT = PACKAGE_VERSIONS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), PackageVersionEntity::createdAt, SqlColumnBuilder::notNull);
 	public static final SqlColumn<PackageVersionEntity, String> VERSION_CREATED_BY = PACKAGE_VERSIONS.column("created_by", SqlTypes.STRING.configure(SqlParameter.length(128)), PackageVersionEntity::createdBy);
 	public static final SqlCompositePrimaryKey<PackageVersionEntity> VERSION_PK = PACKAGE_VERSIONS.compositePrimaryKey(VERSION_REPOSITORY, VERSION_PACKAGE, VERSION_VERSION);
-	//endregion
 	
-	//region Dist tags
 	public static final SqlTable<DistTagEntity> DIST_TAGS = SqlTable.create(DistTagEntity.class, "dist_tags");
 	public static final SqlColumn<DistTagEntity, String> TAG_REPOSITORY = DIST_TAGS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), DistTagEntity::repository, col -> col.primaryKey().notNull());
 	public static final SqlColumn<DistTagEntity, String> TAG_PACKAGE = DIST_TAGS.column("package_name", SqlTypes.STRING.configure(SqlParameter.length(256)), DistTagEntity::packageName, col -> col.primaryKey().notNull());
 	public static final SqlColumn<DistTagEntity, String> TAG_NAME = DIST_TAGS.column("tag", SqlTypes.STRING.configure(SqlParameter.length(128)), DistTagEntity::tag, col -> col.primaryKey().notNull());
 	public static final SqlColumn<DistTagEntity, String> TAG_VERSION = DIST_TAGS.column("version", SqlTypes.STRING.configure(SqlParameter.length(128)), DistTagEntity::version, SqlColumnBuilder::notNull);
 	public static final SqlCompositePrimaryKey<DistTagEntity> TAG_PK = DIST_TAGS.compositePrimaryKey(TAG_REPOSITORY, TAG_PACKAGE, TAG_NAME);
-	//endregion
 	
-	public static final List<SqlTable<?>> ALL = List.of(USERS, TOKENS, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS);
+	/**
+	 * The tables of the initial schema, they are created if missing on startup.<br>
+	 * Every later schema change (new tables, columns, indexes) is a migration in {@link Migrations}.<br>
+	 */
+	public static final List<SqlTable<?>> BASELINE = List.of(USERS, TOKENS, REPOSITORIES, PERMISSIONS, FILES, PACKAGE_VERSIONS, DIST_TAGS);
 	
 	private Tables() {}
 }

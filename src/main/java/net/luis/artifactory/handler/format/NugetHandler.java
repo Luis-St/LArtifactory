@@ -5,6 +5,7 @@ import io.javalin.http.UploadedFile;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
+import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
@@ -12,6 +13,7 @@ import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
 import net.luis.artifactory.util.Versions;
+import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.w3c.dom.*;
@@ -35,6 +37,7 @@ import java.util.zip.ZipFile;
 public class NugetHandler extends FormatHandler {
 
 	private static final int MAX_NUSPEC_SIZE = 8 * 1024 * 1024;
+	private static final int MAX_TAKE = 1000;
 	private static final Pattern PACKAGE_ID = Pattern.compile("\\w+(?:[.\\-_]\\w+)*");
 
 	public NugetHandler(@NonNull Services services) {
@@ -98,7 +101,6 @@ public class NugetHandler extends FormatHandler {
 		}
 	}
 	
-	//region Read
 	private void serviceIndex(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		String base = this.repositoryUrl(ctx, repository);
 		ObjectNode root = Json.object();
@@ -224,14 +226,15 @@ public class NugetHandler extends FormatHandler {
 	private void search(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		String query = Objects.requireNonNullElse(ctx.queryParam("q"), "").toLowerCase(Locale.ROOT).strip();
 		int skip = parseInt(ctx.queryParam("skip"), 0);
-		int take = parseInt(ctx.queryParam("take"), 20);
+		int take = Math.min(parseInt(ctx.queryParam("take"), 20), MAX_TAKE);
 		boolean prerelease = Boolean.parseBoolean(ctx.queryParam("prerelease"));
 		String base = this.repositoryUrl(ctx, repository);
 		
+		// Versions are loaded one package at a time, only the requested page is kept in memory
 		List<ObjectNode> results = new ArrayList<>();
-		for (Map.Entry<String, List<PackageVersionEntity>> entry : this.services.packages().grouped(repository.name()).entrySet()) {
-			String lowerId = entry.getKey();
-			List<PackageVersionEntity> versions = entry.getValue().stream()
+		int totalHits = 0;
+		for (String lowerId : this.services.packages().packageNames(repository.name())) {
+			List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), lowerId).stream()
 				.filter(version -> Json.parseObject(version.metadata()).path("listed").asBoolean(true))
 				.filter(version -> prerelease || !Versions.isPrerelease(version.version()))
 				.sorted(Comparator.comparing(PackageVersionEntity::version, Versions.SEMVER))
@@ -243,6 +246,9 @@ public class NugetHandler extends FormatHandler {
 			String id = Json.text(latest, "id", lowerId);
 			String description = Json.text(latest, "description", "");
 			if (!query.isEmpty() && !id.toLowerCase(Locale.ROOT).contains(query) && !description.toLowerCase(Locale.ROOT).contains(query)) {
+				continue;
+			}
+			if (totalHits++ < skip || results.size() >= take) {
 				continue;
 			}
 			
@@ -270,9 +276,9 @@ public class NugetHandler extends FormatHandler {
 		}
 		
 		ObjectNode root = Json.object();
-		root.put("totalHits", results.size());
+		root.put("totalHits", totalHits);
 		ArrayNode data = root.putArray("data");
-		results.stream().skip(skip).limit(take).forEach(data::add);
+		results.forEach(data::add);
 		json(ctx, 200, root);
 	}
 	
@@ -284,19 +290,20 @@ public class NugetHandler extends FormatHandler {
 		if (id != null) {
 			this.sortedVersions(repository, id.toLowerCase(Locale.ROOT)).forEach(version -> data.add(version.version()));
 		} else {
-			for (Map.Entry<String, List<PackageVersionEntity>> entry : this.services.packages().grouped(repository.name()).entrySet()) {
-				String packageId = Json.text(Json.parseObject(entry.getValue().getLast().metadata()), "id", entry.getKey());
-				if (packageId.toLowerCase(Locale.ROOT).contains(query)) {
-					data.add(packageId);
-				}
+			int skip = parseInt(ctx.queryParam("skip"), 0);
+			int take = Math.min(parseInt(ctx.queryParam("take"), 20), MAX_TAKE);
+			for (String lowerId : this.services.packages().packageNames(repository.name(), query, skip, take)) {
+				List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), lowerId);
+				data.add(versions.isEmpty() ? lowerId : Json.text(Json.parseObject(versions.getLast().metadata()), "id", lowerId));
 			}
+			root.put("totalHits", this.services.packages().countPackages(repository.name(), query));
+			json(ctx, 200, root);
+			return;
 		}
 		root.put("totalHits", data.size());
 		json(ctx, 200, root);
 	}
-	//endregion
 	
-	//region Write
 	private void push(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		
@@ -326,20 +333,29 @@ public class NugetHandler extends FormatHandler {
 		String lowerId = nuspec.id().toLowerCase(Locale.ROOT);
 		String version = normalize(nuspec.version());
 		String lowerVersion = version.toLowerCase(Locale.ROOT);
-		if (this.services.packages().get(repository.name(), lowerId, lowerVersion) != null) {
-			if (!repository.allowRedeploy()) {
-				this.services.artifacts().releaseBlobs(List.of(PathRepositoryHandler.fakeFile(repository, blob)));
-				throw HttpError.conflict("Version " + version + " already exists; releases are immutable");
-			}
-			this.services.packages().delete(repository.name(), lowerId, lowerVersion);
-		}
-		
 		ObjectNode metadata = nuspec.metadata();
 		metadata.put("version", version);
 		metadata.put("listed", true);
 		String path = lowerId + "/" + lowerVersion + "/" + lowerId + "." + lowerVersion + ".nupkg";
-		this.services.artifacts().put(repository.name(), path, blob, "application/octet-stream", lowerId, lowerVersion, null, username(principal));
-		this.services.packages().create(repository.name(), lowerId, lowerVersion, Json.write(metadata), username(principal));
+		
+		try {
+			this.services.artifacts().transaction(work -> {
+				if (this.services.packages().get(work, repository.name(), lowerId, lowerVersion) != null) {
+					if (!repository.allowRedeploy()) {
+						throw HttpError.conflict("Version " + version + " already exists; releases are immutable");
+					}
+					this.services.packages().delete(work, repository.name(), lowerId, lowerVersion);
+				}
+				this.services.artifacts().put(work, repository.name(), path, blob, "application/octet-stream", lowerId, lowerVersion, null, username(principal));
+				return this.services.packages().create(work, repository.name(), lowerId, lowerVersion, Json.write(metadata), username(principal));
+			});
+		} catch (HttpError | SqlException e) {
+			this.services.artifacts().releaseBlobs(List.of(PathRepositoryHandler.fakeFile(repository, blob)));
+			if (SqlErrors.isUniqueViolation(e)) {
+				throw HttpError.conflict("Version " + version + " was pushed concurrently");
+			}
+			throw e;
+		}
 		ctx.status(201);
 	}
 	
@@ -353,13 +369,10 @@ public class NugetHandler extends FormatHandler {
 		}
 		ObjectNode metadata = Json.parseObject(entity.metadata());
 		metadata.put("listed", listed);
-		this.services.packages().updateMetadata(repository.name(), lowerId, lowerVersion, Json.write(metadata));
-		this.services.packages().setYanked(repository.name(), lowerId, lowerVersion, !listed);
+		this.services.packages().setYanked(repository.name(), lowerId, lowerVersion, !listed, Json.write(metadata));
 		ctx.status(listed ? 200 : 204);
 	}
-	//endregion
 	
-	//region Nuspec
 	private record Nuspec(@NonNull String id, @NonNull String version, @NonNull ObjectNode metadata) {}
 	
 	private static @NonNull Nuspec readNuspec(@NonNull File file) throws Exception {
@@ -487,7 +500,6 @@ public class NugetHandler extends FormatHandler {
 		String text = element.getTextContent().strip();
 		return text.isEmpty() ? null : text;
 	}
-	//endregion
 	
 	private static @NonNull String normalize(@NonNull String version) {
 		try {

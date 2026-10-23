@@ -298,6 +298,22 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "description" : "Number of files to skip",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "Maximum number of files (default 1000, at most 5000)",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -309,6 +325,15 @@
                   "items" : {
                     "$ref" : "#/components/schemas/FileResponse"
                   }
+                }
+              }
+            },
+            "headers" : {
+              "X-Total-Count" : {
+                "description" : "Total number of matching files",
+                "schema" : {
+                  "type" : "integer",
+                  "format" : "int64"
                 }
               }
             }
@@ -335,6 +360,22 @@
           "schema" : {
             "type" : "string"
           }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "description" : "Number of packages to skip",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "Maximum number of packages (default 100, at most 500)",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
         } ],
         "responses" : {
           "200" : {
@@ -346,6 +387,15 @@
                   "items" : {
                     "$ref" : "#/components/schemas/PackageResponse"
                   }
+                }
+              }
+            },
+            "headers" : {
+              "X-Total-Count" : {
+                "description" : "Total number of matching packages",
+                "schema" : {
+                  "type" : "integer",
+                  "format" : "int64"
                 }
               }
             }
@@ -384,10 +434,61 @@
         }
       }
     },
+    "/api/session" : {
+      "post" : {
+        "tags" : [ "Users" ],
+        "summary" : "Sign in to the web ui with the user password (basic auth), returns a session token for bearer authentication",
+        "operationId" : "createSession",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CreateSessionRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Unauthorized",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429" : {
+            "description" : "Too many failed logins"
+          }
+        }
+      },
+      "delete" : {
+        "tags" : [ "Users" ],
+        "summary" : "Sign out of the web ui, deletes the session of the request",
+        "operationId" : "deleteSession",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        }
+      }
+    },
     "/api/tokens" : {
       "get" : {
         "tags" : [ "Tokens" ],
-        "summary" : "List the tokens of the caller (admins may pass a username)",
+        "summary" : "List the tokens of the caller (admins may pass a username), requires password authentication",
         "operationId" : "listTokens",
         "parameters" : [ {
           "name" : "username",
@@ -414,7 +515,7 @@
       },
       "post" : {
         "tags" : [ "Tokens" ],
-        "summary" : "Create a token, the secret is only returned once",
+        "summary" : "Create a token, the secret is only returned once, requires password authentication",
         "description" : "Tokens can be used as password (basic auth), bearer token (npm), api key (NuGet) or raw authorization header (Cargo)",
         "operationId" : "createToken",
         "requestBody" : {
@@ -443,7 +544,7 @@
     "/api/tokens/{id}" : {
       "delete" : {
         "tags" : [ "Tokens" ],
-        "summary" : "Revoke a token",
+        "summary" : "Revoke a token, requires password authentication",
         "operationId" : "deleteToken",
         "parameters" : [ {
           "name" : "id",
@@ -575,11 +676,21 @@
     "/health" : {
       "get" : {
         "tags" : [ "Health" ],
-        "summary" : "Health check",
+        "summary" : "Health check, responds with 503 if the database is unreachable",
         "operationId" : "healthCheck",
         "responses" : {
           "200" : {
             "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503" : {
+            "description" : "Service Unavailable",
             "content" : {
               "application/json" : {
                 "schema" : {
@@ -610,6 +721,14 @@
             "type" : "boolean"
           },
           "allowRedeploy" : {
+            "type" : "boolean"
+          }
+        }
+      },
+      "CreateSessionRequest" : {
+        "type" : "object",
+        "properties" : {
+          "remember" : {
             "type" : "boolean"
           }
         }
@@ -840,6 +959,21 @@
           }
         },
         "required" : [ "publicRead", "allowRedeploy" ]
+      },
+      "SessionResponse" : {
+        "type" : "object",
+        "properties" : {
+          "username" : {
+            "type" : "string"
+          },
+          "token" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }
       },
       "TokenResponse" : {
         "type" : "object",

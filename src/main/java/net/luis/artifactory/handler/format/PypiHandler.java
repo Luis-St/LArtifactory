@@ -5,12 +5,14 @@ import io.javalin.http.UploadedFile;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
+import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
+import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.node.*;
@@ -101,7 +103,6 @@ public class PypiHandler extends FormatHandler {
 		return Requests.accepts(ctx, JSON_TYPE);
 	}
 	
-	//region Simple API
 	private void projectList(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		List<String> projects = this.services.packages().packageNames(repository.name());
 		if (wantsJson(ctx)) {
@@ -215,9 +216,7 @@ public class PypiHandler extends FormatHandler {
 	private static @NonNull String fileName(@NonNull FileEntity file) {
 		return file.path().substring(file.path().lastIndexOf('/') + 1);
 	}
-	//endregion
 	
-	//region Upload
 	private void upload(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		if (!ctx.isMultipartFormData()) {
@@ -265,15 +264,29 @@ public class PypiHandler extends FormatHandler {
 		putIfPresent(ctx, fileMetadata, "filetype");
 		putIfPresent(ctx, fileMetadata, "pyversion");
 		putIfPresent(ctx, fileMetadata, "metadata_version");
-		this.services.artifacts().put(repository.name(), path, blob, "application/octet-stream", normalized, version, Json.write(fileMetadata), username(principal));
-		
 		ObjectNode versionMetadata = Json.object();
 		versionMetadata.put("name", name);
 		putIfPresent(ctx, versionMetadata, "summary");
 		putIfPresent(ctx, versionMetadata, "author");
 		putIfPresent(ctx, versionMetadata, "license");
 		putIfPresent(ctx, versionMetadata, "home_page");
-		this.services.packages().upsert(repository.name(), normalized, version, Json.write(versionMetadata), username(principal));
+		
+		try {
+			this.services.artifacts().transaction(work -> {
+				// Checked again inside the transaction, the file may have been uploaded since the check above
+				if (!repository.allowRedeploy() && this.services.artifacts().get(work, repository.name(), path) != null) {
+					throw HttpError.conflict("File already exists: " + fileName);
+				}
+				this.services.artifacts().put(work, repository.name(), path, blob, "application/octet-stream", normalized, version, Json.write(fileMetadata), username(principal));
+				this.services.packages().upsert(work, repository.name(), normalized, version, Json.write(versionMetadata), username(principal));
+				return null;
+			});
+		} catch (SqlException e) {
+			if (SqlErrors.isUniqueViolation(e)) {
+				throw HttpError.conflict("File already exists: " + fileName);
+			}
+			throw e;
+		}
 		text(ctx, 200, "OK");
 	}
 	
@@ -291,5 +304,4 @@ public class PypiHandler extends FormatHandler {
 			node.put(field, value.strip());
 		}
 	}
-	//endregion
 }

@@ -61,6 +61,9 @@ dependencies {
 	// Testing
 	testImplementation(platform("org.junit:junit-bom:6.0.0"))
 	testImplementation("org.junit.jupiter:junit-jupiter")
+	// Integration tests against a real PostgreSQL, skipped when no docker daemon is available
+	testImplementation(libs.testcontainers.postgresql)
+	testImplementation(libs.testcontainers.junit.jupiter)
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

@@ -2,12 +2,14 @@ package net.luis.artifactory.handler.format;
 
 import io.javalin.http.Context;
 import net.luis.artifactory.Services;
+import net.luis.artifactory.database.UnitOfWork;
 import net.luis.artifactory.database.entity.FileEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
 import net.luis.artifactory.util.Versions;
+import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.node.ObjectNode;
@@ -45,8 +47,6 @@ public class MavenHandler extends PathRepositoryHandler {
 		return RepositoryType.MAVEN;
 	}
 	
-	//region Coordinates
-	
 	/**
 	 * Coordinates of an artifact file within the Maven 2 layout.<br>
 	 */
@@ -78,9 +78,7 @@ public class MavenHandler extends PathRepositoryHandler {
 		}
 		return matches ? new Coordinates(groupId, artifactId, version, fileName) : null;
 	}
-	//endregion
 	
-	//region Virtual files
 	@Override
 	protected boolean serveVirtual(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		String checksum = checksumExtension(path);
@@ -285,9 +283,7 @@ public class MavenHandler extends PathRepositoryHandler {
 			.map(SnapshotFile::file)
 			.orElse(null);
 	}
-	//endregion
 	
-	//region Upload
 	@Override
 	protected boolean isMutable(@NonNull String path) {
 		Coordinates coordinates = parseCoordinates(path);
@@ -311,17 +307,18 @@ public class MavenHandler extends PathRepositoryHandler {
 			return;
 		}
 		
-		this.services.artifacts().put(repository.name(), path, blob, contentType(path), coordinates.packageName(), coordinates.version(), null, username);
-		if (this.services.packages().get(repository.name(), coordinates.packageName(), coordinates.version()) == null) {
-			ObjectNode metadata = Json.object();
-			metadata.put("groupId", coordinates.groupId());
-			metadata.put("artifactId", coordinates.artifactId());
-			this.services.packages().upsert(repository.name(), coordinates.packageName(), coordinates.version(), Json.write(metadata), username);
-		}
+		ObjectNode metadata = Json.object();
+		metadata.put("groupId", coordinates.groupId());
+		metadata.put("artifactId", coordinates.artifactId());
+		// Clients upload the files of a version in parallel, the version is created by whichever upload comes first
+		this.services.artifacts().transaction(work -> {
+			this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), coordinates.packageName(), coordinates.version(), null, username);
+			return this.services.packages().ensure(work, repository.name(), coordinates.packageName(), coordinates.version(), Json.write(metadata), username);
+		});
 	}
 	
 	@Override
-	protected void afterDelete(@NonNull RepositoryEntity repository, @NonNull List<FileEntity> deleted) throws Exception {
+	protected void afterDelete(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull List<FileEntity> deleted) throws SqlException {
 		Set<List<String>> versions = new HashSet<>();
 		for (FileEntity file : deleted) {
 			if (file.packageName() != null && file.version() != null) {
@@ -329,10 +326,9 @@ public class MavenHandler extends PathRepositoryHandler {
 			}
 		}
 		for (List<String> version : versions) {
-			if (this.services.artifacts().listByVersion(repository.name(), version.get(0), version.get(1)).isEmpty()) {
-				this.services.packages().delete(repository.name(), version.get(0), version.get(1));
+			if (this.services.artifacts().listByVersion(work, repository.name(), version.get(0), version.get(1)).isEmpty()) {
+				this.services.packages().delete(work, repository.name(), version.get(0), version.get(1));
 			}
 		}
 	}
-	//endregion
 }

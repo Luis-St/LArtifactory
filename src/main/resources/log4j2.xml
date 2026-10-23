@@ -2,32 +2,32 @@
 <Configuration name="RuntimeConfiguration" status="ERROR">
     <Appenders>
         <Console name="ConsoleTrace" target="SYSTEM_OUT">
-            <PatternLayout pattern="%replace{[%d{HH:mm:ss}] [%t] [%marker] [%C:%line/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{] \[]}{]}"/>
+            <PatternLayout pattern="%replace{[%d{yyyy-MM-dd HH:mm:ss.SSS}] [%t] [%marker] [%X{trace_id}] [%C:%line/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{ \[\]}{}"/>
             <LevelMatchFilter level="TRACE" onMatch="ACCEPT" onMismatch="DENY"/>
         </Console>
         <Console name="ConsoleDebug" target="SYSTEM_OUT">
-            <PatternLayout pattern="%replace{[%d{HH:mm:ss}] [%t] [%marker] [%C{1}:%line/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{] \[]}{]}"/>
+            <PatternLayout pattern="%replace{[%d{yyyy-MM-dd HH:mm:ss.SSS}] [%t] [%marker] [%X{trace_id}] [%C{1}:%line/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{ \[\]}{}"/>
             <LevelMatchFilter level="DEBUG" onMatch="ACCEPT" onMismatch="DENY"/>
         </Console>
         <Console name="ConsoleInfo" target="SYSTEM_OUT">
-            <PatternLayout pattern="%replace{[%d{HH:mm:ss}] [%t] [%marker] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{] \[]}{]}"/>
+            <PatternLayout pattern="%replace{[%d{yyyy-MM-dd HH:mm:ss.SSS}] [%t] [%marker] [%X{trace_id}] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{ \[\]}{}"/>
             <LevelMatchFilter level="INFO" onMatch="ACCEPT" onMismatch="DENY"/>
         </Console>
         <Console name="ConsoleWarn" target="SYSTEM_OUT">
-            <PatternLayout pattern="%replace{[%d{HH:mm:ss}] [%t] [%marker] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{] \[]}{]}"/>
+            <PatternLayout pattern="%replace{[%d{yyyy-MM-dd HH:mm:ss.SSS}] [%t] [%marker] [%X{trace_id}] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{ \[\]}{}"/>
             <LevelMatchFilter level="WARN" onMatch="ACCEPT" onMismatch="DENY"/>
         </Console>
         <Console name="ConsoleError" target="SYSTEM_OUT">
-            <PatternLayout pattern="%replace{[%d{HH:mm:ss}] [%t] [%marker] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{] \[]}{]}"/>
+            <PatternLayout pattern="%replace{[%d{yyyy-MM-dd HH:mm:ss.SSS}] [%t] [%marker] [%X{trace_id}] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{ \[\]}{}"/>
             <LevelMatchFilter level="ERROR" onMatch="ACCEPT" onMismatch="DENY"/>
         </Console>
         <Console name="ConsoleFatal" target="SYSTEM_OUT">
-            <PatternLayout pattern="%replace{[%d{HH:mm:ss}] [%t] [%marker] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{] \[]}{]}"/>
+            <PatternLayout pattern="%replace{[%d{yyyy-MM-dd HH:mm:ss.SSS}] [%t] [%marker] [%X{trace_id}] [%C{1}/%level{TRACE=Trace, DEBUG=Debug, INFO=Info, WARN=Warn, ERROR=Error, FATAL=Fatal}] %msg%n%throwable}{ \[\]}{}"/>
             <LevelMatchFilter level="FATAL" onMatch="ACCEPT" onMismatch="DENY"/>
         </Console>
     </Appenders>
     <Loggers>
-        <!-- Application logger always logs; set ARTIFACTORY_LOG_ALL (e.g. to "ALL" or "INFO") to also enable every third-party logger via the Root logger below. -->
+        <!-- Application logger always logs; third-party loggers (Jetty, HikariCP, ...) log warnings and errors, set ARTIFACTORY_LOG_ALL (e.g. to "INFO" or "OFF") to change their level via the Root logger below. -->
         <Logger name="net.luis.artifactory" level="ALL" additivity="false">
             <!--<AppenderRef ref="ConsoleTrace"/>-->
             <!--<AppenderRef ref="ConsoleDebug"/>-->
@@ -36,7 +36,7 @@
             <AppenderRef ref="ConsoleError"/>
             <AppenderRef ref="ConsoleFatal"/>
         </Logger>
-        <Root level="${env:ARTIFACTORY_LOG_ALL:-OFF}">
+        <Root level="${env:ARTIFACTORY_LOG_ALL:-WARN}">
             <!--<AppenderRef ref="ConsoleTrace"/>-->
             <!--<AppenderRef ref="ConsoleDebug"/>-->
             <!--<AppenderRef ref="ConsoleInfo"/>-->

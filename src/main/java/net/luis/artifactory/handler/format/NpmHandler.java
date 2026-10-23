@@ -3,6 +3,8 @@ package net.luis.artifactory.handler.format;
 import io.javalin.http.Context;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.*;
+import net.luis.artifactory.database.SqlErrors;
+import net.luis.artifactory.database.UnitOfWork;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
@@ -12,6 +14,7 @@ import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
 import net.luis.artifactory.util.Versions;
 import org.jspecify.annotations.NonNull;
+import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -19,6 +22,7 @@ import tools.jackson.databind.node.*;
 
 import java.security.MessageDigest;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Pattern;
@@ -31,6 +35,7 @@ public class NpmHandler extends FormatHandler {
 	
 	private static final Pattern NAME = Pattern.compile("(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9._~][a-z0-9._~-]*");
 	private static final Pattern TAG = Pattern.compile("[A-Za-z][A-Za-z0-9._-]*");
+	private static final int MAX_SEARCH_SIZE = 250;
 	
 	public NpmHandler(@NonNull Services services) {
 		super(services);
@@ -118,7 +123,6 @@ public class NpmHandler extends FormatHandler {
 		return result;
 	}
 	
-	//region Special endpoints
 	private void special(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments, @NonNull String method) throws Exception {
 		String first = segments.isEmpty() ? "" : segments.getFirst();
 		switch (first) {
@@ -165,14 +169,17 @@ public class NpmHandler extends FormatHandler {
 			throw HttpError.methodNotAllowed();
 		}
 		
-		JsonNode body = parseBody(this.readBody(ctx));
+		// Parsed before authentication, so only a small body is accepted
+		JsonNode body = parseBody(this.services.bodies().json(ctx));
 		String name = Json.text(body, "name", username);
 		String password = Json.text(body, "password");
-		UserEntity user = this.services.users().get(name);
-		if (password == null || user == null || !this.services.auth().verifyPassword(password, user.passwordHash())) {
+		UserEntity user = password == null ? null : this.services.auth().login(ctx, name, password);
+		if (user == null) {
 			throw npmError(401, "Invalid username or password");
 		}
-		UserService.CreatedToken token = this.services.users().createToken(user.username(), "npm login", AccessLevel.DELETE, null);
+		int days = this.services.config().npmTokenDays();
+		Instant expiresAt = days == 0 ? null : Instant.now().plus(days, ChronoUnit.DAYS);
+		UserService.CreatedToken token = this.services.users().createToken(user.username(), "npm login", AccessLevel.DELETE, expiresAt);
 		ObjectNode root = ok();
 		root.put("id", "org.couchdb.user:" + user.username());
 		root.put("token", token.secret());
@@ -182,19 +189,28 @@ public class NpmHandler extends FormatHandler {
 	private void search(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
 		String text = Objects.requireNonNullElse(ctx.queryParam("text"), "").toLowerCase(Locale.ROOT).strip();
-		int size = parseInt(ctx.queryParam("size"), 20);
+		int size = Math.min(parseInt(ctx.queryParam("size"), 20), MAX_SEARCH_SIZE);
 		int from = parseInt(ctx.queryParam("from"), 0);
 		
-		List<Map.Entry<String, List<PackageVersionEntity>>> matches = new ArrayList<>();
-		for (Map.Entry<String, List<PackageVersionEntity>> entry : this.services.packages().grouped(repository.name()).entrySet()) {
-			if (text.isEmpty() || entry.getKey().contains(text) || this.latestManifest(repository, entry.getKey(), entry.getValue()).toString().toLowerCase(Locale.ROOT).contains(text)) {
-				matches.add(entry);
+		// Versions are loaded one package at a time, only the requested page is kept in memory
+		List<Map.Entry<String, List<PackageVersionEntity>>> page = new ArrayList<>();
+		int total = 0;
+		for (String packageName : this.services.packages().packageNames(repository.name())) {
+			List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), packageName);
+			if (versions.isEmpty()) {
+				continue;
+			}
+			if (text.isEmpty() || packageName.contains(text) || this.latestManifest(repository, packageName, versions).toString().toLowerCase(Locale.ROOT).contains(text)) {
+				if (total >= from && page.size() < size) {
+					page.add(Map.entry(packageName, versions));
+				}
+				total++;
 			}
 		}
 		
 		ObjectNode root = Json.object();
 		ArrayNode objects = root.putArray("objects");
-		for (Map.Entry<String, List<PackageVersionEntity>> entry : matches.stream().skip(from).limit(size).toList()) {
+		for (Map.Entry<String, List<PackageVersionEntity>> entry : page) {
 			JsonNode manifest = this.latestManifest(repository, entry.getKey(), entry.getValue());
 			ObjectNode object = objects.addObject();
 			ObjectNode pkg = object.putObject("package");
@@ -214,7 +230,7 @@ public class NpmHandler extends FormatHandler {
 			score.putObject("detail").put("quality", 1.0).put("popularity", 1.0).put("maintenance", 1.0);
 			object.put("searchScore", 1.0);
 		}
-		root.put("total", matches.size());
+		root.put("total", total);
 		root.put("time", DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
 		json(ctx, 200, root);
 	}
@@ -252,7 +268,7 @@ public class NpmHandler extends FormatHandler {
 				if (!TAG.matcher(tag).matches()) {
 					throw npmError(400, "Invalid tag name: " + tag);
 				}
-				JsonNode body = parseBody(this.readBody(ctx));
+				JsonNode body = parseBody(this.services.bodies().json(ctx));
 				String version = body.isString() ? body.asString() : null;
 				if (version == null || this.services.packages().get(repository.name(), name, version) == null) {
 					throw npmError(404, "Version not found: " + version);
@@ -269,9 +285,7 @@ public class NpmHandler extends FormatHandler {
 		}
 		json(ctx, 200, this.services.packages().tags(repository.name(), name));
 	}
-	//endregion
 	
-	//region Read
 	private @NonNull List<PackageVersionEntity> requireVersions(@NonNull RepositoryEntity repository, @NonNull String name) throws Exception {
 		List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), name);
 		if (versions.isEmpty()) {
@@ -348,26 +362,27 @@ public class NpmHandler extends FormatHandler {
 		builder.append(tags);
 		return versions.size() + "-" + BlobStore.sha256Hex(builder.toString()).substring(0, 16);
 	}
-	//endregion
 	
-	//region Write
 	private void publishOrUpdate(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String name, boolean revision) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
-		JsonNode body = parseBody(this.readBody(ctx));
-		if (!body.isObject()) {
-			throw npmError(400, "Invalid package document");
-		}
-		String bodyName = Json.text(body, "name", name);
-		if (!bodyName.equals(name)) {
-			throw npmError(400, "Package name in body (" + bodyName + ") does not match url (" + name + ")");
-		}
-		
-		JsonNode attachments = body.get("_attachments");
-		if (attachments != null && attachments.isObject() && !attachments.isEmpty()) {
-			this.publish(ctx, repository, name, (ObjectNode) body, principal);
-		} else {
-			this.update(ctx, repository, name, (ObjectNode) body, revision);
-		}
+		this.services.bodies().withPackageBody(ctx, data -> {
+			JsonNode body = parseBody(data);
+			if (!body.isObject()) {
+				throw npmError(400, "Invalid package document");
+			}
+			String bodyName = Json.text(body, "name", name);
+			if (!bodyName.equals(name)) {
+				throw npmError(400, "Package name in body (" + bodyName + ") does not match url (" + name + ")");
+			}
+			
+			JsonNode attachments = body.get("_attachments");
+			if (attachments != null && attachments.isObject() && !attachments.isEmpty()) {
+				this.publish(ctx, repository, name, (ObjectNode) body, principal);
+			} else {
+				this.update(ctx, repository, name, (ObjectNode) body, revision);
+			}
+			return null;
+		});
 	}
 	
 	private void publish(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String name, @NonNull ObjectNode body, @Nullable Principal principal) throws Exception {
@@ -376,7 +391,10 @@ public class NpmHandler extends FormatHandler {
 			throw npmError(400, "No versions to publish");
 		}
 		
-		List<String> published = new ArrayList<>();
+		// Store the tarballs first, then record all versions and tags in one transaction so a failed or concurrent publish
+		// leaves no partially published package behind
+		Map<String, ObjectNode> manifests = new LinkedHashMap<>();
+		Map<String, StoredBlob> blobs = new HashMap<>();
 		for (Map.Entry<String, JsonNode> entry : versionsNode.properties()) {
 			String version = entry.getKey();
 			if (!(entry.getValue() instanceof ObjectNode manifest)) {
@@ -404,24 +422,42 @@ public class NpmHandler extends FormatHandler {
 			manifest.remove("_id");
 			manifest.put("_id", name + "@" + version);
 			
-			StoredBlob blob = this.services.artifacts().upload(tarball);
-			this.services.artifacts().put(repository.name(), name + "/-/" + tarballName(name, version), blob, "application/octet-stream", name, version, null, username(principal));
-			this.services.packages().create(repository.name(), name, version, Json.write(manifest), username(principal));
-			published.add(version);
+			blobs.put(version, this.services.artifacts().upload(tarball));
+			manifests.put(version, manifest);
 		}
 		
-		Map<String, String> tags = this.services.packages().tags(repository.name(), name);
 		JsonNode distTags = body.get("dist-tags");
-		if (distTags != null && distTags.isObject()) {
-			for (Map.Entry<String, JsonNode> entry : distTags.properties()) {
-				if (entry.getValue().isString() && TAG.matcher(entry.getKey()).matches()) {
-					this.services.packages().setTag(repository.name(), name, entry.getKey(), entry.getValue().asString());
-					tags.put(entry.getKey(), entry.getValue().asString());
+		try {
+			this.services.artifacts().transaction(work -> {
+				for (Map.Entry<String, ObjectNode> entry : manifests.entrySet()) {
+					String version = entry.getKey();
+					if (this.services.packages().get(work, repository.name(), name, version) != null) {
+						throw npmError(409, "cannot modify pre-existing version: " + version);
+					}
+					this.services.artifacts().put(work, repository.name(), name + "/-/" + tarballName(name, version), blobs.get(version), "application/octet-stream", name, version, null, username(principal));
+					this.services.packages().create(work, repository.name(), name, version, Json.write(entry.getValue()), username(principal));
 				}
+				
+				Map<String, String> tags = this.services.packages().tags(work, repository.name(), name);
+				if (distTags != null && distTags.isObject()) {
+					for (Map.Entry<String, JsonNode> entry : distTags.properties()) {
+						if (entry.getValue().isString() && TAG.matcher(entry.getKey()).matches()) {
+							this.services.packages().setTag(work, repository.name(), name, entry.getKey(), entry.getValue().asString());
+							tags.put(entry.getKey(), entry.getValue().asString());
+						}
+					}
+				}
+				if (!tags.containsKey("latest")) {
+					this.services.packages().setTag(work, repository.name(), name, "latest", manifests.keySet().stream().max(Versions.SEMVER).orElseThrow());
+				}
+				return null;
+			});
+		} catch (RuntimeException | SqlException e) {
+			this.releaseUploads(repository, blobs.values());
+			if (SqlErrors.isUniqueViolation(e)) {
+				throw npmError(409, "cannot modify pre-existing version, it was published concurrently");
 			}
-		}
-		if (!tags.containsKey("latest")) {
-			this.services.packages().setTag(repository.name(), name, "latest", published.stream().max(Versions.SEMVER).orElseThrow());
+			throw e;
 		}
 		
 		List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), name);
@@ -443,11 +479,29 @@ public class NpmHandler extends FormatHandler {
 		
 		List<PackageVersionEntity> removed = new ArrayList<>();
 		for (PackageVersionEntity version : versions) {
+			if (versionsNode.get(version.version()) == null && revision) {
+				removed.add(version);
+			}
+		}
+		if (!removed.isEmpty()) {
+			this.authorize(ctx, repository, AccessLevel.DELETE);
+		}
+		
+		JsonNode distTags = body.get("dist-tags");
+		this.services.artifacts().transaction(work -> {
+			this.applyUpdate(work, repository, name, versions, versionsNode, distTags, removed, revision);
+			return null;
+		});
+		
+		ObjectNode response = ok();
+		response.put("id", name);
+		json(ctx, 201, response);
+	}
+	
+	private void applyUpdate(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull String name, @NonNull List<PackageVersionEntity> versions, @NonNull JsonNode versionsNode, @Nullable JsonNode distTags, @NonNull List<PackageVersionEntity> removed, boolean revision) throws SqlException {
+		for (PackageVersionEntity version : versions) {
 			JsonNode updated = versionsNode.get(version.version());
 			if (updated == null) {
-				if (revision) {
-					removed.add(version);
-				}
 				continue;
 			}
 			ObjectNode manifest = Json.parseObject(version.metadata());
@@ -460,28 +514,24 @@ public class NpmHandler extends FormatHandler {
 				changed = manifest.remove("deprecated") != null;
 			}
 			if (changed) {
-				this.services.packages().updateMetadata(repository.name(), name, version.version(), Json.write(manifest));
+				this.services.packages().updateMetadata(work, repository.name(), name, version.version(), Json.write(manifest));
 			}
 		}
 		
-		if (!removed.isEmpty()) {
-			this.authorize(ctx, repository, AccessLevel.DELETE);
-			for (PackageVersionEntity version : removed) {
-				this.services.packages().delete(repository.name(), name, version.version());
-				this.services.artifacts().deleteVersion(repository.name(), name, version.version());
-			}
+		for (PackageVersionEntity version : removed) {
+			this.services.packages().delete(work, repository.name(), name, version.version());
+			this.services.artifacts().deleteVersion(work, repository.name(), name, version.version());
 		}
 		
 		Set<String> remaining = new HashSet<>();
-		for (PackageVersionEntity version : this.services.packages().versions(repository.name(), name)) {
+		for (PackageVersionEntity version : this.services.packages().versions(work, repository.name(), name)) {
 			remaining.add(version.version());
 		}
-		JsonNode distTags = body.get("dist-tags");
-		Map<String, String> tags = this.services.packages().tags(repository.name(), name);
+		Map<String, String> tags = this.services.packages().tags(work, repository.name(), name);
 		if (revision && distTags != null && distTags.isObject()) {
 			for (String tag : tags.keySet()) {
 				if (!distTags.has(tag)) {
-					this.services.packages().deleteTag(repository.name(), name, tag);
+					this.services.packages().deleteTag(work, repository.name(), name, tag);
 				}
 			}
 		}
@@ -489,31 +539,31 @@ public class NpmHandler extends FormatHandler {
 			for (Map.Entry<String, JsonNode> entry : distTags.properties()) {
 				String version = entry.getValue().asString();
 				if (remaining.contains(version) && TAG.matcher(entry.getKey()).matches()) {
-					this.services.packages().setTag(repository.name(), name, entry.getKey(), version);
+					this.services.packages().setTag(work, repository.name(), name, entry.getKey(), version);
 				}
 			}
 		}
-		for (Map.Entry<String, String> tag : this.services.packages().tags(repository.name(), name).entrySet()) {
+		for (Map.Entry<String, String> tag : this.services.packages().tags(work, repository.name(), name).entrySet()) {
 			if (!remaining.contains(tag.getValue())) {
-				this.services.packages().deleteTag(repository.name(), name, tag.getKey());
+				this.services.packages().deleteTag(work, repository.name(), name, tag.getKey());
 			}
 		}
-		if (!remaining.isEmpty() && !this.services.packages().tags(repository.name(), name).containsKey("latest")) {
-			this.services.packages().setTag(repository.name(), name, "latest", remaining.stream().max(Versions.SEMVER).orElseThrow());
+		if (!remaining.isEmpty() && !this.services.packages().tags(work, repository.name(), name).containsKey("latest")) {
+			this.services.packages().setTag(work, repository.name(), name, "latest", remaining.stream().max(Versions.SEMVER).orElseThrow());
 		}
-		
-		ObjectNode response = ok();
-		response.put("id", name);
-		json(ctx, 201, response);
 	}
 	
 	private void unpublishAll(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String name) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
-		for (PackageVersionEntity version : this.requireVersions(repository, name)) {
-			this.services.packages().delete(repository.name(), name, version.version());
-			this.services.artifacts().deleteVersion(repository.name(), name, version.version());
-		}
-		this.services.packages().deleteTags(repository.name(), name);
+		List<PackageVersionEntity> versions = this.requireVersions(repository, name);
+		this.services.artifacts().transaction(work -> {
+			for (PackageVersionEntity version : versions) {
+				this.services.packages().delete(work, repository.name(), name, version.version());
+				this.services.artifacts().deleteVersion(work, repository.name(), name, version.version());
+			}
+			this.services.packages().deleteTags(work, repository.name(), name);
+			return null;
+		});
 		json(ctx, 200, ok());
 	}
 	
@@ -544,9 +594,11 @@ public class NpmHandler extends FormatHandler {
 		}
 		return tarball;
 	}
-	//endregion
 	
-	//region Helpers
+	private void releaseUploads(@NonNull RepositoryEntity repository, @NonNull Collection<StoredBlob> blobs) throws SqlException {
+		this.services.artifacts().releaseBlobs(blobs.stream().map(blob -> PathRepositoryHandler.fakeFile(repository, blob)).toList());
+	}
+	
 	private static @NonNull JsonNode parseBody(byte @NonNull [] body) {
 		try {
 			return Json.parse(body);
@@ -586,5 +638,4 @@ public class NpmHandler extends FormatHandler {
 	private static @NonNull String hex(@NonNull String algorithm, byte @NonNull [] data) {
 		return HexFormat.of().formatHex(digest(algorithm, data));
 	}
-	//endregion
 }

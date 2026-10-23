@@ -12,7 +12,6 @@ import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
-import java.io.*;
 import java.util.Objects;
 
 /**
@@ -55,30 +54,6 @@ public abstract class FormatHandler {
 			return Requests.baseUrl(ctx, this.services.config());
 		}
 		return Requests.baseUrl(ctx, this.services.config()) + "/" + this.type().id() + "/" + repository.name();
-	}
-	
-	/**
-	 * Reads the request body into memory, limited to the configured max upload size.<br>
-	 */
-	protected byte @NonNull [] readBody(@NonNull Context ctx) throws IOException {
-		long max = this.services.config().maxUploadSize() * 2;
-		if (ctx.req().getContentLengthLong() > max) {
-			throw HttpError.payloadTooLarge();
-		}
-		try (InputStream input = ctx.bodyInputStream()) {
-			ByteArrayOutputStream output = new ByteArrayOutputStream();
-			byte[] buffer = new byte[64 * 1024];
-			long total = 0;
-			int read;
-			while ((read = input.read(buffer)) != -1) {
-				total += read;
-				if (total > max) {
-					throw HttpError.payloadTooLarge();
-				}
-				output.write(buffer, 0, read);
-			}
-			return output.toByteArray();
-		}
 	}
 	
 	protected static void text(@NonNull Context ctx, int status, @NonNull String body) {

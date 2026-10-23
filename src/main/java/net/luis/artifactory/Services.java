@@ -3,6 +3,7 @@ package net.luis.artifactory;
 import net.luis.artifactory.auth.AuthService;
 import net.luis.artifactory.auth.UserService;
 import net.luis.artifactory.config.ServerConfig;
+import net.luis.artifactory.http.BodyReader;
 import net.luis.artifactory.repository.*;
 import org.jspecify.annotations.NonNull;
 
@@ -14,7 +15,8 @@ public record Services(
 	@NonNull AuthService auth,
 	@NonNull RepositoryService repositories,
 	@NonNull ArtifactService artifacts,
-	@NonNull PackageService packages
+	@NonNull PackageService packages,
+	@NonNull BodyReader bodies
 ) {
 	
 	public Services {
@@ -24,5 +26,6 @@ public record Services(
 		Objects.requireNonNull(repositories, "Repository service must not be null");
 		Objects.requireNonNull(artifacts, "Artifact service must not be null");
 		Objects.requireNonNull(packages, "Package service must not be null");
+		Objects.requireNonNull(bodies, "Body reader must not be null");
 	}
 }

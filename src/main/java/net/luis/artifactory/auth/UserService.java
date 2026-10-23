@@ -10,6 +10,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 
@@ -18,6 +19,11 @@ import static net.luis.artifactory.database.Tables.*;
 public class UserService {
 	
 	private static final Logger LOGGER = LoggerFactory.getLogger(UserService.class);
+	
+	/**
+	 * Prefix of session secrets, sessions are only accepted as bearer token.<br>
+	 */
+	public static final String SESSION_PREFIX = "las_";
 	
 	private final SqlDatabase database;
 	
@@ -54,23 +60,32 @@ public class UserService {
 	}
 	
 	public void update(@NonNull String username, @Nullable String password, @Nullable Boolean admin) throws SqlException {
+		if (password == null && admin == null) {
+			return;
+		}
+		var update = this.database.from(USERS).update();
 		if (password != null) {
-			this.database.from(USERS).update().set(USER_PASSWORD_HASH, PasswordHasher.hash(password)).where(Sql.equalTo(USER_NAME, username)).execute();
+			update = update.set(USER_PASSWORD_HASH, PasswordHasher.hash(password));
 		}
 		if (admin != null) {
-			this.database.from(USERS).update().set(USER_ADMIN, admin).where(Sql.equalTo(USER_NAME, username)).execute();
+			update = update.set(USER_ADMIN, admin);
 		}
+		update.where(Sql.equalTo(USER_NAME, username)).execute();
+	}
+	
+	public long countAdmins() throws SqlException {
+		return this.database.from(USERS).select().where(Sql.equalTo(USER_ADMIN, true)).count();
 	}
 	
 	public void delete(@NonNull String username) throws SqlException {
 		this.database.inTransaction(transaction -> {
 			transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_USERNAME, username)).execute();
+			transaction.from(SESSIONS).delete().where(Sql.equalTo(SESSION_USERNAME, username)).execute();
 			transaction.from(PERMISSIONS).delete().where(Sql.equalTo(PERMISSION_USERNAME, username)).execute();
 			return transaction.from(USERS).delete().where(Sql.equalTo(USER_NAME, username)).execute();
 		});
 	}
 	
-	//region Permissions
 	public @NonNull List<PermissionEntity> listPermissions(@Nullable String repository, @Nullable String username) throws SqlException {
 		List<SqlCondition> conditions = new ArrayList<>();
 		if (repository != null) {
@@ -115,9 +130,7 @@ public class UserService {
 		}
 		return best;
 	}
-	//endregion
 	
-	//region Tokens
 	public @NonNull List<TokenEntity> listTokens(@Nullable String username) throws SqlException {
 		var query = this.database.from(TOKENS).select();
 		if (username != null) {
@@ -152,10 +165,45 @@ public class UserService {
 		return this.database.from(TOKENS).delete().where(Sql.equalTo(TOKEN_HASH, hashToken(secret))).execute();
 	}
 	
+	public int deleteExpiredSessions() throws SqlException {
+		return this.database.from(SESSIONS).delete().where(Sql.before(SESSION_EXPIRES_AT, Instant.now())).execute();
+	}
+	
 	public static @NonNull String hashToken(@NonNull String secret) {
 		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
 	}
 	
 	public record CreatedToken(@NonNull TokenEntity token, @NonNull String secret) {}
-	//endregion
+	
+	/**
+	 * Creates a web ui session and returns the plain secret, only its hash is stored.<br>
+	 */
+	public @NonNull CreatedSession createSession(@NonNull String username, @NonNull Duration lifetime) throws SqlException {
+		String secret = SESSION_PREFIX + PasswordHasher.randomSecret(32);
+		Instant now = Instant.now();
+		SessionEntity session = new SessionEntity(UUID.randomUUID().toString(), username, hashToken(secret), now, now.plus(lifetime));
+		this.database.from(SESSIONS).insert(session).execute();
+		return new CreatedSession(session, secret);
+	}
+	
+	public @Nullable SessionEntity findSessionBySecret(@NonNull String secret) throws SqlException {
+		return this.database.from(SESSIONS).select().where(Sql.equalTo(SESSION_HASH, hashToken(secret))).fetchOneOrNull();
+	}
+	
+	public int deleteSessionBySecret(@NonNull String secret) throws SqlException {
+		return this.database.from(SESSIONS).delete().where(Sql.equalTo(SESSION_HASH, hashToken(secret))).execute();
+	}
+	
+	/**
+	 * Deletes all sessions of the user, except the session with the given secret (e.g. the session changing the password).<br>
+	 */
+	public int deleteSessions(@NonNull String username, @Nullable String keepSecret) throws SqlException {
+		SqlCondition condition = Sql.equalTo(SESSION_USERNAME, username);
+		if (keepSecret != null) {
+			condition = SqlCondition.allOf(condition, Sql.equalTo(SESSION_HASH, hashToken(keepSecret)).not());
+		}
+		return this.database.from(SESSIONS).delete().where(condition).execute();
+	}
+	
+	public record CreatedSession(@NonNull SessionEntity session, @NonNull String secret) {}
 }

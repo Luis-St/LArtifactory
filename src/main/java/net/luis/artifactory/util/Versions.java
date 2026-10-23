@@ -24,7 +24,6 @@ public final class Versions {
 	
 	private Versions() {}
 	
-	//region Maven
 	private static int compareMaven(@NonNull String first, @NonNull String second) {
 		List<Object> a = tokenizeMaven(first);
 		List<Object> b = tokenizeMaven(second);
@@ -125,9 +124,7 @@ public final class Versions {
 			tokens.add(token);
 		}
 	}
-	//endregion
 	
-	//region SemVer
 	private static int compareSemver(@NonNull String first, @NonNull String second) {
 		String a = stripBuild(first);
 		String b = stripBuild(second);
@@ -195,9 +192,7 @@ public final class Versions {
 	private static @NonNull BigInteger parseNumber(@NonNull String value) {
 		return isNumber(value) ? new BigInteger(value) : BigInteger.ZERO;
 	}
-	//endregion
 	
-	//region NuGet
 	/**
 	 * Normalizes a NuGet version as described in the NuGet documentation:<br>
 	 * leading zeros are removed, a zero fourth part is omitted, missing parts are added and build metadata is dropped.<br>
@@ -232,5 +227,4 @@ public final class Versions {
 		}
 		return String.join(".", numbers) + (prerelease == null || prerelease.isEmpty() ? "" : "-" + prerelease);
 	}
-	//endregion
 }

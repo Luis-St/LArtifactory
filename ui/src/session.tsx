@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, basicAuthorization, hasAuthorization, onUnauthorized, setAuthorization } from './api';
+import { api, basicAuthorization, hasAuthorization, hasSession, onUnauthorized, setAuthorization } from './api';
 import type { Principal } from './types';
 
 interface Session {
@@ -41,6 +41,10 @@ export function SessionProvider({ children }: { children: (state: { ready: boole
 	}, []);
 
 	const logout = useCallback(() => {
+		if (hasSession()) {
+			// Revoke the session on the server, signing out locally does not wait for it
+			api.deleteSession().catch(() => undefined);
+		}
 		setAuthorization(null);
 		setPrincipal(null);
 	}, []);
@@ -56,7 +60,13 @@ export function SessionProvider({ children }: { children: (state: { ready: boole
 	}, [logout, notify]);
 
 	const login = useCallback(async (username: string, secret: string, remember: boolean) => {
-		setAuthorization(basicAuthorization(username || '__token__', secret), remember);
+		if (username) {
+			// The password is only sent once to create a session, it is never stored in the browser
+			const session = await api.createSession(username, secret, remember);
+			setAuthorization(`Bearer ${session.token}`, remember);
+		} else {
+			setAuthorization(basicAuthorization('__token__', secret), remember);
+		}
 		try {
 			setPrincipal(await api.me());
 		} catch (error) {

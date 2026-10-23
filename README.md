@@ -21,19 +21,32 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_ENABLE_API_DOCS`    | `false`                                        | Serve the (unauthenticated) OpenAPI spec and Swagger UI                     |
 | `ARTIFACTORY_STORAGE_PATH`       | `data`                                         | Directory for the artifact files                                            |
 | `ARTIFACTORY_MAX_UPLOAD_SIZE_MB` | `1024`                                         | Maximum size of a single artifact                                           |
+| `ARTIFACTORY_MAX_BUFFERED_UPLOAD_SIZE_MB` | `256` | Maximum size of an npm or Cargo publish request, these are parsed in memory |
 | `ARTIFACTORY_ADMIN_USERNAME`     | `admin`                                        | Name of the initial administrator                                           |
 | `ARTIFACTORY_ADMIN_PASSWORD`     | generated and logged on first start            | Password of the initial administrator (only used if no user exists yet)     |
+| `ARTIFACTORY_LOGIN_MAX_FAILURES` | `10` | Failed password logins per client address and user before the login is locked |
+| `ARTIFACTORY_LOGIN_LOCKOUT_MINUTES` | `15` | Duration of a login lockout |
+| `ARTIFACTORY_SESSION_HOURS` | `12` | Lifetime of a web ui session |
+| `ARTIFACTORY_SESSION_REMEMBER_DAYS` | `30` | Lifetime of a web ui session with "keep me signed in" |
+| `ARTIFACTORY_NPM_TOKEN_DAYS` | `90` | Lifetime of tokens created by `npm login`, `0` for no expiry |
+| `ARTIFACTORY_MAINTENANCE_INTERVAL_MINUTES` | `60` | Interval of the cleanup of orphaned blobs, temporary files and expired sessions |
 | `ARTIFACTORY_DB_URL`             | `jdbc:postgresql://localhost:5432/artifactory` | JDBC url                                                                    |
-| `ARTIFACTORY_DB_USERNAME`        | `artifactory`                                  | Database user                                                               |
-| `ARTIFACTORY_DB_PASSWORD`        | `artifactory`                                  | Database password                                                           |
+| `ARTIFACTORY_DB_USERNAME`        | required                                       | Database user                                                               |
+| `ARTIFACTORY_DB_PASSWORD`        | required                                       | Database password                                                           |
 | `ARTIFACTORY_DB_POOL_SIZE`       | `10`                                           | HikariCP maximum pool size                                                  |
+| `ARTIFACTORY_LOG_ALL` | `WARN` | Log level of third-party libraries (Jetty, HikariCP), the server itself always logs `INFO` |
 
 Without `ARTIFACTORY_BASE_URL` the public url is derived from the request. The client controlled `X-Forwarded-Host`,
 `X-Forwarded-Proto` and `X-Forwarded-Prefix` headers are only trusted when `ARTIFACTORY_TRUST_PROXY=true` (otherwise the
 `Host` header and the request scheme are used). **Set `ARTIFACTORY_BASE_URL` in production**, or only enable
 `ARTIFACTORY_TRUST_PROXY` behind a reverse proxy that sets these headers, so generated download urls can not be
 redirected to an attacker host via a forged `Host`/`X-Forwarded-Host` header.
-The database schema is created on startup, files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
+The database schema is created on startup and later schema changes are applied as versioned migrations (recorded in `_sql_migrations`).
+Files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
+A blob that no file references any more is deleted once it is older than one hour,
+because an upload stores its blob before the file is committed to the database and a younger blob may still be in use.
+The maintenance task removes such blobs, temporary files older than a day and expired sessions.
+`GET /health` responds with `503` while the database is unreachable, so load balancers and orchestrators can detect it.
 
 For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user passwords created through the API must be at least 12 characters), a dedicated `ARTIFACTORY_DB_PASSWORD`, and leave `ARTIFACTORY_ENABLE_API_DOCS` disabled. Uploaded artifacts are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` so they can not execute in the browser.
 
@@ -42,6 +55,7 @@ For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user pass
 The server ships a web ui at `/ui/` (`/` redirects there). It shows an overview of the stored artifacts per repository type,
 lets you browse packages, versions and files, and covers the configuration of repositories, users, permissions and tokens,
 including copy-ready client setup snippets for every repository. Users sign in with their password or an access token.
+Signing in with a password creates a session (`POST /api/session`), only the session token is kept in the browser and never the password.
 
 The ui is a React single page application in `ui/`, built with Vite and packaged into the jar by Gradle (requires Node.js 20.19+):
 
@@ -140,8 +154,16 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
   A token can be limited to a lower access level than its user and can expire.
 - Access levels per repository: `READ` (download), `WRITE` (publish, tags, yank, unlist) and `DELETE` (delete, unpublish).
   Permissions are granted per repository or for all repositories with `*`. Administrators have full access.
-- The management api (`/api/*`) requires authenticating with the user password (basic auth); tokens (including an
-  admin's token) grant repository access only and can not be used to administer users, permissions or repositories.
+- The management api (`/api/*`) requires authenticating with the user password (basic auth) or a web ui session.
+  Tokens, including an admin's token, grant repository access only.
+  They can not administer users, permissions or repositories and can not create, list or revoke tokens,
+  so a leaked short-lived token can not be turned into a token that never expires.
+- Failed password logins are counted per client address and user.
+  After `ARTIFACTORY_LOGIN_MAX_FAILURES` failures the login responds with `429` for `ARTIFACTORY_LOGIN_LOCKOUT_MINUTES`,
+  and an address is locked for all users after five times as many failures.
+  Behind a reverse proxy the client address is only taken from `X-Forwarded-For` with `ARTIFACTORY_TRUST_PROXY=true`.
+- Tokens created by `npm login` expire after `ARTIFACTORY_NPM_TOKEN_DAYS`, run `npm login` again afterwards.
+- The last administrator can not lose the administrator privileges, so the server can not be locked out of its own management.
 - Repositories are private by default, `publicRead` allows anonymous downloads.
 
 ## Management API
@@ -149,16 +171,19 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | Method                  | Path                                  | Description                                            |
 |-------------------------|---------------------------------------|--------------------------------------------------------|
 | `GET`                   | `/api/me`                             | The authenticated user                                 |
+| `POST` `DELETE`         | `/api/session`                        | Sign in with the password / sign out (web ui session)  |
 | `GET` `POST`            | `/api/repositories`                   | List / create repositories                             |
 | `GET` `PATCH` `DELETE`  | `/api/repositories/{name}`            | Get / update / delete a repository                     |
-| `GET` `DELETE`          | `/api/repositories/{name}/packages`   | List packages and versions / delete a package version  |
-| `GET`                   | `/api/repositories/{name}/files`      | List files (`?prefix=`)                                |
+| `GET` `DELETE`          | `/api/repositories/{name}/packages`   | List packages and versions (`?q=&offset=&limit=`) / delete a package version |
+| `GET`                   | `/api/repositories/{name}/files`      | List files (`?prefix=&offset=&limit=`)                 |
 | `GET` `POST`            | `/api/users`                          | List / create users                                    |
 | `PATCH` `DELETE`        | `/api/users/{username}`               | Update (password, admin) / delete a user               |
 | `GET` `PUT` `DELETE`    | `/api/permissions`                    | List / grant / revoke permissions                      |
 | `GET` `POST`            | `/api/tokens`                         | List / create tokens                                   |
 | `DELETE`                | `/api/tokens/{id}`                    | Revoke a token                                         |
 
+The package and file lists are paged, the total number of entries is returned in the `X-Total-Count` header.
+A page holds at most 500 packages or 5000 files, so a single request can not load a whole large repository into memory.
 The full api is documented in `openapi.json` and served by Swagger UI at `/swagger`.
 
 ```bash
@@ -176,11 +201,12 @@ curl -u ci:a-long-password -X POST https://repo.example.com/api/tokens -H 'Conte
 
 ```bash
 ./gradlew run          # start the server
-./gradlew test         # run the unit tests
+./gradlew test         # run the unit and integration tests
 ./gradlew shadowJar    # build a fat jar into build/libs
 ```
 
 `./gradlew compileJava` also regenerates `openapi.json` from the `@OpenApi` annotations.
+The integration tests start the server against a PostgreSQL container with Testcontainers and are skipped if no docker daemon is available.
 Swagger UI is served at `/swagger`, the health endpoint at `/health`.
 
 ### Repository tests
@@ -201,5 +227,11 @@ The script recreates the test repositories and the users `lat-ci` and `lat-reade
 
 ```bash
 docker build -t lartifactory .
-docker run -p 8080:8080 -v lartifactory-data:/data -e ARTIFACTORY_ADMIN_PASSWORD=... lartifactory
+docker run -p 8080:8080 -v lartifactory-data:/data -e ARTIFACTORY_DB_PASSWORD=... -e ARTIFACTORY_ADMIN_PASSWORD=... lartifactory
 ```
+
+The container runs as the unprivileged user `artifactory` (uid and gid `10001`) and checks `/health` with a docker health check.
+A data volume created by an older image belongs to root and has to be handed over once,
+for example with `docker run --rm -v lartifactory-data:/data alpine chown -R 10001:10001 /data`.
+The database password has no default and is required.
+The heap is sized to 75 % of the container memory limit (`JAVA_TOOL_OPTIONS`), override it to change the heap size.

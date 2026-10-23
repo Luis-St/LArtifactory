@@ -10,12 +10,22 @@ export function Tokens() {
 	const { principal, notify } = useSession();
 	const [owner, setOwner] = useState(principal?.username ?? '');
 	const users = useAsync(() => (principal?.admin ? api.users() : Promise.resolve([])), [principal?.admin]);
-	const tokens = useAsync(() => api.tokens(owner || undefined), [owner]);
+	// Tokens can only be managed after signing in with a password, a token can not create or list tokens
+	const signedInWithToken = principal?.tokenLevel != null;
+	const tokens = useAsync(() => (signedInWithToken ? Promise.resolve([]) : api.tokens(owner || undefined)), [owner, signedInWithToken]);
 	const [creating, setCreating] = useState(false);
 	const [created, setCreated] = useState<Token | null>(null);
 	const [revoking, setRevoking] = useState<Token | null>(null);
 
 	const now = new Date().toISOString();
+	if (signedInWithToken) {
+		return (
+			<>
+				<PageHeader title="Access tokens" subtitle="Tokens authenticate package managers and CI. They can be restricted to a lower access level and expire." />
+				<Empty title="Password required">You signed in with an access token. Sign in with your password to create, list or revoke tokens.</Empty>
+			</>
+		);
+	}
 	return (
 		<>
 			<PageHeader
@@ -60,7 +70,7 @@ export function Tokens() {
 			{creating && (
 				<CreateTokenDialog
 					owner={owner || principal?.username || ''}
-					maxLevel={principal?.tokenLevel ?? 'DELETE'}
+					maxLevel="DELETE"
 					onClose={() => setCreating(false)}
 					onCreated={token => { setCreating(false); setCreated(token); tokens.reload(); }}
 				/>

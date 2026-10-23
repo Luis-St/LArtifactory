@@ -4,6 +4,7 @@ import io.javalin.http.Context;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
+import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
@@ -11,6 +12,7 @@ import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
 import net.luis.artifactory.util.Versions;
+import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
@@ -107,7 +109,6 @@ public class CargoHandler extends FormatHandler {
 		}
 	}
 	
-	//region Read
 	private void config(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		String base = this.repositoryUrl(ctx, repository);
 		ObjectNode root = Json.object();
@@ -154,33 +155,42 @@ public class CargoHandler extends FormatHandler {
 		ObjectNode root = Json.object();
 		ArrayNode crates = root.putArray("crates");
 		int total = 0;
-		for (Map.Entry<String, List<PackageVersionEntity>> entry : this.services.packages().grouped(repository.name()).entrySet()) {
-			if (!query.isEmpty() && !entry.getKey().contains(query.replace('_', '-')) && !entry.getKey().contains(query)) {
+		for (String crate : this.services.packages().packageNames(repository.name())) {
+			if (!query.isEmpty() && !crate.contains(query.replace('_', '-')) && !crate.contains(query)) {
 				continue;
 			}
 			total++;
 			if (crates.size() >= perPage) {
 				continue;
 			}
-			PackageVersionEntity latest = entry.getValue().stream()
+			List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), crate);
+			if (versions.isEmpty()) {
+				continue;
+			}
+			PackageVersionEntity latest = versions.stream()
 				.filter(version -> !version.yanked())
 				.max(Comparator.comparing(PackageVersionEntity::version, Versions.SEMVER))
-				.orElse(entry.getValue().getLast());
+				.orElse(versions.getLast());
 			ObjectNode metadata = Json.parseObject(latest.metadata());
 			crates.addObject()
-				.put("name", Json.text(metadata, "name", entry.getKey()))
+				.put("name", Json.text(metadata, "name", crate))
 				.put("max_version", latest.version())
 				.put("description", Json.text(metadata.path("_publish"), "description", ""));
 		}
 		root.putObject("meta").put("total", total);
 		json(ctx, 200, root);
 	}
-	//endregion
 	
-	//region Write
 	private void publish(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
-		ByteBuffer buffer = ByteBuffer.wrap(this.readBody(ctx)).order(ByteOrder.LITTLE_ENDIAN);
+		this.services.bodies().withPackageBody(ctx, body -> {
+			this.publish(ctx, repository, principal, body);
+			return null;
+		});
+	}
+	
+	private void publish(@NonNull Context ctx, @NonNull RepositoryEntity repository, @Nullable Principal principal, byte @NonNull [] body) throws Exception {
+		ByteBuffer buffer = ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN);
 		
 		JsonNode payload;
 		byte[] crate;
@@ -228,8 +238,17 @@ public class CargoHandler extends FormatHandler {
 		
 		StoredBlob blob = this.services.artifacts().upload(crate);
 		ObjectNode line = indexLine(payload, name, version, blob.sha256());
-		this.services.artifacts().put(repository.name(), cratePath(key, version), blob, "application/octet-stream", key, version, null, username(principal));
-		this.services.packages().create(repository.name(), key, version, Json.write(line), username(principal));
+		try {
+			this.services.artifacts().transaction(work -> {
+				this.services.artifacts().put(work, repository.name(), cratePath(key, version), blob, "application/octet-stream", key, version, null, username(principal));
+				return this.services.packages().create(work, repository.name(), key, version, Json.write(line), username(principal));
+			});
+		} catch (SqlException e) {
+			if (SqlErrors.isUniqueViolation(e)) {
+				throw cargoError(409, "crate version `" + version + "` is already uploaded");
+			}
+			throw e;
+		}
 		
 		ObjectNode root = Json.object();
 		ObjectNode warnings = root.putObject("warnings");
@@ -348,7 +367,6 @@ public class CargoHandler extends FormatHandler {
 		}
 		json(ctx, 200, root);
 	}
-	//endregion
 	
 	private static @NonNull String cratePath(@NonNull String crate, @NonNull String version) {
 		return "crates/" + crate + "/" + crate + "-" + version + ".crate";

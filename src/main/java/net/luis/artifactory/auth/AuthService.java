@@ -1,14 +1,17 @@
 package net.luis.artifactory.auth;
 
 import io.javalin.http.Context;
+import net.luis.artifactory.config.ServerConfig;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
+import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.storage.BlobStore;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -23,13 +26,13 @@ import java.util.concurrent.TimeUnit;
  * <ul>
  *     <li>{@code Authorization: Basic base64(user:password)} with the password of the user or one of its tokens</li>
  *     <li>{@code Authorization: Basic base64(__token__:token)} (PyPI style)</li>
- *     <li>{@code Authorization: Bearer token} (npm style)</li>
+ *     <li>{@code Authorization: Bearer token} (npm style), also used for web ui sessions ({@code las_...})</li>
  *     <li>{@code Authorization: token} without scheme (Cargo style)</li>
  *     <li>{@code X-NuGet-ApiKey: token} (NuGet style) and {@code X-JFrog-Art-Api: token}</li>
  * </ul>
  */
 public class AuthService {
-	
+
 	private static final String PRINCIPAL_ATTRIBUTE = "artifactory.principal";
 	private static final long CACHE_TTL_MILLIS = 60_000;
 
@@ -40,14 +43,27 @@ public class AuthService {
 	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
 
 	private final UserService userService;
+	private final ServerConfig config;
+	private final LoginThrottle throttle;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
-	
-	public AuthService(@NonNull UserService userService) {
+
+	public AuthService(@NonNull UserService userService, @NonNull ServerConfig config) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
+		this.config = Objects.requireNonNull(config, "Config must not be null");
+		this.throttle = new LoginThrottle(config.loginMaxFailures(), Duration.ofMinutes(config.loginLockoutMinutes()));
 	}
-	
+
 	public void invalidateCache() {
 		this.cache.clear();
+	}
+
+	/**
+	 * Removes expired cache entries and login failure counters.<br>
+	 */
+	public void cleanup() {
+		long now = System.currentTimeMillis();
+		this.cache.values().removeIf(entry -> entry.expiresAt() <= now);
+		this.throttle.cleanup();
 	}
 
 	/**
@@ -72,7 +88,33 @@ public class AuthService {
 			HASH_SLOTS.release();
 		}
 	}
-	
+
+	/**
+	 * Checks the password of a user, failed attempts count towards the login throttle of the client.<br>
+	 *
+	 * @return The user, null if the user does not exist or the password is wrong
+	 * @throws HttpError 429 if the client is locked out because of too many failed logins
+	 */
+	public @Nullable UserEntity login(@NonNull Context ctx, @NonNull String username, @NonNull String password) throws SqlException {
+		String address = Requests.clientIp(ctx, this.config);
+		this.throttle.check(address, username);
+
+		UserEntity user = this.userService.get(username);
+		boolean valid;
+		if (user == null) {
+			this.verifyPassword(password, DUMMY_HASH); // keep timing independent of whether the user exists
+			valid = false;
+		} else {
+			valid = this.verifyPassword(password, user.passwordHash());
+		}
+		if (!valid) {
+			this.throttle.failure(address, username);
+			return null;
+		}
+		this.throttle.success(address, username);
+		return user;
+	}
+
 	/**
 	 * Authenticates the request, returns null for anonymous requests.<br>
 	 *
@@ -82,12 +124,12 @@ public class AuthService {
 		if (ctx.attributeMap().containsKey(PRINCIPAL_ATTRIBUTE)) {
 			return ctx.attribute(PRINCIPAL_ATTRIBUTE);
 		}
-		
+
 		Principal principal = this.resolve(ctx);
 		ctx.attribute(PRINCIPAL_ATTRIBUTE, principal);
 		return principal;
 	}
-	
+
 	public @NonNull Principal requireAuthenticated(@NonNull Context ctx, @NonNull String challenge) throws SqlException {
 		Principal principal = this.authenticate(ctx);
 		if (principal == null) {
@@ -95,7 +137,18 @@ public class AuthService {
 		}
 		return principal;
 	}
-	
+
+	/**
+	 * Requires a principal that signed in with a password or a session, tokens are rejected with 403.<br>
+	 */
+	public @NonNull Principal requirePassword(@NonNull Context ctx, @NonNull String action) throws SqlException {
+		Principal principal = this.requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
+		if (principal.tokenLevel() != null) {
+			throw HttpError.forbidden(action + " requires signing in with a password, access tokens can not be used");
+		}
+		return principal;
+	}
+
 	public @NonNull Principal requireAdmin(@NonNull Context ctx) throws SqlException {
 		Principal principal = this.requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		if (!principal.isAdmin()) {
@@ -103,7 +156,7 @@ public class AuthService {
 		}
 		return principal;
 	}
-	
+
 	/**
 	 * Checks that the request has the given access level on the repository.<br>
 	 *
@@ -118,14 +171,14 @@ public class AuthService {
 		if (principal == null) {
 			throw HttpError.unauthorized(challenge);
 		}
-		
+
 		AccessLevel level = this.effectiveLevel(principal, repository.name());
 		if (level == null || !level.includes(required)) {
 			throw HttpError.forbidden("Token not permitted to " + describe(required) + " repository " + repository.name());
 		}
 		return principal;
 	}
-	
+
 	public boolean canRead(@Nullable Principal principal, @NonNull RepositoryEntity repository) throws SqlException {
 		if (repository.publicRead()) {
 			return true;
@@ -135,7 +188,7 @@ public class AuthService {
 		}
 		return this.effectiveLevel(principal, repository.name()) != null;
 	}
-	
+
 	public @Nullable AccessLevel effectiveLevel(@NonNull Principal principal, @NonNull String repository) throws SqlException {
 		AccessLevel level = principal.admin() ? AccessLevel.DELETE : this.userService.permissionLevel(repository, principal.username());
 		if (level != null && principal.tokenLevel() != null) {
@@ -143,7 +196,23 @@ public class AuthService {
 		}
 		return level;
 	}
-	
+
+	/**
+	 * Returns the session secret of the request, null if the request is not authenticated with a session.<br>
+	 */
+	public static @Nullable String sessionSecret(@NonNull Context ctx) {
+		String authorization = ctx.header("Authorization");
+		if (authorization == null) {
+			return null;
+		}
+		authorization = authorization.strip();
+		if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+			String value = authorization.substring(7).strip();
+			return value.startsWith(UserService.SESSION_PREFIX) ? value : null;
+		}
+		return null;
+	}
+
 	private static @NonNull String describe(@NonNull AccessLevel level) {
 		return switch (level) {
 			case READ -> "read from";
@@ -151,7 +220,7 @@ public class AuthService {
 			case DELETE -> "delete from";
 		};
 	}
-	
+
 	private @Nullable Principal resolve(@NonNull Context ctx) throws SqlException {
 		String authorization = ctx.header("Authorization");
 		if (authorization != null && !authorization.isBlank()) {
@@ -159,9 +228,12 @@ public class AuthService {
 			int space = authorization.indexOf(' ');
 			String scheme = space < 0 ? "" : authorization.substring(0, space);
 			String value = space < 0 ? authorization : authorization.substring(space + 1).strip();
-			
+
 			if ("Basic".equalsIgnoreCase(scheme)) {
-				return this.basic(value);
+				return this.basic(ctx, value);
+			}
+			if ("Bearer".equalsIgnoreCase(scheme) && value.startsWith(UserService.SESSION_PREFIX)) {
+				return this.requireSession(value);
 			}
 			if ("Bearer".equalsIgnoreCase(scheme) || "token".equalsIgnoreCase(scheme)) {
 				return this.requireToken(value, null);
@@ -171,7 +243,7 @@ public class AuthService {
 			}
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-		
+
 		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
 			String apiKey = ctx.header(header);
 			if (apiKey != null && !apiKey.isBlank()) {
@@ -180,8 +252,8 @@ public class AuthService {
 		}
 		return null;
 	}
-	
-	private @NonNull Principal basic(@NonNull String encoded) throws SqlException {
+
+	private @NonNull Principal basic(@NonNull Context ctx, @NonNull String encoded) throws SqlException {
 		String decoded;
 		try {
 			decoded = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
@@ -194,39 +266,30 @@ public class AuthService {
 		}
 		String username = decoded.substring(0, colon);
 		String secret = decoded.substring(colon + 1);
-		
+
 		if ("__token__".equals(username) || secret.startsWith("lat_")) {
 			return this.requireToken(secret, "__token__".equals(username) ? null : username);
 		}
-		
+
 		String cacheKey = "basic:" + BlobStore.sha256Hex(decoded);
 		CacheEntry cached = this.cache.get(cacheKey);
 		if (cached != null && cached.expiresAt() > System.currentTimeMillis()) {
 			return cached.principal();
 		}
-		
-		UserEntity user = this.userService.get(username);
+
+		UserEntity user = this.login(ctx, username, secret);
 		if (user == null) {
-			this.verifyPassword(secret, DUMMY_HASH); // keep timing independent of whether the user exists
-			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
-		}
-		if (!this.verifyPassword(secret, user.passwordHash())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
 		Principal principal = new Principal(user.username(), user.admin(), null);
 		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null));
 		return principal;
 	}
-	
+
 	private @NonNull Principal requireToken(@NonNull String secret, @Nullable String expectedUser) throws SqlException {
 		String cacheKey = "token:" + UserService.hashToken(secret);
-		CacheEntry cached = this.cache.get(cacheKey);
-		Principal principal;
-		// Re-check the token expiry on a cache hit so a token that expires within the cache window stops working
-		if (cached != null && cached.expiresAt() > System.currentTimeMillis()
-			&& (cached.tokenExpiresAt() == null || cached.tokenExpiresAt().isAfter(Instant.now()))) {
-			principal = cached.principal();
-		} else {
+		Principal principal = this.cached(cacheKey);
+		if (principal == null) {
 			TokenEntity token = this.userService.findTokenBySecret(secret);
 			if (token == null || (token.expiresAt() != null && token.expiresAt().isBefore(Instant.now()))) {
 				throw HttpError.unauthorized("Basic realm=\"artifactory\"");
@@ -237,16 +300,45 @@ public class AuthService {
 			}
 			AccessLevel level = Objects.requireNonNullElse(AccessLevel.parse(token.level()), AccessLevel.READ);
 			principal = new Principal(user.username(), user.admin(), level);
-			// Never cache a token past its expiry: the read path re-checks tokenExpiresAt on every hit so a token
-			// that expires within the cache window stops working immediately.
 			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt()));
 		}
-		
+
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
 		return principal;
 	}
-	
-	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant tokenExpiresAt) {}
+
+	private @NonNull Principal requireSession(@NonNull String secret) throws SqlException {
+		String cacheKey = "session:" + UserService.hashToken(secret);
+		Principal principal = this.cached(cacheKey);
+		if (principal != null) {
+			return principal;
+		}
+		SessionEntity session = this.userService.findSessionBySecret(secret);
+		if (session == null || session.expiresAt().isBefore(Instant.now())) {
+			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+		}
+		UserEntity user = this.userService.get(session.username());
+		if (user == null) {
+			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+		}
+		principal = new Principal(user.username(), user.admin(), null);
+		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, session.expiresAt()));
+		return principal;
+	}
+
+	/**
+	 * Returns the cached principal, entries are re-checked against the expiry of their token or session so a credential that
+	 * expires within the cache window stops working immediately.<br>
+	 */
+	private @Nullable Principal cached(@NonNull String cacheKey) {
+		CacheEntry cached = this.cache.get(cacheKey);
+		if (cached != null && cached.expiresAt() > System.currentTimeMillis() && (cached.credentialExpiresAt() == null || cached.credentialExpiresAt().isAfter(Instant.now()))) {
+			return cached.principal();
+		}
+		return null;
+	}
+
+	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant credentialExpiresAt) {}
 }

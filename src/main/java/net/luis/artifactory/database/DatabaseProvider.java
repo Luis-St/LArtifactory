@@ -7,6 +7,7 @@ import net.luis.utils.io.database.SqlDatabase;
 import net.luis.utils.io.database.audit.SqlAuditUserProvider;
 import net.luis.utils.io.database.dialect.SqlDialects;
 import net.luis.utils.io.database.exception.SqlException;
+import net.luis.utils.io.database.migration.SqlMigrationRunner;
 import net.luis.utils.io.database.table.SqlTable;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
@@ -48,11 +49,17 @@ public class DatabaseProvider {
 		return this.database;
 	}
 	
+	/**
+	 * Creates the baseline tables if they are missing and applies all pending {@link Migrations}.<br>
+	 */
 	public void initialize() throws SqlException {
-		for (SqlTable<?> table : Tables.ALL) {
+		for (SqlTable<?> table : Tables.BASELINE) {
 			this.database.table(table).createIfNotExists();
 		}
-		LOGGER.info("Database schema initialized ({} tables)", Tables.ALL.size());
+		SqlMigrationRunner runner = SqlMigrationRunner.of(this.database);
+		runner.register(Migrations.ALL);
+		runner.migrate();
+		LOGGER.info("Database schema initialized ({} migrations registered)", Migrations.ALL.size());
 	}
 	
 	public boolean isHealthy() {

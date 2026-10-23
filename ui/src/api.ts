@@ -41,6 +41,11 @@ export function hasAuthorization(): boolean {
 	return authorization !== null;
 }
 
+/** Whether the stored authorization is a web ui session (created from a password) rather than an access token. */
+export function hasSession(): boolean {
+	return authorization !== null && authorization.startsWith('Bearer las_');
+}
+
 export function onUnauthorized(listener: () => void): void {
 	unauthorizedListener = listener;
 }
@@ -70,10 +75,10 @@ async function errorMessage(response: Response): Promise<string> {
 	return text;
 }
 
-async function request<T>(method: string, path: string, body?: unknown, silent = false): Promise<T> {
+async function send(method: string, path: string, body?: unknown, silent = false, extraHeaders?: Record<string, string>): Promise<Response> {
 	const response = await fetch(path, {
 		method,
-		headers: headers(body === undefined ? undefined : { 'Content-Type': 'application/json' }),
+		headers: { ...headers(body === undefined ? undefined : { 'Content-Type': 'application/json' }), ...extraHeaders },
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 	if (!response.ok) {
@@ -82,11 +87,35 @@ async function request<T>(method: string, path: string, body?: unknown, silent =
 		}
 		throw new ApiError(response.status, await errorMessage(response));
 	}
+	return response;
+}
+
+async function parse<T>(response: Response): Promise<T> {
 	if (response.status === 204) {
 		return undefined as T;
 	}
 	const text = await response.text();
 	return (text ? JSON.parse(text) : undefined) as T;
+}
+
+async function request<T>(method: string, path: string, body?: unknown, silent = false): Promise<T> {
+	return parse<T>(await send(method, path, body, silent));
+}
+
+/**
+ * Loads every page of a paged list endpoint, the server limits the size of a single page and reports the total in X-Total-Count.
+ */
+async function requestAll<T>(path: string, params: Record<string, string | undefined>, pageSize: number): Promise<T[]> {
+	const result: T[] = [];
+	for (;;) {
+		const response = await send('GET', `${path}${query({ ...params, offset: String(result.length), limit: String(pageSize) })}`);
+		const page = await parse<T[]>(response);
+		result.push(...page);
+		const total = Number(response.headers.get('X-Total-Count') ?? result.length);
+		if (page.length === 0 || result.length >= total) {
+			return result;
+		}
+	}
 }
 
 function query(params: Record<string, string | undefined>): string {
@@ -106,6 +135,10 @@ export const api = {
 	health: () => request<Health>('GET', '/health'),
 	// Silent: a failed sign in must not be reported as an expired session
 	me: () => request<Principal>('GET', '/api/me', undefined, true),
+	// Signs in with the password once, only the returned session token is kept
+	createSession: async (username: string, password: string, remember: boolean) =>
+		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', { remember }, true, { Authorization: basicAuthorization(username, password) })),
+	deleteSession: () => request<void>('DELETE', '/api/session', undefined, true),
 
 	repositories: () => request<Repository[]>('GET', '/api/repositories'),
 	repository: (name: string) => request<Repository>('GET', `/api/repositories/${enc(name)}`),
@@ -114,10 +147,10 @@ export const api = {
 	updateRepository: (name: string, body: { description?: string; publicRead?: boolean; allowRedeploy?: boolean }) =>
 		request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
 	deleteRepository: (name: string) => request<void>('DELETE', `/api/repositories/${enc(name)}`),
-	packages: (name: string, q?: string) => request<Package[]>('GET', `/api/repositories/${enc(name)}/packages${query({ q })}`),
+	packages: (name: string, q?: string) => requestAll<Package>(`/api/repositories/${enc(name)}/packages`, { q }, 500),
 	deletePackage: (name: string, pkg: string, version?: string) =>
 		request<void>('DELETE', `/api/repositories/${enc(name)}/packages${query({ package: pkg, version })}`),
-	files: (name: string, prefix?: string) => request<FileEntry[]>('GET', `/api/repositories/${enc(name)}/files${query({ prefix })}`),
+	files: (name: string, prefix?: string) => requestAll<FileEntry>(`/api/repositories/${enc(name)}/files`, { prefix }, 5000),
 
 	users: () => request<User[]>('GET', '/api/users'),
 	createUser: (body: { username: string; password: string; admin: boolean }) => request<User>('POST', '/api/users', body),

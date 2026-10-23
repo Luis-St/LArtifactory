@@ -19,6 +19,12 @@ import java.util.*;
 
 public class RepositoryAdminHandler {
 	
+	public static final String TOTAL_COUNT_HEADER = "X-Total-Count";
+	private static final int DEFAULT_PACKAGE_LIMIT = 100;
+	private static final int MAX_PACKAGE_LIMIT = 500;
+	private static final int DEFAULT_FILE_LIMIT = 1000;
+	private static final int MAX_FILE_LIMIT = 5000;
+	
 	private final Services services;
 	
 	public RepositoryAdminHandler(@NonNull Services services) {
@@ -135,22 +141,30 @@ public class RepositoryAdminHandler {
 		methods = HttpMethod.GET,
 		tags = "Repositories",
 		pathParams = @OpenApiParam(name = "name", required = true),
-		queryParams = @OpenApiParam(name = "q", description = "Filter packages by name"),
-		responses = @OpenApiResponse(status = "200", content = @OpenApiContent(from = PackageResponse[].class))
+		queryParams = {
+			@OpenApiParam(name = "q", description = "Filter packages by name"),
+			@OpenApiParam(name = "offset", type = Integer.class, description = "Number of packages to skip"),
+			@OpenApiParam(name = "limit", type = Integer.class, description = "Maximum number of packages (default " + DEFAULT_PACKAGE_LIMIT + ", at most " + MAX_PACKAGE_LIMIT + ")")
+		},
+		responses = @OpenApiResponse(
+			status = "200",
+			content = @OpenApiContent(from = PackageResponse[].class),
+			headers = @OpenApiParam(name = TOTAL_COUNT_HEADER, type = Long.class, description = "Total number of matching packages")
+		)
 	)
 	public void packages(@NonNull Context ctx) throws Exception {
 		RepositoryEntity repository = this.readable(ctx);
-		String query = Objects.requireNonNullElse(ctx.queryParam("q"), "").toLowerCase(Locale.ROOT);
+		String query = Objects.requireNonNullElse(ctx.queryParam("q"), "").strip();
+		long offset = queryLong(ctx, "offset", 0, Long.MAX_VALUE);
+		long limit = queryLong(ctx, "limit", DEFAULT_PACKAGE_LIMIT, MAX_PACKAGE_LIMIT);
 		List<PackageResponse> result = new ArrayList<>();
-		for (Map.Entry<String, List<PackageVersionEntity>> entry : this.services.packages().grouped(repository.name()).entrySet()) {
-			if (!entry.getKey().toLowerCase(Locale.ROOT).contains(query)) {
-				continue;
-			}
-			List<PackageResponse.VersionResponse> versions = entry.getValue().stream()
+		for (String packageName : this.services.packages().packageNames(repository.name(), query, offset, limit)) {
+			List<PackageResponse.VersionResponse> versions = this.services.packages().versions(repository.name(), packageName).stream()
 				.map(version -> new PackageResponse.VersionResponse(version.version(), version.yanked(), version.createdAt(), version.createdBy()))
 				.toList();
-			result.add(new PackageResponse(entry.getKey(), versions, this.services.packages().tags(repository.name(), entry.getKey())));
+			result.add(new PackageResponse(packageName, versions, this.services.packages().tags(repository.name(), packageName)));
 		}
+		ctx.header(TOTAL_COUNT_HEADER, String.valueOf(this.services.packages().countPackages(repository.name(), query)));
 		ctx.json(result);
 	}
 	
@@ -176,24 +190,27 @@ public class RepositoryAdminHandler {
 			throw HttpError.badRequest("Missing query parameter: package");
 		}
 		
-		List<String> versions = version != null ? List.of(version) : this.services.packages().versions(repository.name(), packageName).stream().map(PackageVersionEntity::version).toList();
-		boolean deleted = false;
-		for (String current : versions) {
-			deleted |= this.services.packages().delete(repository.name(), packageName, current);
-			deleted |= this.services.artifacts().deleteVersion(repository.name(), packageName, current) > 0;
-		}
-		if (version == null) {
-			this.services.packages().deleteTags(repository.name(), packageName);
-		} else {
-			for (Map.Entry<String, String> tag : this.services.packages().tags(repository.name(), packageName).entrySet()) {
-				if (tag.getValue().equals(version)) {
-					this.services.packages().deleteTag(repository.name(), packageName, tag.getKey());
+		this.services.artifacts().transaction(work -> {
+			List<String> versions = version != null ? List.of(version) : this.services.packages().versions(work, repository.name(), packageName).stream().map(PackageVersionEntity::version).toList();
+			boolean deleted = false;
+			for (String current : versions) {
+				deleted |= this.services.packages().delete(work, repository.name(), packageName, current);
+				deleted |= this.services.artifacts().deleteVersion(work, repository.name(), packageName, current) > 0;
+			}
+			if (!deleted) {
+				throw HttpError.notFound();
+			}
+			if (version == null) {
+				this.services.packages().deleteTags(work, repository.name(), packageName);
+			} else {
+				for (Map.Entry<String, String> tag : this.services.packages().tags(work, repository.name(), packageName).entrySet()) {
+					if (tag.getValue().equals(version)) {
+						this.services.packages().deleteTag(work, repository.name(), packageName, tag.getKey());
+					}
 				}
 			}
-		}
-		if (!deleted) {
-			throw HttpError.notFound();
-		}
+			return null;
+		});
 		ctx.status(204);
 	}
 	
@@ -204,13 +221,36 @@ public class RepositoryAdminHandler {
 		methods = HttpMethod.GET,
 		tags = "Repositories",
 		pathParams = @OpenApiParam(name = "name", required = true),
-		queryParams = @OpenApiParam(name = "prefix", description = "Only list files below this path"),
-		responses = @OpenApiResponse(status = "200", content = @OpenApiContent(from = FileResponse[].class))
+		queryParams = {
+			@OpenApiParam(name = "prefix", description = "Only list files below this path"),
+			@OpenApiParam(name = "offset", type = Integer.class, description = "Number of files to skip"),
+			@OpenApiParam(name = "limit", type = Integer.class, description = "Maximum number of files (default " + DEFAULT_FILE_LIMIT + ", at most " + MAX_FILE_LIMIT + ")")
+		},
+		responses = @OpenApiResponse(
+			status = "200",
+			content = @OpenApiContent(from = FileResponse[].class),
+			headers = @OpenApiParam(name = TOTAL_COUNT_HEADER, type = Long.class, description = "Total number of matching files")
+		)
 	)
 	public void files(@NonNull Context ctx) throws Exception {
 		RepositoryEntity repository = this.readable(ctx);
 		String prefix = Objects.requireNonNullElse(ctx.queryParam("prefix"), "");
-		ctx.json(this.services.artifacts().list(repository.name(), prefix).stream().map(FileResponse::of).toList());
+		long offset = queryLong(ctx, "offset", 0, Long.MAX_VALUE);
+		long limit = queryLong(ctx, "limit", DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT);
+		ctx.header(TOTAL_COUNT_HEADER, String.valueOf(this.services.artifacts().count(repository.name(), prefix)));
+		ctx.json(this.services.artifacts().list(repository.name(), prefix, offset, limit).stream().map(FileResponse::of).toList());
+	}
+	
+	private static long queryLong(@NonNull Context ctx, @NonNull String name, long defaultValue, long max) {
+		String value = ctx.queryParam(name);
+		if (value == null || value.isBlank()) {
+			return defaultValue;
+		}
+		try {
+			return Math.clamp(Long.parseLong(value.strip()), 0, max);
+		} catch (NumberFormatException e) {
+			throw HttpError.badRequest("Query parameter " + name + " must be a number");
+		}
 	}
 	
 	private @NonNull RepositoryEntity require(@NonNull Context ctx) throws Exception {

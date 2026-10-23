@@ -32,6 +32,14 @@ public final class Requests {
 		return proto + "://" + host + (prefix == null ? "" : prefix.replaceAll("/+$", ""));
 	}
 	
+	/**
+	 * Returns the address of the client, the first {@code X-Forwarded-For} entry is only honored behind a trusted proxy.<br>
+	 */
+	public static @NonNull String clientIp(@NonNull Context ctx, @NonNull ServerConfig config) {
+		String forwarded = config.trustProxy() ? firstHeaderValue(ctx.header("X-Forwarded-For")) : null;
+		return forwarded == null ? ctx.req().getRemoteAddr() : forwarded;
+	}
+	
 	private static @Nullable String firstHeaderValue(@Nullable String value) {
 		if (value == null || value.isBlank()) {
 			return null;
@@ -79,18 +87,6 @@ public final class Requests {
 		return accept != null && accept.toLowerCase(Locale.ROOT).contains(mediaType.toLowerCase(Locale.ROOT));
 	}
 	
-	/**
-	 * Redacts secrets that are carried in the request path (e.g. the npm logout token) before the path is logged.<br>
-	 */
-	public static @NonNull String sanitizePath(@NonNull String path) {
-		String marker = "/-/user/token/";
-		int index = path.indexOf(marker);
-		if (index >= 0) {
-			return path.substring(0, index + marker.length()) + "***";
-		}
-		return path;
-	}
-
 	/**
 	 * Writes a server generated HTML response with a restrictive content security policy, the pages only contain links.<br>
 	 */

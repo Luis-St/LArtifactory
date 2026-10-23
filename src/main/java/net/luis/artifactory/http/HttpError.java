@@ -60,6 +60,10 @@ public class HttpError extends RuntimeException {
 		return of(413, "Artifact exceeds configured max upload size");
 	}
 	
+	public static @NonNull HttpError tooManyRequests(long retryAfterSeconds) {
+		return new HttpError(429, "Too many failed logins", "text/plain", "Too many failed logins, try again later", Map.of("Retry-After", String.valueOf(retryAfterSeconds)));
+	}
+	
 	public static @NonNull HttpError methodNotAllowed() {
 		return of(405, "Method not allowed");
 	}

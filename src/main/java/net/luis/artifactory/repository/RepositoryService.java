@@ -1,6 +1,5 @@
 package net.luis.artifactory.repository;
 
-import net.luis.artifactory.database.entity.FileEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.utils.io.database.Sql;
 import net.luis.utils.io.database.SqlDatabase;
@@ -57,28 +56,32 @@ public class RepositoryService {
 	}
 	
 	public void update(@NonNull String name, @Nullable String description, @Nullable Boolean publicRead, @Nullable Boolean allowRedeploy) throws SqlException {
+		if (description == null && publicRead == null && allowRedeploy == null) {
+			return;
+		}
+		var update = this.database.from(REPOSITORIES).update();
 		if (description != null) {
-			this.database.from(REPOSITORIES).update().set(REPOSITORY_DESCRIPTION, description).where(Sql.equalTo(REPOSITORY_NAME, name)).execute();
+			update = update.set(REPOSITORY_DESCRIPTION, description);
 		}
 		if (publicRead != null) {
-			this.database.from(REPOSITORIES).update().set(REPOSITORY_PUBLIC_READ, publicRead).where(Sql.equalTo(REPOSITORY_NAME, name)).execute();
+			update = update.set(REPOSITORY_PUBLIC_READ, publicRead);
 		}
 		if (allowRedeploy != null) {
-			this.database.from(REPOSITORIES).update().set(REPOSITORY_ALLOW_REDEPLOY, allowRedeploy).where(Sql.equalTo(REPOSITORY_NAME, name)).execute();
+			update = update.set(REPOSITORY_ALLOW_REDEPLOY, allowRedeploy);
 		}
+		update.where(Sql.equalTo(REPOSITORY_NAME, name)).execute();
 		this.cache.remove(name);
 	}
 	
 	public void delete(@NonNull String name) throws SqlException {
-		List<FileEntity> files = this.database.from(FILES).select().where(Sql.equalTo(FILE_REPOSITORY, name)).fetch();
-		this.database.inTransaction(transaction -> {
-			transaction.from(FILES).delete().where(Sql.equalTo(FILE_REPOSITORY, name)).execute();
-			transaction.from(PACKAGE_VERSIONS).delete().where(Sql.equalTo(VERSION_REPOSITORY, name)).execute();
-			transaction.from(DIST_TAGS).delete().where(Sql.equalTo(TAG_REPOSITORY, name)).execute();
-			transaction.from(PERMISSIONS).delete().where(Sql.equalTo(PERMISSION_REPOSITORY, name)).execute();
-			return transaction.from(REPOSITORIES).delete().where(Sql.equalTo(REPOSITORY_NAME, name)).execute();
+		this.artifactService.transaction(work -> {
+			work.removed(work.sql().from(FILES).select().where(Sql.equalTo(FILE_REPOSITORY, name)).fetch());
+			work.sql().from(FILES).delete().where(Sql.equalTo(FILE_REPOSITORY, name)).execute();
+			work.sql().from(PACKAGE_VERSIONS).delete().where(Sql.equalTo(VERSION_REPOSITORY, name)).execute();
+			work.sql().from(DIST_TAGS).delete().where(Sql.equalTo(TAG_REPOSITORY, name)).execute();
+			work.sql().from(PERMISSIONS).delete().where(Sql.equalTo(PERMISSION_REPOSITORY, name)).execute();
+			return work.sql().from(REPOSITORIES).delete().where(Sql.equalTo(REPOSITORY_NAME, name)).execute();
 		});
 		this.cache.remove(name);
-		this.artifactService.releaseBlobs(files);
 	}
 }

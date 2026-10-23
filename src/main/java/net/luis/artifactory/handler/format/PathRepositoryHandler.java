@@ -4,11 +4,13 @@ import io.javalin.http.Context;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
+import net.luis.artifactory.database.UnitOfWork;
 import net.luis.artifactory.database.entity.FileEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.storage.StoredBlob;
+import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -55,7 +57,6 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		}
 	}
 	
-	//region GET
 	protected void get(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, boolean directory) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
 		
@@ -149,9 +150,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		String bare = dir ? name.substring(0, name.length() - 1) : name;
 		return java.net.URLEncoder.encode(bare, StandardCharsets.UTF_8).replace("+", "%20") + (dir ? "/" : "");
 	}
-	//endregion
 	
-	//region PUT
 	protected void put(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		
@@ -230,36 +229,36 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			return space < 0 ? value : value.substring(0, space);
 		}
 	}
-	//endregion
 	
-	//region DELETE
 	protected void delete(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
 		if (path.isEmpty()) {
 			throw HttpError.badRequest("Refusing to delete the repository root, delete the repository instead");
 		}
 		
-		List<FileEntity> deleted = new ArrayList<>();
-		FileEntity file = this.services.artifacts().get(repository.name(), path);
-		if (file != null) {
-			this.services.artifacts().delete(repository.name(), path);
-			deleted.add(file);
-		} else {
-			List<FileEntity> files = this.services.artifacts().list(repository.name(), path + "/");
-			this.services.artifacts().deletePrefix(repository.name(), path + "/");
-			deleted.addAll(files);
-		}
-		if (deleted.isEmpty()) {
-			throw HttpError.notFound();
-		}
-		this.afterDelete(repository, deleted);
+		this.services.artifacts().transaction(work -> {
+			List<FileEntity> deleted = new ArrayList<>();
+			FileEntity file = this.services.artifacts().get(work, repository.name(), path);
+			if (file != null) {
+				this.services.artifacts().delete(work, repository.name(), path);
+				deleted.add(file);
+			} else {
+				deleted.addAll(this.services.artifacts().deletePrefix(work, repository.name(), path + "/"));
+			}
+			if (deleted.isEmpty()) {
+				throw HttpError.notFound();
+			}
+			this.afterDelete(work, repository, deleted);
+			return null;
+		});
 		ctx.status(204);
 	}
 	
-	protected void afterDelete(@NonNull RepositoryEntity repository, @NonNull List<FileEntity> deleted) throws Exception {}
-	//endregion
+	/**
+	 * Called inside the transaction of a delete, after the files were deleted.<br>
+	 */
+	protected void afterDelete(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull List<FileEntity> deleted) throws SqlException {}
 	
-	//region Helpers
 	protected static @Nullable String checksumExtension(@NonNull String path) {
 		int dot = path.lastIndexOf('.');
 		if (dot < 0) {
@@ -323,5 +322,4 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			default -> "application/octet-stream";
 		};
 	}
-	//endregion
 }
