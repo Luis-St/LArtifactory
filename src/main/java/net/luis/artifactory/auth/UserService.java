@@ -31,6 +31,10 @@ public class UserService {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 	}
 	
+	public static @NonNull String hashToken(@NonNull String secret) {
+		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
+	}
+	
 	public void bootstrapAdmin(@NonNull String username, @Nullable String password) throws SqlException {
 		if (this.database.from(USERS).select().count() > 0) {
 			return;
@@ -169,12 +173,6 @@ public class UserService {
 		return this.database.from(SESSIONS).delete().where(Sql.before(SESSION_EXPIRES_AT, Instant.now())).execute();
 	}
 	
-	public static @NonNull String hashToken(@NonNull String secret) {
-		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
-	}
-	
-	public record CreatedToken(@NonNull TokenEntity token, @NonNull String secret) {}
-	
 	/**
 	 * Creates a web ui session and returns the plain secret, only its hash is stored.<br>
 	 */
@@ -204,6 +202,8 @@ public class UserService {
 		}
 		return this.database.from(SESSIONS).delete().where(condition).execute();
 	}
+	
+	public record CreatedToken(@NonNull TokenEntity token, @NonNull String secret) {}
 	
 	public record CreatedSession(@NonNull SessionEntity session, @NonNull String secret) {}
 }

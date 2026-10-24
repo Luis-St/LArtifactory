@@ -13,17 +13,18 @@ import net.luis.artifactory.storage.BlobStore;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
 import net.luis.artifactory.util.Versions;
-import org.jspecify.annotations.NonNull;
 import net.luis.utils.io.database.exception.SqlException;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.*;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.security.MessageDigest;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.regex.Pattern;
 
@@ -39,6 +40,104 @@ public class NpmHandler extends FormatHandler {
 	
 	public NpmHandler(@NonNull Services services) {
 		super(services);
+	}
+	
+	/**
+	 * Joins {@code @scope} and {@code name} segments of unencoded scoped package names.<br>
+	 */
+	private static @NonNull List<String> joinScopes(@NonNull List<String> segments) {
+		List<String> result = new ArrayList<>();
+		for (int i = 0; i < segments.size(); i++) {
+			String segment = segments.get(i);
+			if (segment.startsWith("@") && !segment.contains("/") && i + 1 < segments.size()) {
+				result.add(segment + "/" + segments.get(++i));
+			} else {
+				result.add(segment);
+			}
+		}
+		return result;
+	}
+	
+	private static @NonNull String tarballName(@NonNull String name, @NonNull String version) {
+		String bare = name.contains("/") ? name.substring(name.indexOf('/') + 1) : name;
+		return bare + "-" + version + ".tgz";
+	}
+	
+	private static @NonNull String revision(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
+		StringBuilder builder = new StringBuilder();
+		for (PackageVersionEntity version : versions) {
+			builder.append(version.version()).append(version.metadata().hashCode()).append(';');
+		}
+		builder.append(tags);
+		return versions.size() + "-" + BlobStore.sha256Hex(builder.toString()).substring(0, 16);
+	}
+	
+	private static byte @NonNull [] findAttachment(@NonNull JsonNode attachments, @NonNull String name, @NonNull String version) {
+		JsonNode attachment = attachments.get(name + "-" + version + ".tgz");
+		if (attachment == null) {
+			attachment = attachments.get(tarballName(name, version));
+		}
+		if (attachment == null && attachments.size() == 1) {
+			attachment = attachments.values().iterator().next();
+		}
+		if (attachment == null) {
+			throw npmError(400, "Missing tarball attachment for version " + version);
+		}
+		String data = Json.text(attachment, "data");
+		if (data == null) {
+			throw npmError(400, "Missing tarball data for version " + version);
+		}
+		byte[] tarball;
+		try {
+			tarball = Base64.getDecoder().decode(data);
+		} catch (IllegalArgumentException e) {
+			throw npmError(400, "Invalid base64 tarball data");
+		}
+		JsonNode length = attachment.get("length");
+		if (length != null && length.isNumber() && length.asLong() != tarball.length) {
+			throw npmError(400, "Attachment length does not match uploaded content");
+		}
+		return tarball;
+	}
+	
+	private static @NonNull JsonNode parseBody(byte @NonNull [] body) {
+		try {
+			return Json.parse(body);
+		} catch (JacksonException e) {
+			throw npmError(400, "Invalid json body");
+		}
+	}
+	
+	private static @NonNull ObjectNode ok() {
+		ObjectNode node = Json.object();
+		node.put("ok", true);
+		return node;
+	}
+	
+	private static @NonNull HttpError npmError(int status, @NonNull String message) {
+		ObjectNode node = Json.object();
+		node.put("error", message);
+		return HttpError.json(status, message, Json.write(node));
+	}
+	
+	private static int parseInt(@Nullable String value, int defaultValue) {
+		try {
+			return value == null ? defaultValue : Math.max(0, Integer.parseInt(value));
+		} catch (NumberFormatException e) {
+			return defaultValue;
+		}
+	}
+	
+	private static byte @NonNull [] digest(@NonNull String algorithm, byte @NonNull [] data) {
+		try {
+			return MessageDigest.getInstance(algorithm).digest(data);
+		} catch (java.security.NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
+		}
+	}
+	
+	private static @NonNull String hex(@NonNull String algorithm, byte @NonNull [] data) {
+		return HexFormat.of().formatHex(digest(algorithm, data));
 	}
 	
 	@Override
@@ -105,22 +204,6 @@ public class NpmHandler extends FormatHandler {
 		} else {
 			throw npmError(404, "Not found");
 		}
-	}
-	
-	/**
-	 * Joins {@code @scope} and {@code name} segments of unencoded scoped package names.<br>
-	 */
-	private static @NonNull List<String> joinScopes(@NonNull List<String> segments) {
-		List<String> result = new ArrayList<>();
-		for (int i = 0; i < segments.size(); i++) {
-			String segment = segments.get(i);
-			if (segment.startsWith("@") && !segment.contains("/") && i + 1 < segments.size()) {
-				result.add(segment + "/" + segments.get(++i));
-			} else {
-				result.add(segment);
-			}
-		}
-		return result;
 	}
 	
 	private void special(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments, @NonNull String method) throws Exception {
@@ -349,20 +432,6 @@ public class NpmHandler extends FormatHandler {
 		return manifest;
 	}
 	
-	private static @NonNull String tarballName(@NonNull String name, @NonNull String version) {
-		String bare = name.contains("/") ? name.substring(name.indexOf('/') + 1) : name;
-		return bare + "-" + version + ".tgz";
-	}
-	
-	private static @NonNull String revision(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
-		StringBuilder builder = new StringBuilder();
-		for (PackageVersionEntity version : versions) {
-			builder.append(version.version()).append(version.metadata().hashCode()).append(';');
-		}
-		builder.append(tags);
-		return versions.size() + "-" + BlobStore.sha256Hex(builder.toString()).substring(0, 16);
-	}
-	
 	private void publishOrUpdate(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String name, boolean revision) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		this.services.bodies().withPackageBody(ctx, data -> {
@@ -567,75 +636,7 @@ public class NpmHandler extends FormatHandler {
 		json(ctx, 200, ok());
 	}
 	
-	private static byte @NonNull [] findAttachment(@NonNull JsonNode attachments, @NonNull String name, @NonNull String version) {
-		JsonNode attachment = attachments.get(name + "-" + version + ".tgz");
-		if (attachment == null) {
-			attachment = attachments.get(tarballName(name, version));
-		}
-		if (attachment == null && attachments.size() == 1) {
-			attachment = attachments.values().iterator().next();
-		}
-		if (attachment == null) {
-			throw npmError(400, "Missing tarball attachment for version " + version);
-		}
-		String data = Json.text(attachment, "data");
-		if (data == null) {
-			throw npmError(400, "Missing tarball data for version " + version);
-		}
-		byte[] tarball;
-		try {
-			tarball = Base64.getDecoder().decode(data);
-		} catch (IllegalArgumentException e) {
-			throw npmError(400, "Invalid base64 tarball data");
-		}
-		JsonNode length = attachment.get("length");
-		if (length != null && length.isNumber() && length.asLong() != tarball.length) {
-			throw npmError(400, "Attachment length does not match uploaded content");
-		}
-		return tarball;
-	}
-	
 	private void releaseUploads(@NonNull RepositoryEntity repository, @NonNull Collection<StoredBlob> blobs) throws SqlException {
 		this.services.artifacts().releaseBlobs(blobs.stream().map(blob -> PathRepositoryHandler.fakeFile(repository, blob)).toList());
-	}
-	
-	private static @NonNull JsonNode parseBody(byte @NonNull [] body) {
-		try {
-			return Json.parse(body);
-		} catch (JacksonException e) {
-			throw npmError(400, "Invalid json body");
-		}
-	}
-	
-	private static @NonNull ObjectNode ok() {
-		ObjectNode node = Json.object();
-		node.put("ok", true);
-		return node;
-	}
-	
-	private static @NonNull HttpError npmError(int status, @NonNull String message) {
-		ObjectNode node = Json.object();
-		node.put("error", message);
-		return HttpError.json(status, message, Json.write(node));
-	}
-	
-	private static int parseInt(@Nullable String value, int defaultValue) {
-		try {
-			return value == null ? defaultValue : Math.max(0, Integer.parseInt(value));
-		} catch (NumberFormatException e) {
-			return defaultValue;
-		}
-	}
-	
-	private static byte @NonNull [] digest(@NonNull String algorithm, byte @NonNull [] data) {
-		try {
-			return MessageDigest.getInstance(algorithm).digest(data);
-		} catch (java.security.NoSuchAlgorithmException e) {
-			throw new IllegalStateException(e);
-		}
-	}
-	
-	private static @NonNull String hex(@NonNull String algorithm, byte @NonNull [] data) {
-		return HexFormat.of().formatHex(digest(algorithm, data));
 	}
 }

@@ -1,6 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
-import { api, basicAuthorization, hasAuthorization, hasSession, onUnauthorized, setAuthorization } from './api';
-import type { Principal } from './types';
+import {createContext, type ReactNode, useCallback, useContext, useEffect, useState} from 'react';
+import {api, basicAuthorization, hasAuthorization, hasSession, onUnauthorized, setAuthorization} from './api';
+import type {Principal} from './types';
 
 interface Session {
 	principal: Principal | null;
@@ -29,17 +29,17 @@ export function useSession(): Session {
 
 let nextToastId = 1;
 
-export function SessionProvider({ children }: { children: (state: { ready: boolean; principal: Principal | null }) => ReactNode }) {
+export function SessionProvider({children}: { children: (state: { ready: boolean; principal: Principal | null }) => ReactNode }) {
 	const [principal, setPrincipal] = useState<Principal | null>(null);
 	const [ready, setReady] = useState(!hasAuthorization());
 	const [toasts, setToasts] = useState<Toast[]>([]);
-
+	
 	const notify = useCallback((message: string, kind: ToastKind = 'success') => {
 		const id = nextToastId++;
-		setToasts(current => [...current, { id, message, kind }]);
+		setToasts(current => [...current, {id, message, kind}]);
 		setTimeout(() => setToasts(current => current.filter(toast => toast.id !== id)), kind === 'error' ? 7000 : 4000);
 	}, []);
-
+	
 	const logout = useCallback(() => {
 		if (hasSession()) {
 			// Revoke the session on the server, signing out locally does not wait for it
@@ -48,7 +48,7 @@ export function SessionProvider({ children }: { children: (state: { ready: boole
 		setAuthorization(null);
 		setPrincipal(null);
 	}, []);
-
+	
 	useEffect(() => {
 		onUnauthorized(() => {
 			logout();
@@ -58,7 +58,7 @@ export function SessionProvider({ children }: { children: (state: { ready: boole
 			api.me().then(setPrincipal, () => setAuthorization(null)).finally(() => setReady(true));
 		}
 	}, [logout, notify]);
-
+	
 	const login = useCallback(async (username: string, secret: string, remember: boolean) => {
 		if (username) {
 			// The password is only sent once to create a session, it is never stored in the browser
@@ -74,10 +74,10 @@ export function SessionProvider({ children }: { children: (state: { ready: boole
 			throw error;
 		}
 	}, []);
-
+	
 	return (
-		<SessionContext.Provider value={{ principal, login, logout, notify }}>
-			{children({ ready, principal })}
+		<SessionContext.Provider value={{principal, login, logout, notify}}>
+			{children({ready, principal})}
 			<div className="toasts" role="status" aria-live="polite">
 				{toasts.map(toast => (
 					<div key={toast.id} className={`toast toast-${toast.kind}`} onClick={() => setToasts(current => current.filter(entry => entry.id !== toast.id))}>

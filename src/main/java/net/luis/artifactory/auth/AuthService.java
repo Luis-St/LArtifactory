@@ -14,9 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * Authenticates requests and checks repository permissions.<br>
@@ -32,31 +30,55 @@ import java.util.concurrent.TimeUnit;
  * </ul>
  */
 public class AuthService {
-
+	
 	private static final String PRINCIPAL_ATTRIBUTE = "artifactory.principal";
 	private static final long CACHE_TTL_MILLIS = 60_000;
-
+	
 	// Bound the number of concurrent (deliberately expensive) password hashes so a flood of authentication attempts
 	// can not exhaust CPU, and verify a dummy hash for unknown users to keep the timing independent of user existence.
 	private static final Semaphore HASH_SLOTS = new Semaphore(Math.max(2, Runtime.getRuntime().availableProcessors()));
 	private static final long HASH_WAIT_MILLIS = 5_000;
 	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
-
+	
 	private final UserService userService;
 	private final ServerConfig config;
 	private final LoginThrottle throttle;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
-
+	
 	public AuthService(@NonNull UserService userService, @NonNull ServerConfig config) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
 		this.config = Objects.requireNonNull(config, "Config must not be null");
 		this.throttle = new LoginThrottle(config.loginMaxFailures(), Duration.ofMinutes(config.loginLockoutMinutes()));
 	}
-
+	
+	/**
+	 * Returns the session secret of the request, null if the request is not authenticated with a session.<br>
+	 */
+	public static @Nullable String sessionSecret(@NonNull Context ctx) {
+		String authorization = ctx.header("Authorization");
+		if (authorization == null) {
+			return null;
+		}
+		authorization = authorization.strip();
+		if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
+			String value = authorization.substring(7).strip();
+			return value.startsWith(UserService.SESSION_PREFIX) ? value : null;
+		}
+		return null;
+	}
+	
+	private static @NonNull String describe(@NonNull AccessLevel level) {
+		return switch (level) {
+			case READ -> "read from";
+			case WRITE -> "publish to";
+			case DELETE -> "delete from";
+		};
+	}
+	
 	public void invalidateCache() {
 		this.cache.clear();
 	}
-
+	
 	/**
 	 * Removes expired cache entries and login failure counters.<br>
 	 */
@@ -65,7 +87,7 @@ public class AuthService {
 		this.cache.values().removeIf(entry -> entry.expiresAt() <= now);
 		this.throttle.cleanup();
 	}
-
+	
 	/**
 	 * Verifies a password against a stored hash while bounding the number of concurrent hash computations.<br>
 	 * Password hashing is intentionally expensive, without a bound a flood of authentication attempts could exhaust
@@ -88,7 +110,7 @@ public class AuthService {
 			HASH_SLOTS.release();
 		}
 	}
-
+	
 	/**
 	 * Checks the password of a user, failed attempts count towards the login throttle of the client.<br>
 	 *
@@ -98,7 +120,7 @@ public class AuthService {
 	public @Nullable UserEntity login(@NonNull Context ctx, @NonNull String username, @NonNull String password) throws SqlException {
 		String address = Requests.clientIp(ctx, this.config);
 		this.throttle.check(address, username);
-
+		
 		UserEntity user = this.userService.get(username);
 		boolean valid;
 		if (user == null) {
@@ -114,7 +136,7 @@ public class AuthService {
 		this.throttle.success(address, username);
 		return user;
 	}
-
+	
 	/**
 	 * Authenticates the request, returns null for anonymous requests.<br>
 	 *
@@ -124,12 +146,12 @@ public class AuthService {
 		if (ctx.attributeMap().containsKey(PRINCIPAL_ATTRIBUTE)) {
 			return ctx.attribute(PRINCIPAL_ATTRIBUTE);
 		}
-
+		
 		Principal principal = this.resolve(ctx);
 		ctx.attribute(PRINCIPAL_ATTRIBUTE, principal);
 		return principal;
 	}
-
+	
 	public @NonNull Principal requireAuthenticated(@NonNull Context ctx, @NonNull String challenge) throws SqlException {
 		Principal principal = this.authenticate(ctx);
 		if (principal == null) {
@@ -137,7 +159,7 @@ public class AuthService {
 		}
 		return principal;
 	}
-
+	
 	/**
 	 * Requires a principal that signed in with a password or a session, tokens are rejected with 403.<br>
 	 */
@@ -148,7 +170,7 @@ public class AuthService {
 		}
 		return principal;
 	}
-
+	
 	public @NonNull Principal requireAdmin(@NonNull Context ctx) throws SqlException {
 		Principal principal = this.requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		if (!principal.isAdmin()) {
@@ -156,7 +178,7 @@ public class AuthService {
 		}
 		return principal;
 	}
-
+	
 	/**
 	 * Checks that the request has the given access level on the repository.<br>
 	 *
@@ -171,14 +193,14 @@ public class AuthService {
 		if (principal == null) {
 			throw HttpError.unauthorized(challenge);
 		}
-
+		
 		AccessLevel level = this.effectiveLevel(principal, repository.name());
 		if (level == null || !level.includes(required)) {
 			throw HttpError.forbidden("Token not permitted to " + describe(required) + " repository " + repository.name());
 		}
 		return principal;
 	}
-
+	
 	public boolean canRead(@Nullable Principal principal, @NonNull RepositoryEntity repository) throws SqlException {
 		if (repository.publicRead()) {
 			return true;
@@ -188,7 +210,7 @@ public class AuthService {
 		}
 		return this.effectiveLevel(principal, repository.name()) != null;
 	}
-
+	
 	public @Nullable AccessLevel effectiveLevel(@NonNull Principal principal, @NonNull String repository) throws SqlException {
 		AccessLevel level = principal.admin() ? AccessLevel.DELETE : this.userService.permissionLevel(repository, principal.username());
 		if (level != null && principal.tokenLevel() != null) {
@@ -196,31 +218,7 @@ public class AuthService {
 		}
 		return level;
 	}
-
-	/**
-	 * Returns the session secret of the request, null if the request is not authenticated with a session.<br>
-	 */
-	public static @Nullable String sessionSecret(@NonNull Context ctx) {
-		String authorization = ctx.header("Authorization");
-		if (authorization == null) {
-			return null;
-		}
-		authorization = authorization.strip();
-		if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
-			String value = authorization.substring(7).strip();
-			return value.startsWith(UserService.SESSION_PREFIX) ? value : null;
-		}
-		return null;
-	}
-
-	private static @NonNull String describe(@NonNull AccessLevel level) {
-		return switch (level) {
-			case READ -> "read from";
-			case WRITE -> "publish to";
-			case DELETE -> "delete from";
-		};
-	}
-
+	
 	private @Nullable Principal resolve(@NonNull Context ctx) throws SqlException {
 		String authorization = ctx.header("Authorization");
 		if (authorization != null && !authorization.isBlank()) {
@@ -228,7 +226,7 @@ public class AuthService {
 			int space = authorization.indexOf(' ');
 			String scheme = space < 0 ? "" : authorization.substring(0, space);
 			String value = space < 0 ? authorization : authorization.substring(space + 1).strip();
-
+			
 			if ("Basic".equalsIgnoreCase(scheme)) {
 				return this.basic(ctx, value);
 			}
@@ -243,7 +241,7 @@ public class AuthService {
 			}
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-
+		
 		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
 			String apiKey = ctx.header(header);
 			if (apiKey != null && !apiKey.isBlank()) {
@@ -252,7 +250,7 @@ public class AuthService {
 		}
 		return null;
 	}
-
+	
 	private @NonNull Principal basic(@NonNull Context ctx, @NonNull String encoded) throws SqlException {
 		String decoded;
 		try {
@@ -266,17 +264,17 @@ public class AuthService {
 		}
 		String username = decoded.substring(0, colon);
 		String secret = decoded.substring(colon + 1);
-
+		
 		if ("__token__".equals(username) || secret.startsWith("lat_")) {
 			return this.requireToken(secret, "__token__".equals(username) ? null : username);
 		}
-
+		
 		String cacheKey = "basic:" + BlobStore.sha256Hex(decoded);
 		CacheEntry cached = this.cache.get(cacheKey);
 		if (cached != null && cached.expiresAt() > System.currentTimeMillis()) {
 			return cached.principal();
 		}
-
+		
 		UserEntity user = this.login(ctx, username, secret);
 		if (user == null) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
@@ -285,7 +283,7 @@ public class AuthService {
 		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null));
 		return principal;
 	}
-
+	
 	private @NonNull Principal requireToken(@NonNull String secret, @Nullable String expectedUser) throws SqlException {
 		String cacheKey = "token:" + UserService.hashToken(secret);
 		Principal principal = this.cached(cacheKey);
@@ -302,13 +300,13 @@ public class AuthService {
 			principal = new Principal(user.username(), user.admin(), level);
 			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt()));
 		}
-
+		
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
 		return principal;
 	}
-
+	
 	private @NonNull Principal requireSession(@NonNull String secret) throws SqlException {
 		String cacheKey = "session:" + UserService.hashToken(secret);
 		Principal principal = this.cached(cacheKey);
@@ -327,7 +325,7 @@ public class AuthService {
 		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, session.expiresAt()));
 		return principal;
 	}
-
+	
 	/**
 	 * Returns the cached principal, entries are re-checked against the expiry of their token or session so a credential that
 	 * expires within the cache window stops working immediately.<br>
@@ -339,6 +337,6 @@ public class AuthService {
 		}
 		return null;
 	}
-
+	
 	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant credentialExpiresAt) {}
 }

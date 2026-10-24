@@ -1,7 +1,5 @@
 # Project guidance for Claude
-
 ## Branching policy (applies to all cloud sessions)
-
 When asked to implement a feature or make changes:
 
 - **Work directly on `main`**, or on the `dev` branch if it exists. Prefer `dev` over `main` when present.

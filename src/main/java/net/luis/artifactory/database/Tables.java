@@ -2,8 +2,8 @@ package net.luis.artifactory.database;
 
 import net.luis.artifactory.database.entity.*;
 import net.luis.utils.io.database.table.*;
-import net.luis.utils.io.database.type.parameter.SqlParameter;
 import net.luis.utils.io.database.type.SqlTypes;
+import net.luis.utils.io.database.type.parameter.SqlParameter;
 
 import java.time.Instant;
 import java.util.List;

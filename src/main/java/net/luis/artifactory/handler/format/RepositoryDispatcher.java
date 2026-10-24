@@ -15,9 +15,8 @@ import java.util.*;
  */
 public class RepositoryDispatcher {
 	
-	public static final String HOST_MAPPED_ATTRIBUTE = "artifactory.hostMapped";
 	private static final List<String> RESERVED_PREFIXES = List.of("/api/", "/health", "/swagger", "/openapi", "/webjars/", "/ui/");
-	
+	public static final String HOST_MAPPED_ATTRIBUTE = "artifactory.hostMapped";
 	private final Services services;
 	private final Map<RepositoryType, FormatHandler> handlers = new EnumMap<>(RepositoryType.class);
 	

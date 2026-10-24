@@ -24,12 +24,12 @@ public record ServerConfig(
 	int npmTokenDays,
 	int maintenanceIntervalMinutes
 ) {
-
+	
 	public ServerConfig {
 		Objects.requireNonNull(storagePath, "Storage path must not be null");
 		Objects.requireNonNull(adminUsername, "Admin username must not be null");
 		hostRepositories = Map.copyOf(Objects.requireNonNull(hostRepositories, "Host repositories must not be null"));
-
+		
 		if (port < 1 || port > 65535) {
 			throw new ConfigException(EnvKeys.PORT + " must be between 1 and 65535, got: " + port);
 		}
@@ -49,7 +49,7 @@ public record ServerConfig(
 			baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
 		}
 	}
-
+	
 	public static @NonNull ServerConfig from(@NonNull Env env) {
 		return new ServerConfig(
 			env.integer(EnvKeys.PORT, 8080),
@@ -70,13 +70,13 @@ public record ServerConfig(
 			env.integer(EnvKeys.MAINTENANCE_INTERVAL, 60)
 		);
 	}
-
+	
 	private static void requireAtLeast(@NonNull String key, int value, int min) {
 		if (value < min) {
 			throw new ConfigException(key + " must be at least " + min + ", got: " + value);
 		}
 	}
-
+	
 	/**
 	 * Parses a comma separated list of {@code host=repository} pairs.<br>
 	 * Requests to a mapped host are served by the repository at the root path, e.g. {@code npm.example.com=npm-local}.<br>

@@ -1,29 +1,29 @@
-import { useState, type FormEvent } from 'react';
-import { api } from '../api';
-import { Badge, Button, Card, Empty, ErrorBox, PageHeader, Spinner, TypeBadge, errorText } from '../components/ui';
-import { useAsync } from '../hooks';
-import { href } from '../router';
-import { useSession } from '../session';
-import { ACCESS_LEVELS, type AccessLevel } from '../types';
+import {type FormEvent, useState} from 'react';
+import {api} from '../api';
+import {Badge, Button, Card, Empty, ErrorBox, errorText, PageHeader, Spinner, TypeBadge} from '../components/ui';
+import {useAsync} from '../hooks';
+import {href} from '../router';
+import {useSession} from '../session';
+import {ACCESS_LEVELS, type AccessLevel} from '../types';
 
-export function Permissions({ params }: { params: URLSearchParams }) {
-	const { notify } = useSession();
+export function Permissions({params}: { params: URLSearchParams }) {
+	const {notify} = useSession();
 	const permissions = useAsync(() => api.permissions(), []);
 	const users = useAsync(() => api.users(), []);
 	const repositories = useAsync(() => api.repositories(), []);
 	const [userFilter, setUserFilter] = useState(params.get('username') ?? '');
 	const [repositoryFilter, setRepositoryFilter] = useState('');
-
+	
 	const [username, setUsername] = useState('');
 	const [repository, setRepository] = useState('*');
 	const [level, setLevel] = useState<AccessLevel>('READ');
 	const [busy, setBusy] = useState(false);
-
+	
 	const grant = async (event: FormEvent) => {
 		event.preventDefault();
 		setBusy(true);
 		try {
-			await api.setPermission({ repository, username, level });
+			await api.setPermission({repository, username, level});
 			notify(`Granted ${level} on ${repository === '*' ? 'all repositories' : repository} to ${username}`);
 			permissions.reload();
 		} catch (e) {
@@ -41,17 +41,17 @@ export function Permissions({ params }: { params: URLSearchParams }) {
 			notify(errorText(e), 'error');
 		}
 	};
-
+	
 	const typeOf = (name: string) => repositories.data?.find(entry => entry.name === name)?.type;
 	const rows = (permissions.data ?? [])
 		.filter(permission => (!userFilter || permission.username === userFilter) && (!repositoryFilter || permission.repository === repositoryFilter))
 		.sort((a, b) => a.username.localeCompare(b.username) || a.repository.localeCompare(b.repository));
 	const nonAdmins = (users.data ?? []).filter(user => !user.admin);
-
+	
 	return (
 		<>
-			<PageHeader title="Permissions" subtitle="Grant users access per repository or for all repositories with *. Administrators always have full access." />
-
+			<PageHeader title="Permissions" subtitle="Grant users access per repository or for all repositories with *. Administrators always have full access."/>
+			
 			<Card title="Grant access">
 				<form className="inline-form" onSubmit={grant}>
 					<select value={username} onChange={event => setUsername(event.target.value)} required aria-label="User">
@@ -69,7 +69,7 @@ export function Permissions({ params }: { params: URLSearchParams }) {
 				</form>
 				<p className="muted small">READ downloads, WRITE publishes, tags and yanks, DELETE removes artifacts. Granting again replaces the existing level.</p>
 			</Card>
-
+			
 			<div className="toolbar">
 				<select value={userFilter} onChange={event => setUserFilter(event.target.value)} aria-label="Filter user">
 					<option value="">All users</option>
@@ -81,32 +81,39 @@ export function Permissions({ params }: { params: URLSearchParams }) {
 					{(repositories.data ?? []).map(entry => <option key={entry.name} value={entry.name}>{entry.name}</option>)}
 				</select>
 			</div>
-
-			{permissions.loading && !permissions.data && <Spinner />}
-			{permissions.error && <ErrorBox error={permissions.error} onRetry={permissions.reload} />}
-			{permissions.data && (rows.length === 0 ? <Empty title="No permissions" /> : (
+			
+			{permissions.loading && !permissions.data && <Spinner/>}
+			{permissions.error && <ErrorBox error={permissions.error} onRetry={permissions.reload}/>}
+			{permissions.data && (rows.length === 0 ? <Empty title="No permissions"/> : (
 				<div className="table-wrap">
 					<table className="table">
-						<thead><tr><th>User</th><th>Repository</th><th>Level</th><th /></tr></thead>
+						<thead>
+						<tr>
+							<th>User</th>
+							<th>Repository</th>
+							<th>Level</th>
+							<th/>
+						</tr>
+						</thead>
 						<tbody>
-							{rows.map(permission => {
-								const type = typeOf(permission.repository);
-								return (
-									<tr key={`${permission.username}/${permission.repository}`}>
-										<td><strong>{permission.username}</strong></td>
-										<td>
-											{permission.repository === '*' ? <span className="muted">* (all repositories)</span> : (
-												<span className="cell-inline">
-													{type && <TypeBadge type={type} />}
-													<a className="link" href={href('repositories', permission.repository)}>{permission.repository}</a>
+						{rows.map(permission => {
+							const type = typeOf(permission.repository);
+							return (
+								<tr key={`${permission.username}/${permission.repository}`}>
+									<td><strong>{permission.username}</strong></td>
+									<td>
+										{permission.repository === '*' ? <span className="muted">* (all repositories)</span> : (
+											<span className="cell-inline">
+													{type && <TypeBadge type={type}/>}
+												<a className="link" href={href('repositories', permission.repository)}>{permission.repository}</a>
 												</span>
-											)}
-										</td>
-										<td><Badge tone={permission.level === 'DELETE' ? 'danger' : permission.level === 'WRITE' ? 'warning' : 'neutral'}>{permission.level}</Badge></td>
-										<td className="actions"><Button small variant="ghost" className="danger-text" onClick={() => revoke(permission.repository, permission.username)}>Revoke</Button></td>
-									</tr>
-								);
-							})}
+										)}
+									</td>
+									<td><Badge tone={permission.level === 'DELETE' ? 'danger' : permission.level === 'WRITE' ? 'warning' : 'neutral'}>{permission.level}</Badge></td>
+									<td className="actions"><Button small variant="ghost" className="danger-text" onClick={() => revoke(permission.repository, permission.username)}>Revoke</Button></td>
+								</tr>
+							);
+						})}
 						</tbody>
 					</table>
 				</div>

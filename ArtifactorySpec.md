@@ -1,100 +1,102 @@
 # Artifact Server — Endpoint Payload Templates
-
-Companion to the protocol spec (`artifact-server-spec.md`) and implementation spec
-(`artifact-server-implementation-spec.md`). Wire-level request/response templates for
+Companion to the protocol spec (`artifact-server-spec.md`) and implementation spec (`artifact-server-implementation-spec.md`). Wire-level request/response templates for
 every endpoint. Every variable part is a `{NamedPattern}`.
-
 Each exchange begins with a `#` comment legend giving an example value for every
 variable it uses — those `#` lines are annotations, **not** part of the HTTP wire
 format. §0 remains the master glossary (variable → meaning).
-
 Conventions:
+
 - Binary bodies shown as `<binary … bytes>`; truncated hex/base64 shown with `…`.
 - Hostnames are illustrative subdomains; nginx terminates TLS in front (impl spec §9).
 
 ---
-
 ## 0. Placeholder glossary (meanings)
-
 ### Infrastructure
-| Variable | Meaning |
-|---|---|
-| `{Host}` | server hostname |
-| `{Repo}` | Maven repository name (`releases` / `snapshots`) |
-| `{Realm}` | auth challenge realm |
-| `{Size}` | `Content-Length` in bytes |
+
+| Variable  | Meaning                                          |
+|-----------|--------------------------------------------------|
+| `{Host}`  | server hostname                                  |
+| `{Repo}`  | Maven repository name (`releases` / `snapshots`) |
+| `{Realm}` | auth challenge realm                             |
+| `{Size}`  | `Content-Length` in bytes                        |
 
 ### Credentials
-| Variable | Meaning |
-|---|---|
-| `{BasicCreds}` | base64 of `user:password` |
-| `{PypiBasic}` | base64 of `__token__:{Token}` |
-| `{Token}` | bearer token (npm) |
-| `{ApiKey}` | NuGet API key |
+
+| Variable       | Meaning                            |
+|----------------|------------------------------------|
+| `{BasicCreds}` | base64 of `user:password`          |
+| `{PypiBasic}`  | base64 of `__token__:{Token}`      |
+| `{Token}`      | bearer token (npm)                 |
+| `{ApiKey}`     | NuGet API key                      |
 | `{CargoToken}` | raw Cargo token (no scheme prefix) |
 
 ### Coordinates — Maven
-| Variable | Meaning |
-|---|---|
-| `{GroupId}` / `{GroupPath}` | group dotted / slashed |
-| `{ArtifactId}` | artifact id |
-| `{Classifier}` | optional classifier |
-| `{Ext}` | file extension (`jar`/`pom`/`module`) |
-| `{FileName}` | `{ArtifactId}-{Version}[-{Classifier}].{Ext}` |
+
+| Variable                    | Meaning                                       |
+|-----------------------------|-----------------------------------------------|
+| `{GroupId}` / `{GroupPath}` | group dotted / slashed                        |
+| `{ArtifactId}`              | artifact id                                   |
+| `{Classifier}`              | optional classifier                           |
+| `{Ext}`                     | file extension (`jar`/`pom`/`module`)         |
+| `{FileName}`                | `{ArtifactId}-{Version}[-{Classifier}].{Ext}` |
 
 ### Coordinates — package ecosystems
-| Variable | Meaning |
-|---|---|
-| `{Package}` | package/library name (npm scoped = `@{Scope}/{Name}`) |
-| `{Scope}` / `{Name}` | npm scope (no `@`) / bare name |
-| `{EncodedPackage}` | npm name with `/` → `%2f` |
-| `{NormalizedName}` | PyPI PEP 503 normalized name |
-| `{PackageId}` / `{LowerId}` | NuGet id original / lowercased |
-| `{Crate}` | Cargo crate name |
-| `{IndexPath}` | Cargo length-based index path |
+
+| Variable                    | Meaning                                               |
+|-----------------------------|-------------------------------------------------------|
+| `{Package}`                 | package/library name (npm scoped = `@{Scope}/{Name}`) |
+| `{Scope}` / `{Name}`        | npm scope (no `@`) / bare name                        |
+| `{EncodedPackage}`          | npm name with `/` → `%2f`                             |
+| `{NormalizedName}`          | PyPI PEP 503 normalized name                          |
+| `{PackageId}` / `{LowerId}` | NuGet id original / lowercased                        |
+| `{Crate}`                   | Cargo crate name                                      |
+| `{IndexPath}`               | Cargo length-based index path                         |
 
 ### Versions
-| Variable | Meaning |
-|---|---|
-| `{Version}` / `{LowerVersion}` | release version / NuGet lowercased |
-| `{BaseVersion}` | Maven snapshot base |
-| `{Timestamp}` / `{BuildNumber}` | snapshot timestamp / build counter |
-| `{SnapshotVersion}` | `{BaseVersion}-{Timestamp}-{BuildNumber}` |
-| `{LastUpdated}` / `{IsoTime}` | metadata timestamp / ISO-8601 publish time |
-| `{DistTag}` / `{TagVersion}` | npm tag name / its version |
+
+| Variable                        | Meaning                                    |
+|---------------------------------|--------------------------------------------|
+| `{Version}` / `{LowerVersion}`  | release version / NuGet lowercased         |
+| `{BaseVersion}`                 | Maven snapshot base                        |
+| `{Timestamp}` / `{BuildNumber}` | snapshot timestamp / build counter         |
+| `{SnapshotVersion}`             | `{BaseVersion}-{Timestamp}-{BuildNumber}`  |
+| `{LastUpdated}` / `{IsoTime}`   | metadata timestamp / ISO-8601 publish time |
+| `{DistTag}` / `{TagVersion}`    | npm tag name / its version                 |
 
 ### Files
-| Variable | Meaning |
-|---|---|
-| `{WheelName}` / `{SdistName}` | PyPI wheel / sdist |
-| `{TarballName}` | npm tarball |
-| `{NupkgName}` | NuGet package (`{LowerId}.{LowerVersion}.nupkg`) |
-| `{CrateFile}` | Cargo crate |
+
+| Variable                      | Meaning                                          |
+|-------------------------------|--------------------------------------------------|
+| `{WheelName}` / `{SdistName}` | PyPI wheel / sdist                               |
+| `{TarballName}`               | npm tarball                                      |
+| `{NupkgName}`                 | NuGet package (`{LowerId}.{LowerVersion}.nupkg`) |
+| `{CrateFile}`                 | Cargo crate                                      |
 
 ### Digests
-| Variable | Meaning |
-|---|---|
-| `{Sha256}` / `{Sha1}` / `{Md5}` | content hashes |
-| `{Integrity}` | npm SRI (sha512, base64) |
-| `{Cksum}` | Cargo sha256 of the `.crate` |
+
+| Variable                        | Meaning                      |
+|---------------------------------|------------------------------|
+| `{Sha256}` / `{Sha1}` / `{Md5}` | content hashes               |
+| `{Integrity}`                   | npm SRI (sha512, base64)     |
+| `{Cksum}`                       | Cargo sha256 of the `.crate` |
 
 ### Dependencies & upload metadata
-| Variable | Meaning |
-|---|---|
-| `{DepGroupId}` `{DepArtifactId}` `{DepVersion}` | Maven dependency |
-| `{DepName}` `{DepRange}` | npm dependency |
-| `{DepName}` `{DepReq}` | Cargo dependency |
-| `{RequiresPython}` | PyPI python constraint |
-| `{FileType}` `{PyTag}` `{MetadataVersion}` | PyPI upload fields |
-| `{Rev}` | npm document revision |
-| `{DlBase}` `{ApiBase}` | Cargo config URLs |
-| `{Author}` `{Description}` `{License}` | Cargo publish metadata |
+
+| Variable                                        | Meaning                |
+|-------------------------------------------------|------------------------|
+| `{DepGroupId}` `{DepArtifactId}` `{DepVersion}` | Maven dependency       |
+| `{DepName}` `{DepRange}`                        | npm dependency         |
+| `{DepName}` `{DepReq}`                          | Cargo dependency       |
+| `{RequiresPython}`                              | PyPI python constraint |
+| `{FileType}` `{PyTag}` `{MetadataVersion}`      | PyPI upload fields     |
+| `{Rev}`                                         | npm document revision  |
+| `{DlBase}` `{ApiBase}`                          | Cargo config URLs      |
+| `{Author}` `{Description}` `{License}`          | Cargo publish metadata |
 
 ---
-
 ## 1. Maven / Gradle
-
 ### 1.1 GET artifact
+
 ```http
 # {Host}       = maven.luis-st.net
 # {Repo}       = releases
@@ -107,6 +109,7 @@ Conventions:
 GET /maven/{Repo}/{GroupPath}/{ArtifactId}/{Version}/{FileName} HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/java-archive
@@ -118,6 +121,7 @@ Accept-Ranges: bytes
 ```
 
 ### 1.2 HEAD (existence check before resolve/deploy)
+
 ```http
 # {Host}       = maven.luis-st.net
 # {Repo}       = releases
@@ -130,15 +134,17 @@ Accept-Ranges: bytes
 HEAD /maven/{Repo}/{GroupPath}/{ArtifactId}/{Version}/{FileName} HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/java-archive
 Content-Length: {Size}
 ETag: "{Sha256}"
 ```
-(Not found → `404 Not Found`, no body.)
 
+(Not found → `404 Not Found`, no body.)
 ### 1.3 PUT artifact — unauthenticated, then retried with credentials
+
 ```http
 # {Host}       = maven.luis-st.net
 # {Repo}       = releases
@@ -156,11 +162,14 @@ Content-Length: {Size}
 
 <binary jar bytes>
 ```
+
 ```http
 HTTP/1.1 401 Unauthorized
 WWW-Authenticate: Basic realm="{Realm}"
 ```
+
 Retry with the credential:
+
 ```http
 PUT /maven/{Repo}/{GroupPath}/{ArtifactId}/{Version}/{FileName} HTTP/1.1
 Host: {Host}
@@ -170,11 +179,13 @@ Content-Length: {Size}
 
 <binary jar bytes>
 ```
+
 ```http
 HTTP/1.1 201 Created
 ```
 
 ### 1.4 PUT sibling checksum
+
 ```http
 # {Host}       = maven.luis-st.net
 # {Repo}       = releases
@@ -192,11 +203,13 @@ Content-Length: 40
 
 {Sha1}
 ```
+
 ```http
 HTTP/1.1 201 Created
 ```
 
 ### 1.5 GET POM
+
 ```http
 # {Host}           = maven.luis-st.net
 # {Repo}           = releases
@@ -210,6 +223,7 @@ HTTP/1.1 201 Created
 GET /maven/{Repo}/{GroupPath}/{ArtifactId}/{Version}/{ArtifactId}-{Version}.pom HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/xml
@@ -232,6 +246,7 @@ Content-Type: application/xml
 ```
 
 ### 1.6 GET release version-list metadata
+
 ```http
 # {Host}         = maven.luis-st.net
 # {Repo}         = releases
@@ -243,6 +258,7 @@ Content-Type: application/xml
 GET /maven/{Repo}/{GroupPath}/{ArtifactId}/maven-metadata.xml HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/xml
@@ -263,6 +279,7 @@ Content-Type: application/xml
 ```
 
 ### 1.7 GET snapshot metadata (server-assigned `{BuildNumber}`, impl spec §5.2)
+
 ```http
 # {Host}             = maven.luis-st.net
 # {Repo}             = snapshots
@@ -277,6 +294,7 @@ Content-Type: application/xml
 GET /maven/{Repo}/{GroupPath}/{ArtifactId}/{BaseVersion}-SNAPSHOT/maven-metadata.xml HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/xml
@@ -309,6 +327,7 @@ Content-Type: application/xml
 ```
 
 ### 1.8 Immutable-release conflict
+
 ```http
 # {Host}       = maven.luis-st.net
 # {Repo}       = releases
@@ -322,6 +341,7 @@ Host: {Host}
 Authorization: Basic {BasicCreds}
 ...
 ```
+
 ```http
 HTTP/1.1 409 Conflict
 Content-Type: text/plain
@@ -330,10 +350,9 @@ Version {Version} already exists; releases are immutable
 ```
 
 ---
-
 ## 2. PyPI / pip
-
 ### 2.1 GET simple project index — HTML (PEP 503)
+
 ```http
 # {Host}             = pypi.luis-st.net
 # {NormalizedName}   = luis-toolkit
@@ -345,6 +364,7 @@ GET /simple/{NormalizedName}/ HTTP/1.1
 Host: {Host}
 Accept: text/html
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: text/html
@@ -359,6 +379,7 @@ Content-Type: text/html
 ```
 
 ### 2.2 GET simple project index — JSON (PEP 691)
+
 ```http
 # {Host}             = pypi.luis-st.net
 # {NormalizedName}   = luis-toolkit
@@ -369,6 +390,7 @@ GET /simple/{NormalizedName}/ HTTP/1.1
 Host: {Host}
 Accept: application/vnd.pypi.simple.v1+json
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/vnd.pypi.simple.v1+json
@@ -389,6 +411,7 @@ Content-Type: application/vnd.pypi.simple.v1+json
 ```
 
 ### 2.3 GET download
+
 ```http
 # {Host}       = pypi.luis-st.net
 # {WheelName}  = luis_toolkit-1.0.7-py3-none-any.whl
@@ -397,6 +420,7 @@ Content-Type: application/vnd.pypi.simple.v1+json
 GET /packages/{WheelName} HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/octet-stream
@@ -407,6 +431,7 @@ ETag: "{Sha256}"
 ```
 
 ### 2.4 POST upload (twine legacy multipart)
+
 ```http
 # {Host}             = pypi.luis-st.net
 # {PypiBasic}        = X190b2tlbl9fOnB5cGkt…   (base64 of "__token__:{Token}")
@@ -461,10 +486,13 @@ Content-Type: application/octet-stream
 <binary wheel bytes>
 ------pypi-boundary--
 ```
+
 ```http
 HTTP/1.1 200 OK
 ```
+
 Digest mismatch:
+
 ```http
 HTTP/1.1 400 Bad Request
 Content-Type: text/plain
@@ -473,10 +501,9 @@ sha256_digest does not match uploaded content
 ```
 
 ---
-
 ## 3. npm
-
 ### 3.1 GET packument
+
 ```http
 # {Host}            = npm.luis-st.net
 # {Package}         = @luisst/toolkit
@@ -492,6 +519,7 @@ GET /{EncodedPackage} HTTP/1.1
 Host: {Host}
 Accept: application/json
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -517,6 +545,7 @@ Content-Type: application/json
 ```
 
 ### 3.2 GET tarball
+
 ```http
 # {Host}            = npm.luis-st.net
 # {EncodedPackage}  = @luisst%2ftoolkit
@@ -526,6 +555,7 @@ Content-Type: application/json
 GET /{EncodedPackage}/-/{TarballName} HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/octet-stream
@@ -536,6 +566,7 @@ ETag: "{Sha256}"
 ```
 
 ### 3.3 PUT publish (tarball base64-embedded in `_attachments`)
+
 ```http
 # {Host}            = npm.luis-st.net
 # {Package}         = @luisst/toolkit
@@ -574,13 +605,16 @@ Content-Type: application/json
   }
 }
 ```
+
 ```http
 HTTP/1.1 201 Created
 Content-Type: application/json
 
 { "ok": true, "id": "{Package}", "rev": "{Rev}" }
 ```
+
 Version already published:
+
 ```http
 HTTP/1.1 409 Conflict
 Content-Type: application/json
@@ -589,6 +623,7 @@ Content-Type: application/json
 ```
 
 ### 3.4 dist-tags read / write
+
 ```http
 # {Host}            = npm.luis-st.net
 # {EncodedPackage}  = @luisst%2ftoolkit
@@ -599,13 +634,16 @@ Content-Type: application/json
 GET /-/package/{EncodedPackage}/dist-tags HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
 
 { "latest": "{Version}" }
 ```
+
 Set a tag — the **request body is a bare JSON string** (quoted):
+
 ```http
 PUT /-/package/{EncodedPackage}/dist-tags/{DistTag} HTTP/1.1
 Host: {Host}
@@ -614,6 +652,7 @@ Content-Type: application/json
 
 "{TagVersion}"
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -622,15 +661,15 @@ Content-Type: application/json
 ```
 
 ---
-
 ## 4. NuGet V3
-
 ### 4.1 GET service index (resource discovery)
+
 ```http
 # {Host}  = nuget.luis-st.net
 GET /v3/index.json HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -647,6 +686,7 @@ Content-Type: application/json
 ```
 
 ### 4.2 GET flat-container version list
+
 ```http
 # {Host}     = nuget.luis-st.net
 # {LowerId}  = luisst.toolkit
@@ -654,6 +694,7 @@ Content-Type: application/json
 GET /v3-flatcontainer/{LowerId}/index.json HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -662,6 +703,7 @@ Content-Type: application/json
 ```
 
 ### 4.3 GET download nupkg
+
 ```http
 # {Host}          = nuget.luis-st.net
 # {LowerId}       = luisst.toolkit
@@ -672,6 +714,7 @@ Content-Type: application/json
 GET /v3-flatcontainer/{LowerId}/{LowerVersion}/{NupkgName} HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/octet-stream
@@ -682,6 +725,7 @@ ETag: "{Sha256}"
 ```
 
 ### 4.4 PUT push
+
 ```http
 # {Host}    = nuget.luis-st.net
 # {ApiKey}  = oy2abc0123def…
@@ -697,15 +741,19 @@ Content-Type: application/octet-stream
 <binary nupkg bytes>
 ------nuget-boundary--
 ```
+
 ```http
 HTTP/1.1 201 Created
 ```
+
 Existing version:
+
 ```http
 HTTP/1.1 409 Conflict
 ```
 
 ### 4.5 DELETE (unlist)
+
 ```http
 # {Host}          = nuget.luis-st.net
 # {LowerId}       = luisst.toolkit
@@ -715,15 +763,15 @@ DELETE /v3/package/{LowerId}/{LowerVersion} HTTP/1.1
 Host: {Host}
 X-NuGet-ApiKey: {ApiKey}
 ```
+
 ```http
 HTTP/1.1 204 No Content
 ```
 
 ---
-
 ## 5. Cargo (sparse index)
-
 ### 5.1 GET registry config
+
 ```http
 # {Host}     = cargo.luis-st.net
 # {DlBase}   = https://cargo.luis-st.net/api/v1/crates
@@ -731,6 +779,7 @@ HTTP/1.1 204 No Content
 GET /config.json HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -742,6 +791,7 @@ Content-Type: application/json
 ```
 
 ### 5.2 GET index file (NDJSON, one line per version)
+
 ```http
 # {Host}       = cargo.luis-st.net
 # {IndexPath}  = lu/is/luisst-toolkit     (≥4 chars → {c0c1}/{c2c3}/{Crate})
@@ -753,15 +803,17 @@ Content-Type: application/json
 GET /index/{IndexPath} HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: text/plain
 
 {"name":"{Crate}","vers":"{Version}","deps":[{"name":"{DepName}","req":"{DepReq}","features":[],"optional":false,"default_features":true,"target":null,"kind":"normal"}],"cksum":"{Cksum}","features":{},"yanked":false}
 ```
-(In index lines the dependency version field is `req`. In the publish payload below it is `version_req` — the server translates between the two.)
 
+(In index lines the dependency version field is `req`. In the publish payload below it is `version_req` — the server translates between the two.)
 ### 5.3 GET download
+
 ```http
 # {Host}     = cargo.luis-st.net
 # {Crate}    = luisst-toolkit
@@ -770,6 +822,7 @@ Content-Type: text/plain
 GET /api/v1/crates/{Crate}/{Version}/download HTTP/1.1
 Host: {Host}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/octet-stream
@@ -777,9 +830,10 @@ Content-Length: {Size}
 
 <binary .crate bytes>
 ```
-(May instead answer `302 Found` with a `Location` pointing at the blob; cargo follows it.)
 
+(May instead answer `302 Found` with a `Location` pointing at the blob; cargo follows it.)
 ### 5.4 PUT publish (length-prefixed binary frame)
+
 ```http
 # {Host}         = cargo.luis-st.net
 # {CargoToken}   = ci-token-abc123        (raw token, no scheme prefix)
@@ -819,6 +873,7 @@ Content-Length: {Size}
   "links": null
 } <4-byte LE length> <binary .crate bytes>
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -827,6 +882,7 @@ Content-Type: application/json
 ```
 
 ### 5.5 DELETE yank / PUT unyank
+
 ```http
 # {Host}        = cargo.luis-st.net
 # {Crate}       = luisst-toolkit
@@ -836,36 +892,40 @@ DELETE /api/v1/crates/{Crate}/{Version}/yank HTTP/1.1
 Host: {Host}
 Authorization: {CargoToken}
 ```
+
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
 
 { "ok": true }
 ```
+
 (Yank flips `"yanked": true` on the matching index line; it does not delete bytes.)
 
 ---
-
 ## 6. Common error payloads
-
 The `401` challenge scheme varies per ecosystem (Basic / Bearer / API-key).
+
 ```http
 # {Realm}  = maven-releases
 HTTP/1.1 401 Unauthorized
 WWW-Authenticate: Basic realm="{Realm}"
 ```
+
 ```http
 HTTP/1.1 403 Forbidden
 Content-Type: text/plain
 
 Token not permitted to publish to this repository
 ```
+
 ```http
 HTTP/1.1 404 Not Found
 Content-Type: text/plain
 
 No such package or version
 ```
+
 ```http
 # {Version} = 1.0.7
 HTTP/1.1 409 Conflict
@@ -873,12 +933,14 @@ Content-Type: text/plain
 
 Version {Version} already exists; releases are immutable
 ```
+
 ```http
 HTTP/1.1 400 Bad Request
 Content-Type: text/plain
 
 Declared digest does not match uploaded content
 ```
+
 ```http
 HTTP/1.1 413 Payload Too Large
 Content-Type: text/plain

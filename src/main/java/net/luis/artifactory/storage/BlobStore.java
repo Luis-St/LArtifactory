@@ -29,23 +29,23 @@ import java.util.stream.Stream;
  * </p>
  */
 public class BlobStore {
-
+	
 	private static final Logger LOGGER = LoggerFactory.getLogger(BlobStore.class);
 	private static final HexFormat HEX = HexFormat.of();
-
+	
 	private final Path blobRoot;
 	private final Path tempRoot;
 	private final long maxSize;
 	private final Duration orphanGracePeriod;
 	private final Striped<Lock> locks = Striped.lock(64);
-
+	
 	public BlobStore(@NonNull Path root, long maxSize, @NonNull Duration orphanGracePeriod) {
 		Objects.requireNonNull(root, "Root must not be null");
 		this.blobRoot = root.resolve("blobs");
 		this.tempRoot = root.resolve("tmp");
 		this.maxSize = maxSize;
 		this.orphanGracePeriod = Objects.requireNonNull(orphanGracePeriod, "Orphan grace period must not be null");
-
+		
 		try {
 			Files.createDirectories(this.blobRoot);
 			Files.createDirectories(this.tempRoot);
@@ -54,19 +54,35 @@ public class BlobStore {
 		}
 		LOGGER.info("Blob storage initialized at {}", root);
 	}
-
+	
+	private static boolean isDigest(@NonNull String value) {
+		return value.length() == 64 && value.chars().allMatch(c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+	}
+	
+	private static @NonNull MessageDigest digest(@NonNull String algorithm) {
+		try {
+			return MessageDigest.getInstance(algorithm);
+		} catch (NoSuchAlgorithmException e) {
+			throw new IllegalStateException("Missing digest algorithm " + algorithm, e);
+		}
+	}
+	
+	public static @NonNull String sha256Hex(@NonNull String value) {
+		return HEX.formatHex(digest("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+	}
+	
 	public long maxSize() {
 		return this.maxSize;
 	}
-
+	
 	public @NonNull StoredBlob store(@NonNull InputStream input) throws IOException {
 		Objects.requireNonNull(input, "Input must not be null");
-
+		
 		MessageDigest sha256 = digest("SHA-256");
 		MessageDigest sha1 = digest("SHA-1");
 		MessageDigest md5 = digest("MD5");
 		MessageDigest sha512 = digest("SHA-512");
-
+		
 		Path temp = Files.createTempFile(this.tempRoot, "upload-", ".tmp");
 		long size = 0;
 		try {
@@ -85,7 +101,7 @@ public class BlobStore {
 					output.write(buffer, 0, read);
 				}
 			}
-
+			
 			StoredBlob blob = new StoredBlob(HEX.formatHex(sha256.digest()), HEX.formatHex(sha1.digest()), HEX.formatHex(md5.digest()), HEX.formatHex(sha512.digest()), size);
 			Path target = this.path(blob.sha256());
 			Lock lock = this.locks.get(blob.sha256());
@@ -106,30 +122,30 @@ public class BlobStore {
 			Files.deleteIfExists(temp);
 		}
 	}
-
+	
 	public @NonNull StoredBlob store(byte @NonNull [] data) throws IOException {
 		return this.store(new ByteArrayInputStream(data));
 	}
-
+	
 	public boolean exists(@NonNull String sha256) {
 		return Files.exists(this.path(sha256));
 	}
-
+	
 	public @NonNull InputStream open(@NonNull String sha256) throws IOException {
 		return Files.newInputStream(this.path(sha256));
 	}
-
+	
 	public byte @NonNull [] read(@NonNull String sha256) throws IOException {
 		return Files.readAllBytes(this.path(sha256));
 	}
-
+	
 	public @NonNull Path path(@NonNull String sha256) {
 		if (!isDigest(sha256)) {
 			throw new IllegalArgumentException("Invalid sha256: " + sha256);
 		}
 		return this.blobRoot.resolve(sha256.substring(0, 2)).resolve(sha256.substring(2, 4)).resolve(sha256);
 	}
-
+	
 	/**
 	 * Deletes the blob if it is not referenced and was not stored within the orphan grace period.<br>
 	 *
@@ -152,7 +168,7 @@ public class BlobStore {
 			lock.unlock();
 		}
 	}
-
+	
 	/**
 	 * Deletes all blobs which are not referenced and older than the orphan grace period.<br>
 	 *
@@ -172,7 +188,7 @@ public class BlobStore {
 		}
 		return deleted;
 	}
-
+	
 	/**
 	 * Deletes temporary files (interrupted uploads, multipart caches) which were not modified for the given duration.<br>
 	 *
@@ -196,33 +212,17 @@ public class BlobStore {
 		}
 		return deleted;
 	}
-
+	
 	private boolean withinGracePeriod(@NonNull Path path) throws IOException {
 		return Files.getLastModifiedTime(path).toInstant().isAfter(Instant.now().minus(this.orphanGracePeriod));
 	}
-
-	private static boolean isDigest(@NonNull String value) {
-		return value.length() == 64 && value.chars().allMatch(c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
-	}
-
-	private static @NonNull MessageDigest digest(@NonNull String algorithm) {
-		try {
-			return MessageDigest.getInstance(algorithm);
-		} catch (NoSuchAlgorithmException e) {
-			throw new IllegalStateException("Missing digest algorithm " + algorithm, e);
-		}
-	}
-
-	public static @NonNull String sha256Hex(@NonNull String value) {
-		return HEX.formatHex(digest("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
-	}
-
+	
 	/**
 	 * Checks whether a blob is still referenced by a stored file.<br>
 	 */
 	@FunctionalInterface
 	public interface ReferenceCheck<X extends Exception> {
-
+		
 		boolean isReferenced(@NonNull String sha256) throws X;
 	}
 }

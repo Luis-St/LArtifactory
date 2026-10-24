@@ -5,7 +5,8 @@ import io.javalin.openapi.*;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
-import net.luis.artifactory.database.entity.*;
+import net.luis.artifactory.database.entity.PackageVersionEntity;
+import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.artifactory.dto.request.CreateRepositoryRequest;
 import net.luis.artifactory.dto.request.UpdateRepositoryRequest;
 import net.luis.artifactory.dto.response.*;
@@ -19,16 +20,27 @@ import java.util.*;
 
 public class RepositoryAdminHandler {
 	
-	public static final String TOTAL_COUNT_HEADER = "X-Total-Count";
 	private static final int DEFAULT_PACKAGE_LIMIT = 100;
 	private static final int MAX_PACKAGE_LIMIT = 500;
 	private static final int DEFAULT_FILE_LIMIT = 1000;
 	private static final int MAX_FILE_LIMIT = 5000;
-	
+	public static final String TOTAL_COUNT_HEADER = "X-Total-Count";
 	private final Services services;
 	
 	public RepositoryAdminHandler(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
+	}
+	
+	private static long queryLong(@NonNull Context ctx, @NonNull String name, long defaultValue, long max) {
+		String value = ctx.queryParam(name);
+		if (value == null || value.isBlank()) {
+			return defaultValue;
+		}
+		try {
+			return Math.clamp(Long.parseLong(value.strip()), 0, max);
+		} catch (NumberFormatException e) {
+			throw HttpError.badRequest("Query parameter " + name + " must be a number");
+		}
 	}
 	
 	@OpenApi(
@@ -239,18 +251,6 @@ public class RepositoryAdminHandler {
 		long limit = queryLong(ctx, "limit", DEFAULT_FILE_LIMIT, MAX_FILE_LIMIT);
 		ctx.header(TOTAL_COUNT_HEADER, String.valueOf(this.services.artifacts().count(repository.name(), prefix)));
 		ctx.json(this.services.artifacts().list(repository.name(), prefix, offset, limit).stream().map(FileResponse::of).toList());
-	}
-	
-	private static long queryLong(@NonNull Context ctx, @NonNull String name, long defaultValue, long max) {
-		String value = ctx.queryParam(name);
-		if (value == null || value.isBlank()) {
-			return defaultValue;
-		}
-		try {
-			return Math.clamp(Long.parseLong(value.strip()), 0, max);
-		} catch (NumberFormatException e) {
-			throw HttpError.badRequest("Query parameter " + name + " must be a number");
-		}
 	}
 	
 	private @NonNull RepositoryEntity require(@NonNull Context ctx) throws Exception {

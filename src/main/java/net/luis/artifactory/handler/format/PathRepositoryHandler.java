@@ -26,11 +26,103 @@ import java.util.*;
  */
 public abstract class PathRepositoryHandler extends FormatHandler {
 	
-	protected static final List<String> CHECKSUM_EXTENSIONS = List.of("sha1", "md5", "sha256", "sha512");
 	private static final DateTimeFormatter LISTING_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneOffset.UTC);
+	protected static final List<String> CHECKSUM_EXTENSIONS = List.of("sha1", "md5", "sha256", "sha512");
 	
 	protected PathRepositoryHandler(@NonNull Services services) {
 		super(services);
+	}
+	
+	protected static void serveGenerated(@NonNull Context ctx, @NonNull String path, @NonNull String content, @NonNull String contentType) {
+		byte[] data = content.getBytes(StandardCharsets.UTF_8);
+		String checksum = checksumExtension(path);
+		if (checksum != null) {
+			data = digestHex(checksum, data).getBytes(StandardCharsets.UTF_8);
+			contentType = "text/plain";
+		}
+		ctx.status(200).contentType(contentType).header("Content-Length", String.valueOf(data.length));
+		if (!Requests.isHead(ctx)) {
+			ctx.result(data);
+		}
+	}
+	
+	private static @NonNull String encodeSegment(@NonNull String name) {
+		boolean dir = name.endsWith("/");
+		String bare = dir ? name.substring(0, name.length() - 1) : name;
+		return java.net.URLEncoder.encode(bare, StandardCharsets.UTF_8).replace("+", "%20") + (dir ? "/" : "");
+	}
+	
+	private static @NonNull String readChecksum(@NonNull Context ctx) throws IOException {
+		try (InputStream input = ctx.bodyInputStream()) {
+			byte[] data = input.readNBytes(1024);
+			String value = new String(data, StandardCharsets.UTF_8).strip();
+			int space = value.indexOf(' ');
+			return space < 0 ? value : value.substring(0, space);
+		}
+	}
+	
+	protected static @Nullable String checksumExtension(@NonNull String path) {
+		int dot = path.lastIndexOf('.');
+		if (dot < 0) {
+			return null;
+		}
+		String extension = path.substring(dot + 1).toLowerCase(Locale.ROOT);
+		return CHECKSUM_EXTENSIONS.contains(extension) ? extension : null;
+	}
+	
+	protected static @NonNull String stripExtension(@NonNull String path) {
+		return path.substring(0, path.lastIndexOf('.'));
+	}
+	
+	protected static @NonNull String fileName(@NonNull String path) {
+		return path.substring(path.lastIndexOf('/') + 1);
+	}
+	
+	protected static @NonNull String digest(@NonNull FileEntity file, @NonNull String algorithm) {
+		return switch (algorithm) {
+			case "sha1" -> file.sha1();
+			case "md5" -> file.md5();
+			case "sha256" -> file.sha256();
+			case "sha512" -> file.sha512();
+			default -> throw new IllegalArgumentException("Unknown checksum " + algorithm);
+		};
+	}
+	
+	protected static @NonNull String digestHex(@NonNull String algorithm, byte @NonNull [] data) {
+		String name = switch (algorithm) {
+			case "sha1" -> "SHA-1";
+			case "md5" -> "MD5";
+			case "sha256" -> "SHA-256";
+			case "sha512" -> "SHA-512";
+			default -> throw new IllegalArgumentException("Unknown checksum " + algorithm);
+		};
+		try {
+			return HexFormat.of().formatHex(java.security.MessageDigest.getInstance(name).digest(data));
+		} catch (java.security.NoSuchAlgorithmException e) {
+			throw new IllegalStateException(e);
+		}
+	}
+	
+	protected static @NonNull FileEntity fakeFile(@NonNull RepositoryEntity repository, @NonNull StoredBlob blob) {
+		return new FileEntity(repository.name(), "", null, null, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), "", null, java.time.Instant.now(), null);
+	}
+	
+	public static @NonNull String contentType(@NonNull String path) {
+		String name = fileName(path).toLowerCase(Locale.ROOT);
+		if (checksumExtension(name) != null || name.endsWith(".asc") || name.endsWith(".txt")) {
+			return "text/plain";
+		}
+		int dot = name.lastIndexOf('.');
+		String extension = dot < 0 ? "" : name.substring(dot + 1);
+		return switch (extension) {
+			case "jar", "war", "ear", "aar" -> "application/java-archive";
+			case "pom", "xml" -> "application/xml";
+			case "module", "json" -> "application/json";
+			case "zip" -> "application/zip";
+			case "gz", "tgz" -> "application/gzip";
+			case "html", "htm" -> "text/html";
+			default -> "application/octet-stream";
+		};
 	}
 	
 	@Override
@@ -93,19 +185,6 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		return false;
 	}
 	
-	protected static void serveGenerated(@NonNull Context ctx, @NonNull String path, @NonNull String content, @NonNull String contentType) {
-		byte[] data = content.getBytes(StandardCharsets.UTF_8);
-		String checksum = checksumExtension(path);
-		if (checksum != null) {
-			data = digestHex(checksum, data).getBytes(StandardCharsets.UTF_8);
-			contentType = "text/plain";
-		}
-		ctx.status(200).contentType(contentType).header("Content-Length", String.valueOf(data.length));
-		if (!Requests.isHead(ctx)) {
-			ctx.result(data);
-		}
-	}
-	
 	private boolean listDirectory(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		String prefix = path.isEmpty() ? "" : path + "/";
 		List<FileEntity> files = this.services.artifacts().list(repository.name(), prefix);
@@ -143,12 +222,6 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		html.append("</pre>\n</body>\n</html>\n");
 		Requests.html(ctx, 200, html.toString());
 		return true;
-	}
-	
-	private static @NonNull String encodeSegment(@NonNull String name) {
-		boolean dir = name.endsWith("/");
-		String bare = dir ? name.substring(0, name.length() - 1) : name;
-		return java.net.URLEncoder.encode(bare, StandardCharsets.UTF_8).replace("+", "%20") + (dir ? "/" : "");
 	}
 	
 	protected void put(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
@@ -221,15 +294,6 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		return "File " + path + " already exists; redeploy is not allowed";
 	}
 	
-	private static @NonNull String readChecksum(@NonNull Context ctx) throws IOException {
-		try (InputStream input = ctx.bodyInputStream()) {
-			byte[] data = input.readNBytes(1024);
-			String value = new String(data, StandardCharsets.UTF_8).strip();
-			int space = value.indexOf(' ');
-			return space < 0 ? value : value.substring(0, space);
-		}
-	}
-	
 	protected void delete(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
 		if (path.isEmpty()) {
@@ -258,68 +322,4 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	 * Called inside the transaction of a delete, after the files were deleted.<br>
 	 */
 	protected void afterDelete(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull List<FileEntity> deleted) throws SqlException {}
-	
-	protected static @Nullable String checksumExtension(@NonNull String path) {
-		int dot = path.lastIndexOf('.');
-		if (dot < 0) {
-			return null;
-		}
-		String extension = path.substring(dot + 1).toLowerCase(Locale.ROOT);
-		return CHECKSUM_EXTENSIONS.contains(extension) ? extension : null;
-	}
-	
-	protected static @NonNull String stripExtension(@NonNull String path) {
-		return path.substring(0, path.lastIndexOf('.'));
-	}
-	
-	protected static @NonNull String fileName(@NonNull String path) {
-		return path.substring(path.lastIndexOf('/') + 1);
-	}
-	
-	protected static @NonNull String digest(@NonNull FileEntity file, @NonNull String algorithm) {
-		return switch (algorithm) {
-			case "sha1" -> file.sha1();
-			case "md5" -> file.md5();
-			case "sha256" -> file.sha256();
-			case "sha512" -> file.sha512();
-			default -> throw new IllegalArgumentException("Unknown checksum " + algorithm);
-		};
-	}
-	
-	protected static @NonNull String digestHex(@NonNull String algorithm, byte @NonNull [] data) {
-		String name = switch (algorithm) {
-			case "sha1" -> "SHA-1";
-			case "md5" -> "MD5";
-			case "sha256" -> "SHA-256";
-			case "sha512" -> "SHA-512";
-			default -> throw new IllegalArgumentException("Unknown checksum " + algorithm);
-		};
-		try {
-			return HexFormat.of().formatHex(java.security.MessageDigest.getInstance(name).digest(data));
-		} catch (java.security.NoSuchAlgorithmException e) {
-			throw new IllegalStateException(e);
-		}
-	}
-	
-	protected static @NonNull FileEntity fakeFile(@NonNull RepositoryEntity repository, @NonNull StoredBlob blob) {
-		return new FileEntity(repository.name(), "", null, null, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), "", null, java.time.Instant.now(), null);
-	}
-	
-	public static @NonNull String contentType(@NonNull String path) {
-		String name = fileName(path).toLowerCase(Locale.ROOT);
-		if (checksumExtension(name) != null || name.endsWith(".asc") || name.endsWith(".txt")) {
-			return "text/plain";
-		}
-		int dot = name.lastIndexOf('.');
-		String extension = dot < 0 ? "" : name.substring(dot + 1);
-		return switch (extension) {
-			case "jar", "war", "ear", "aar" -> "application/java-archive";
-			case "pom", "xml" -> "application/xml";
-			case "module", "json" -> "application/json";
-			case "zip" -> "application/zip";
-			case "gz", "tgz" -> "application/gzip";
-			case "html", "htm" -> "text/html";
-			default -> "application/octet-stream";
-		};
-	}
 }

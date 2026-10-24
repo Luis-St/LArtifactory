@@ -17,7 +17,7 @@ import static net.luis.artifactory.database.Tables.*;
  * Applied migrations are recorded in the database, a migration must never be changed once it was released, add a new one instead.<br>
  */
 public final class Migrations {
-
+	
 	public static final List<SqlMigration> ALL = List.of(
 		migration(Version.of(1, 1, 0), "Indexes for blob references, package lookups and tokens", (builder, _) -> {
 			builder.createIndex(FILES, "idx_files_sha256", index -> index.columns(FILE_SHA256).method(SqlIndexMethod.BTREE));
@@ -42,36 +42,36 @@ public final class Migrations {
 			builder.createIndex(SESSIONS, "idx_sessions_username", index -> index.columns(SESSION_USERNAME).method(SqlIndexMethod.BTREE));
 		}, (builder, _) -> builder.dropTable(SESSIONS))
 	);
-
+	
 	private Migrations() {}
-
+	
 	private static @NonNull SqlMigration migration(@NonNull Version version, @NonNull String description, @NonNull Step up, @NonNull Step down) {
 		return new SqlMigration() {
 			@Override
 			public @NonNull Version version() {
 				return version;
 			}
-
+			
 			@Override
 			public @NonNull String description() {
 				return description;
 			}
-
+			
 			@Override
 			public void up(@NonNull SqlMigrationBuilder builder, @NonNull SqlMigrationSchema schema) throws SqlException {
 				up.apply(builder, schema);
 			}
-
+			
 			@Override
 			public void down(@NonNull SqlMigrationBuilder builder, @NonNull SqlMigrationSchema schema) throws SqlException {
 				down.apply(builder, schema);
 			}
 		};
 	}
-
+	
 	@FunctionalInterface
 	private interface Step {
-
+		
 		void apply(@NonNull SqlMigrationBuilder builder, @NonNull SqlMigrationSchema schema) throws SqlException;
 	}
 }

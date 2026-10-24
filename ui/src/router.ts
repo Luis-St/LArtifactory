@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import {useEffect, useState} from 'react';
 
 /**
  * Minimal hash based router, the ui is served as static files below /ui/ so the server never sees client side routes.

@@ -1,6 +1,6 @@
-import { api } from './api';
-import { compareVersions } from './format';
-import { REPOSITORY_TYPES, type FileEntry, type Package, type Repository, type RepositoryType } from './types';
+import {api} from './api';
+import {compareVersions} from './format';
+import {type FileEntry, type Package, type Repository, REPOSITORY_TYPES, type RepositoryType} from './types';
 
 export interface RepositoryInventory {
 	repository: Repository;
@@ -37,9 +37,9 @@ export async function loadInventory(): Promise<RepositoryInventory[]> {
 	return Promise.all(repositories.map(async repository => {
 		try {
 			const [packages, files] = await Promise.all([api.packages(repository.name), api.files(repository.name)]);
-			return { repository, packages, files };
+			return {repository, packages, files};
 		} catch (error) {
-			return { repository, packages: [], files: [], error: error instanceof Error ? error.message : String(error) };
+			return {repository, packages: [], files: [], error: error instanceof Error ? error.message : String(error)};
 		}
 	}));
 }

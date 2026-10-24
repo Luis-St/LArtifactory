@@ -14,10 +14,9 @@ import java.util.regex.Pattern;
 import static net.luis.artifactory.database.Tables.*;
 
 public class RepositoryService {
-
-	public static final Pattern NAME_PATTERN = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}");
+	
 	private static final int MAX_CACHE_ENTRIES = 10_000;
-
+	public static final Pattern NAME_PATTERN = Pattern.compile("[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}");
 	private final SqlDatabase database;
 	private final ArtifactService artifactService;
 	// Bounded LRU cache: repository lookups use request supplied names (including misses), an unbounded cache would

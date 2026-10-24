@@ -3,7 +3,7 @@ package net.luis.artifactory.http;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
-import java.util.*;
+import java.util.Map;
 
 public class HttpError extends RuntimeException {
 	

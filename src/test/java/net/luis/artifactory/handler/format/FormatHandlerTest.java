@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FormatHandlerTest {
-
+	
 	@Test
 	void cargoIndexPath() {
 		assertEquals("1/a", CargoHandler.indexPath("a"));
@@ -14,14 +14,14 @@ class FormatHandlerTest {
 		assertEquals("ca/rg/cargo", CargoHandler.indexPath("cargo"));
 		assertEquals("lu/is/luisst-toolkit", CargoHandler.indexPath("Luisst-Toolkit"));
 	}
-
+	
 	@Test
 	void pypiNormalization() {
 		assertEquals("luis-toolkit", PypiHandler.normalize("Luis_Toolkit"));
 		assertEquals("luis-toolkit", PypiHandler.normalize("luis.-_toolkit"));
 		assertEquals("lartifactory-test-pkg", PypiHandler.normalize("LArtifactory_Test.Pkg"));
 	}
-
+	
 	@Test
 	void mavenReleaseCoordinates() {
 		MavenHandler.Coordinates coordinates = MavenHandler.parseCoordinates("net/luisst/toolkit/1.0.7/toolkit-1.0.7-sources.jar");
@@ -32,7 +32,7 @@ class FormatHandlerTest {
 		assertEquals("net.luisst:toolkit", coordinates.packageName());
 		assertFalse(coordinates.isSnapshot());
 	}
-
+	
 	@Test
 	void mavenSnapshotCoordinates() {
 		MavenHandler.Coordinates coordinates = MavenHandler.parseCoordinates("net/luisst/toolkit/1.1.0-SNAPSHOT/toolkit-1.1.0-20260120.143000-7.jar");
@@ -40,14 +40,14 @@ class FormatHandlerTest {
 		assertEquals("1.1.0-SNAPSHOT", coordinates.version());
 		assertTrue(coordinates.isSnapshot());
 	}
-
+	
 	@Test
 	void mavenInvalidCoordinates() {
 		assertNull(MavenHandler.parseCoordinates("net/luisst/toolkit/maven-metadata.xml"));
 		assertNull(MavenHandler.parseCoordinates("toolkit/1.0.7/toolkit-1.0.7.jar"));
 		assertNull(MavenHandler.parseCoordinates("net/luisst/toolkit/1.0.7/other-1.0.7.jar"));
 	}
-
+	
 	@Test
 	void contentTypes() {
 		assertEquals("application/java-archive", PathRepositoryHandler.contentType("a/b/c-1.0.jar"));

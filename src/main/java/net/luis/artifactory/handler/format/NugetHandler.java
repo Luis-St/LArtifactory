@@ -17,8 +17,8 @@ import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.w3c.dom.*;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.*;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -35,13 +35,159 @@ import java.util.zip.ZipFile;
  * Source url: {@code {base}/nuget/{repo}/v3/index.json}<br>
  */
 public class NugetHandler extends FormatHandler {
-
+	
 	private static final int MAX_NUSPEC_SIZE = 8 * 1024 * 1024;
 	private static final int MAX_TAKE = 1000;
 	private static final Pattern PACKAGE_ID = Pattern.compile("\\w+(?:[.\\-_]\\w+)*");
-
+	
 	public NugetHandler(@NonNull Services services) {
 		super(services);
+	}
+	
+	private static void addResource(@NonNull ArrayNode resources, @NonNull String id, @NonNull String type) {
+		resources.addObject().put("@id", id).put("@type", type);
+	}
+	
+	private static @NonNull Nuspec readNuspec(@NonNull File file) throws Exception {
+		try (ZipFile zip = new ZipFile(file)) {
+			ZipEntry nuspecEntry = null;
+			for (ZipEntry entry : Collections.list(zip.entries())) {
+				if (!entry.getName().contains("/") && entry.getName().toLowerCase(Locale.ROOT).endsWith(".nuspec")) {
+					nuspecEntry = entry;
+					break;
+				}
+			}
+			if (nuspecEntry == null) {
+				throw new IllegalArgumentException("No .nuspec file found in package");
+			}
+			if (nuspecEntry.getSize() > MAX_NUSPEC_SIZE) {
+				throw new IllegalArgumentException(".nuspec file is too large");
+			}
+			byte[] data;
+			try (InputStream input = zip.getInputStream(nuspecEntry)) {
+				// Bound the decompressed size, a maliciously crafted (highly compressed) .nuspec entry could otherwise
+				// exhaust memory. The zip entry's declared size can be spoofed, so enforce the limit on the actual read.
+				data = input.readNBytes(MAX_NUSPEC_SIZE + 1);
+				if (data.length > MAX_NUSPEC_SIZE) {
+					throw new IllegalArgumentException(".nuspec file exceeds the maximum supported size");
+				}
+			}
+			
+			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+			factory.setNamespaceAware(true);
+			factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+			factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+			Document document = factory.newDocumentBuilder().parse(new ByteArrayInputStream(data));
+			Element metadataElement = child(document.getDocumentElement(), "metadata");
+			if (metadataElement == null) {
+				throw new IllegalArgumentException("Missing metadata element in .nuspec");
+			}
+			
+			String id = childText(metadataElement, "id");
+			String version = childText(metadataElement, "version");
+			if (id == null || version == null) {
+				throw new IllegalArgumentException("Missing id or version in .nuspec");
+			}
+			if (!PACKAGE_ID.matcher(id).matches()) {
+				throw new IllegalArgumentException("Invalid package id: " + id);
+			}
+			
+			ObjectNode metadata = Json.object();
+			metadata.put("id", id);
+			metadata.put("nuspec", new String(data, StandardCharsets.UTF_8));
+			for (String field : List.of("description", "authors", "title", "summary", "projectUrl")) {
+				String value = childText(metadataElement, field);
+				if (value != null) {
+					metadata.put(field, value);
+				}
+			}
+			Element license = child(metadataElement, "license");
+			if (license != null && "expression".equals(license.getAttribute("type"))) {
+				metadata.put("licenseExpression", license.getTextContent().strip());
+			}
+			String tags = childText(metadataElement, "tags");
+			if (tags != null) {
+				ArrayNode array = metadata.putArray("tags");
+				Arrays.stream(tags.split("[\\s,;]+")).filter(tag -> !tag.isBlank()).forEach(array::add);
+			}
+			metadata.set("dependencyGroups", dependencyGroups(child(metadataElement, "dependencies")));
+			return new Nuspec(id, version, metadata);
+		}
+	}
+	
+	private static @NonNull ArrayNode dependencyGroups(@Nullable Element dependencies) {
+		ArrayNode groups = Json.array();
+		if (dependencies == null) {
+			return groups;
+		}
+		List<Element> groupElements = children(dependencies, "group");
+		if (groupElements.isEmpty()) {
+			ObjectNode group = groups.addObject();
+			group.put("@type", "PackageDependencyGroup");
+			addDependencies(group, dependencies);
+			return groups;
+		}
+		for (Element groupElement : groupElements) {
+			ObjectNode group = groups.addObject();
+			group.put("@type", "PackageDependencyGroup");
+			if (groupElement.hasAttribute("targetFramework")) {
+				group.put("targetFramework", groupElement.getAttribute("targetFramework"));
+			}
+			addDependencies(group, groupElement);
+		}
+		return groups;
+	}
+	
+	private static void addDependencies(@NonNull ObjectNode group, @NonNull Element parent) {
+		ArrayNode array = group.putArray("dependencies");
+		for (Element dependency : children(parent, "dependency")) {
+			ObjectNode node = array.addObject();
+			node.put("@type", "PackageDependency");
+			node.put("id", dependency.getAttribute("id"));
+			String range = dependency.getAttribute("version");
+			node.put("range", range.isBlank() ? "(, )" : (range.startsWith("[") || range.startsWith("(") ? range : "[" + range + ", )"));
+		}
+	}
+	
+	private static @NonNull List<Element> children(@NonNull Element parent, @NonNull String name) {
+		List<Element> result = new ArrayList<>();
+		NodeList nodes = parent.getChildNodes();
+		for (int i = 0; i < nodes.getLength(); i++) {
+			if (nodes.item(i) instanceof Element element && name.equals(element.getLocalName() == null ? element.getNodeName() : element.getLocalName())) {
+				result.add(element);
+			}
+		}
+		return result;
+	}
+	
+	private static @Nullable Element child(@NonNull Element parent, @NonNull String name) {
+		List<Element> elements = children(parent, name);
+		return elements.isEmpty() ? null : elements.getFirst();
+	}
+	
+	private static @Nullable String childText(@NonNull Element parent, @NonNull String name) {
+		Element element = child(parent, name);
+		if (element == null) {
+			return null;
+		}
+		String text = element.getTextContent().strip();
+		return text.isEmpty() ? null : text;
+	}
+	
+	private static @NonNull String normalize(@NonNull String version) {
+		try {
+			return Versions.normalizeNuGet(version);
+		} catch (IllegalArgumentException e) {
+			throw HttpError.badRequest(e.getMessage());
+		}
+	}
+	
+	private static int parseInt(@Nullable String value, int defaultValue) {
+		try {
+			return value == null ? defaultValue : Math.max(0, Integer.parseInt(value));
+		} catch (NumberFormatException e) {
+			return defaultValue;
+		}
 	}
 	
 	@Override
@@ -118,10 +264,6 @@ public class NugetHandler extends FormatHandler {
 		}
 		addResource(resources, base + "/v3/package", "PackagePublish/2.0.0");
 		json(ctx, 200, root);
-	}
-	
-	private static void addResource(@NonNull ArrayNode resources, @NonNull String id, @NonNull String type) {
-		resources.addObject().put("@id", id).put("@type", type);
 	}
 	
 	private @NonNull List<PackageVersionEntity> sortedVersions(@NonNull RepositoryEntity repository, @NonNull String lowerId) throws Exception {
@@ -374,146 +516,4 @@ public class NugetHandler extends FormatHandler {
 	}
 	
 	private record Nuspec(@NonNull String id, @NonNull String version, @NonNull ObjectNode metadata) {}
-	
-	private static @NonNull Nuspec readNuspec(@NonNull File file) throws Exception {
-		try (ZipFile zip = new ZipFile(file)) {
-			ZipEntry nuspecEntry = null;
-			for (ZipEntry entry : Collections.list(zip.entries())) {
-				if (!entry.getName().contains("/") && entry.getName().toLowerCase(Locale.ROOT).endsWith(".nuspec")) {
-					nuspecEntry = entry;
-					break;
-				}
-			}
-			if (nuspecEntry == null) {
-				throw new IllegalArgumentException("No .nuspec file found in package");
-			}
-			if (nuspecEntry.getSize() > MAX_NUSPEC_SIZE) {
-				throw new IllegalArgumentException(".nuspec file is too large");
-			}
-			byte[] data;
-			try (InputStream input = zip.getInputStream(nuspecEntry)) {
-				// Bound the decompressed size, a maliciously crafted (highly compressed) .nuspec entry could otherwise
-				// exhaust memory. The zip entry's declared size can be spoofed, so enforce the limit on the actual read.
-				data = input.readNBytes(MAX_NUSPEC_SIZE + 1);
-				if (data.length > MAX_NUSPEC_SIZE) {
-					throw new IllegalArgumentException(".nuspec file exceeds the maximum supported size");
-				}
-			}
-			
-			DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-			factory.setNamespaceAware(true);
-			factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
-			factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-			Document document = factory.newDocumentBuilder().parse(new ByteArrayInputStream(data));
-			Element metadataElement = child(document.getDocumentElement(), "metadata");
-			if (metadataElement == null) {
-				throw new IllegalArgumentException("Missing metadata element in .nuspec");
-			}
-			
-			String id = childText(metadataElement, "id");
-			String version = childText(metadataElement, "version");
-			if (id == null || version == null) {
-				throw new IllegalArgumentException("Missing id or version in .nuspec");
-			}
-			if (!PACKAGE_ID.matcher(id).matches()) {
-				throw new IllegalArgumentException("Invalid package id: " + id);
-			}
-			
-			ObjectNode metadata = Json.object();
-			metadata.put("id", id);
-			metadata.put("nuspec", new String(data, StandardCharsets.UTF_8));
-			for (String field : List.of("description", "authors", "title", "summary", "projectUrl")) {
-				String value = childText(metadataElement, field);
-				if (value != null) {
-					metadata.put(field, value);
-				}
-			}
-			Element license = child(metadataElement, "license");
-			if (license != null && "expression".equals(license.getAttribute("type"))) {
-				metadata.put("licenseExpression", license.getTextContent().strip());
-			}
-			String tags = childText(metadataElement, "tags");
-			if (tags != null) {
-				ArrayNode array = metadata.putArray("tags");
-				Arrays.stream(tags.split("[\\s,;]+")).filter(tag -> !tag.isBlank()).forEach(array::add);
-			}
-			metadata.set("dependencyGroups", dependencyGroups(child(metadataElement, "dependencies")));
-			return new Nuspec(id, version, metadata);
-		}
-	}
-	
-	private static @NonNull ArrayNode dependencyGroups(@Nullable Element dependencies) {
-		ArrayNode groups = Json.array();
-		if (dependencies == null) {
-			return groups;
-		}
-		List<Element> groupElements = children(dependencies, "group");
-		if (groupElements.isEmpty()) {
-			ObjectNode group = groups.addObject();
-			group.put("@type", "PackageDependencyGroup");
-			addDependencies(group, dependencies);
-			return groups;
-		}
-		for (Element groupElement : groupElements) {
-			ObjectNode group = groups.addObject();
-			group.put("@type", "PackageDependencyGroup");
-			if (groupElement.hasAttribute("targetFramework")) {
-				group.put("targetFramework", groupElement.getAttribute("targetFramework"));
-			}
-			addDependencies(group, groupElement);
-		}
-		return groups;
-	}
-	
-	private static void addDependencies(@NonNull ObjectNode group, @NonNull Element parent) {
-		ArrayNode array = group.putArray("dependencies");
-		for (Element dependency : children(parent, "dependency")) {
-			ObjectNode node = array.addObject();
-			node.put("@type", "PackageDependency");
-			node.put("id", dependency.getAttribute("id"));
-			String range = dependency.getAttribute("version");
-			node.put("range", range.isBlank() ? "(, )" : (range.startsWith("[") || range.startsWith("(") ? range : "[" + range + ", )"));
-		}
-	}
-	
-	private static @NonNull List<Element> children(@NonNull Element parent, @NonNull String name) {
-		List<Element> result = new ArrayList<>();
-		NodeList nodes = parent.getChildNodes();
-		for (int i = 0; i < nodes.getLength(); i++) {
-			if (nodes.item(i) instanceof Element element && name.equals(element.getLocalName() == null ? element.getNodeName() : element.getLocalName())) {
-				result.add(element);
-			}
-		}
-		return result;
-	}
-	
-	private static @Nullable Element child(@NonNull Element parent, @NonNull String name) {
-		List<Element> elements = children(parent, name);
-		return elements.isEmpty() ? null : elements.getFirst();
-	}
-	
-	private static @Nullable String childText(@NonNull Element parent, @NonNull String name) {
-		Element element = child(parent, name);
-		if (element == null) {
-			return null;
-		}
-		String text = element.getTextContent().strip();
-		return text.isEmpty() ? null : text;
-	}
-	
-	private static @NonNull String normalize(@NonNull String version) {
-		try {
-			return Versions.normalizeNuGet(version);
-		} catch (IllegalArgumentException e) {
-			throw HttpError.badRequest(e.getMessage());
-		}
-	}
-	
-	private static int parseInt(@Nullable String value, int defaultValue) {
-		try {
-			return value == null ? defaultValue : Math.max(0, Integer.parseInt(value));
-		} catch (NumberFormatException e) {
-			return defaultValue;
-		}
-	}
 }

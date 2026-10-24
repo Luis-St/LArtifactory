@@ -1,4 +1,4 @@
-import type { Repository } from './types';
+import type {Repository} from './types';
 
 export interface Snippet {
 	title: string;
@@ -34,22 +34,22 @@ export function setupSnippets(repository: Repository, username: string): Snippet
 			];
 		case 'generic':
 			return [
-				{ title: 'Upload', code: `curl -u ${username}:<token> -T ./file.zip ${url}/path/to/file.zip` },
-				{ title: 'Download', code: `curl -u ${username}:<token> -O ${url}/path/to/file.zip` },
-				{ title: 'Delete', code: `curl -u ${username}:<token> -X DELETE ${url}/path/to/file.zip` },
+				{title: 'Upload', code: `curl -u ${username}:<token> -T ./file.zip ${url}/path/to/file.zip`},
+				{title: 'Download', code: `curl -u ${username}:<token> -O ${url}/path/to/file.zip`},
+				{title: 'Delete', code: `curl -u ${username}:<token> -X DELETE ${url}/path/to/file.zip`},
 			];
 		case 'pypi':
 			return [
-				{ title: 'pip install', code: `pip install --index-url ${url.replace('://', `://${username}:<token>@`)}/simple/ my-package` },
-				{ title: 'pip.conf', code: `[global]\nindex-url = ${url.replace('://', `://${username}:<token>@`)}/simple/` },
-				{ title: 'twine upload', code: `twine upload --repository-url ${url}/ -u __token__ -p <token> dist/*` },
-				{ title: '~/.pypirc', code: `[distutils]\nindex-servers = ${id}\n\n[${id}]\nrepository = ${url}/\nusername = __token__\npassword = <token>` },
+				{title: 'pip install', code: `pip install --index-url ${url.replace('://', `://${username}:<token>@`)}/simple/ my-package`},
+				{title: 'pip.conf', code: `[global]\nindex-url = ${url.replace('://', `://${username}:<token>@`)}/simple/`},
+				{title: 'twine upload', code: `twine upload --repository-url ${url}/ -u __token__ -p <token> dist/*`},
+				{title: '~/.pypirc', code: `[distutils]\nindex-servers = ${id}\n\n[${id}]\nrepository = ${url}/\nusername = __token__\npassword = <token>`},
 			];
 		case 'npm':
 			return [
-				{ title: '.npmrc', code: `registry=${url}/\n${host}/:_authToken=<token>` },
-				{ title: '.npmrc (scoped)', code: `@my-scope:registry=${url}/\n${host}/:_authToken=<token>` },
-				{ title: 'Publish', code: `npm publish --registry ${url}/` },
+				{title: '.npmrc', code: `registry=${url}/\n${host}/:_authToken=<token>`},
+				{title: '.npmrc (scoped)', code: `@my-scope:registry=${url}/\n${host}/:_authToken=<token>`},
+				{title: 'Publish', code: `npm publish --registry ${url}/`},
 			];
 		case 'nuget':
 			return [
@@ -57,13 +57,13 @@ export function setupSnippets(repository: Repository, username: string): Snippet
 					title: 'nuget.config',
 					code: `<configuration>\n\t<packageSources>\n\t\t<add key="${id}" value="${url}/v3/index.json" />\n\t</packageSources>\n\t<packageSourceCredentials>\n\t\t<${id}>\n\t\t\t<add key="Username" value="${username}" />\n\t\t\t<add key="ClearTextPassword" value="<token>" />\n\t\t</${id}>\n\t</packageSourceCredentials>\n</configuration>`,
 				},
-				{ title: 'Push', code: `dotnet nuget push package.nupkg --source ${url}/v3/index.json --api-key <token>` },
+				{title: 'Push', code: `dotnet nuget push package.nupkg --source ${url}/v3/index.json --api-key <token>`},
 			];
 		case 'cargo':
 			return [
-				{ title: '.cargo/config.toml', code: `[registries.${id}]\nindex = "sparse+${url}/index/"` },
-				{ title: 'Login & publish', code: `cargo login --registry ${id} <token>\ncargo publish --registry ${id}` },
-				{ title: 'Cargo.toml dependency', code: `[dependencies]\nmy-crate = { version = "1.0", registry = "${id}" }` },
+				{title: '.cargo/config.toml', code: `[registries.${id}]\nindex = "sparse+${url}/index/"`},
+				{title: 'Login & publish', code: `cargo login --registry ${id} <token>\ncargo publish --registry ${id}`},
+				{title: 'Cargo.toml dependency', code: `[dependencies]\nmy-crate = { version = "1.0", registry = "${id}" }`},
 			];
 	}
 }

@@ -5,7 +5,6 @@ import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
 import net.luis.artifactory.database.entity.RepositoryEntity;
-import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.repository.RepositoryType;
 import net.luis.utils.io.database.exception.SqlException;
@@ -24,6 +23,18 @@ public abstract class FormatHandler {
 	
 	protected FormatHandler(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
+	}
+	
+	protected static @Nullable String username(@Nullable Principal principal) {
+		return principal == null ? null : principal.username();
+	}
+	
+	protected static void text(@NonNull Context ctx, int status, @NonNull String body) {
+		ctx.status(status).contentType("text/plain; charset=utf-8").result(body);
+	}
+	
+	protected static void json(@NonNull Context ctx, int status, @NonNull Object body) {
+		ctx.status(status).contentType("application/json").result(net.luis.artifactory.util.Json.write(body));
 	}
 	
 	public abstract @NonNull RepositoryType type();
@@ -45,22 +56,10 @@ public abstract class FormatHandler {
 		return this.services.auth().authorize(ctx, repository, level, this.challenge(ctx, repository));
 	}
 	
-	protected static @Nullable String username(@Nullable Principal principal) {
-		return principal == null ? null : principal.username();
-	}
-	
 	protected @NonNull String repositoryUrl(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		if (Boolean.TRUE.equals(ctx.attribute(RepositoryDispatcher.HOST_MAPPED_ATTRIBUTE))) {
 			return Requests.baseUrl(ctx, this.services.config());
 		}
 		return Requests.baseUrl(ctx, this.services.config()) + "/" + this.type().id() + "/" + repository.name();
-	}
-	
-	protected static void text(@NonNull Context ctx, int status, @NonNull String body) {
-		ctx.status(status).contentType("text/plain; charset=utf-8").result(body);
-	}
-	
-	protected static void json(@NonNull Context ctx, int status, @NonNull Object body) {
-		ctx.status(status).contentType("application/json").result(net.luis.artifactory.util.Json.write(body));
 	}
 }

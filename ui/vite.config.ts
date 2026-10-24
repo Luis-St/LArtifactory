@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import {defineConfig} from 'vite';
 import react from '@vitejs/plugin-react';
 
 // The ui is served by the server at /ui/, during development the api is proxied to a locally running server

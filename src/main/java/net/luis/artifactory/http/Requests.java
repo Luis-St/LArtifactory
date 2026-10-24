@@ -17,7 +17,7 @@ public final class Requests {
 		if (config.baseUrl() != null) {
 			return config.baseUrl();
 		}
-
+		
 		// X-Forwarded-* headers are client controlled, only honored when the deployment opts in (behind a trusted proxy)
 		boolean trustProxy = config.trustProxy();
 		String proto = trustProxy ? firstHeaderValue(ctx.header("X-Forwarded-Proto")) : null;
@@ -93,7 +93,7 @@ public final class Requests {
 	public static void html(@NonNull Context ctx, int status, @NonNull String html) {
 		ctx.status(status).header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'").html(html);
 	}
-
+	
 	public static @NonNull String escapeHtml(@NonNull String value) {
 		StringBuilder builder = new StringBuilder(value.length());
 		for (char c : value.toCharArray()) {
@@ -112,7 +112,7 @@ public final class Requests {
 	public static @NonNull String escapeXml(@NonNull String value) {
 		return escapeHtml(value);
 	}
-
+	
 	/**
 	 * Redacts token secrets ({@code lat_...}) that appear in a request path (e.g. the npm logout url) so they are not written to logs.
 	 */

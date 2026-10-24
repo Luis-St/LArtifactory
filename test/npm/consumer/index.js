@@ -1,3 +1,3 @@
-const { hello } = require("@lartifactory/test-lib");
+const {hello} = require("@lartifactory/test-lib");
 
 console.log(hello());

@@ -22,7 +22,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import static net.luis.artifactory.http.Requests.escapeXml;
+import static net.luis.artifactory.http.Requests.*;
 
 /**
  * Maven 2 layout repository used by Maven and Gradle.<br>
@@ -42,25 +42,6 @@ public class MavenHandler extends PathRepositoryHandler {
 		super(services);
 	}
 	
-	@Override
-	public @NonNull RepositoryType type() {
-		return RepositoryType.MAVEN;
-	}
-	
-	/**
-	 * Coordinates of an artifact file within the Maven 2 layout.<br>
-	 */
-	public record Coordinates(@NonNull String groupId, @NonNull String artifactId, @NonNull String version, @NonNull String fileName) {
-		
-		public @NonNull String packageName() {
-			return this.groupId + ":" + this.artifactId;
-		}
-		
-		public boolean isSnapshot() {
-			return this.version.endsWith("-SNAPSHOT");
-		}
-	}
-	
 	public static @Nullable Coordinates parseCoordinates(@NonNull String path) {
 		String[] segments = path.split("/");
 		if (segments.length < 4) {
@@ -77,6 +58,11 @@ public class MavenHandler extends PathRepositoryHandler {
 			matches = fileName.startsWith(artifactId + "-" + base + "-");
 		}
 		return matches ? new Coordinates(groupId, artifactId, version, fileName) : null;
+	}
+	
+	@Override
+	public @NonNull RepositoryType type() {
+		return RepositoryType.MAVEN;
 	}
 	
 	@Override
@@ -175,8 +161,6 @@ public class MavenHandler extends PathRepositoryHandler {
 		xml.append("  </versioning>\n</metadata>\n");
 		return xml.toString();
 	}
-	
-	private record SnapshotFile(@NonNull String timestamp, int buildNumber, @Nullable String classifier, @NonNull String extension, @NonNull FileEntity file) {}
 	
 	private @NonNull List<SnapshotFile> snapshotFiles(@NonNull RepositoryEntity repository, @NonNull String directory, @NonNull String artifactId, @NonNull String baseVersion) throws Exception {
 		List<SnapshotFile> result = new ArrayList<>();
@@ -331,4 +315,20 @@ public class MavenHandler extends PathRepositoryHandler {
 			}
 		}
 	}
+	
+	/**
+	 * Coordinates of an artifact file within the Maven 2 layout.<br>
+	 */
+	public record Coordinates(@NonNull String groupId, @NonNull String artifactId, @NonNull String version, @NonNull String fileName) {
+		
+		public @NonNull String packageName() {
+			return this.groupId + ":" + this.artifactId;
+		}
+		
+		public boolean isSnapshot() {
+			return this.version.endsWith("-SNAPSHOT");
+		}
+	}
+	
+	private record SnapshotFile(@NonNull String timestamp, int buildNumber, @Nullable String classifier, @NonNull String extension, @NonNull FileEntity file) {}
 }

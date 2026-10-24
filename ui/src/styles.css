@@ -1391,19 +1391,19 @@ input:disabled {
 	.menu-btn {
 		display: inline-flex;
 	}
-
+	
 	.topbar {
 		padding: 0 16px;
 	}
-
+	
 	.content {
 		padding: 20px 16px;
 	}
-
+	
 	.user-name {
 		display: none;
 	}
-
+	
 	.snippet-grid, .two-columns {
 		grid-template-columns: minmax(0, 1fr);
 	}

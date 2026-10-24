@@ -20,7 +20,7 @@ export function formatDate(value: string | null | undefined): string {
 	if (!value) {
 		return '—';
 	}
-	return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+	return new Date(value).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
 }
 
 export function formatRelative(value: string | null | undefined): string {
@@ -32,7 +32,7 @@ export function formatRelative(value: string | null | undefined): string {
 	let amount = seconds;
 	for (const [size, unit] of steps) {
 		if (Math.abs(amount) < size) {
-			return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(-Math.round(amount), unit);
+			return new Intl.RelativeTimeFormat(undefined, {numeric: 'auto'}).format(-Math.round(amount), unit);
 		}
 		amount /= size;
 	}

@@ -4,7 +4,8 @@ import io.javalin.http.Context;
 import io.javalin.openapi.*;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.*;
-import net.luis.artifactory.database.entity.*;
+import net.luis.artifactory.database.entity.TokenEntity;
+import net.luis.artifactory.database.entity.UserEntity;
 import net.luis.artifactory.dto.request.*;
 import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
@@ -13,7 +14,7 @@ import org.jspecify.annotations.NonNull;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -27,6 +28,15 @@ public class UserAdminHandler {
 	
 	public UserAdminHandler(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
+	}
+	
+	private static void validatePassword(String password) {
+		if (password == null || password.length() < 12) {
+			throw HttpError.badRequest("Password must have at least 12 characters");
+		}
+		if (password.length() > 256) {
+			throw HttpError.badRequest("Password must have at most 256 characters");
+		}
 	}
 	
 	@OpenApi(
@@ -186,15 +196,6 @@ public class UserAdminHandler {
 		this.services.users().delete(username);
 		this.services.auth().invalidateCache();
 		ctx.status(204);
-	}
-	
-	private static void validatePassword(String password) {
-		if (password == null || password.length() < 12) {
-			throw HttpError.badRequest("Password must have at least 12 characters");
-		}
-		if (password.length() > 256) {
-			throw HttpError.badRequest("Password must have at most 256 characters");
-		}
 	}
 	
 	@OpenApi(

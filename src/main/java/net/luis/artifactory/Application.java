@@ -36,7 +36,7 @@ import java.util.UUID;
 import java.util.concurrent.*;
 
 public class Application {
-
+	
 	private static final Logger LOGGER = LoggerFactory.getLogger(Application.class);
 	private static final List<HandlerType> REPOSITORY_METHODS = List.of(HandlerType.GET, HandlerType.HEAD, HandlerType.PUT, HandlerType.POST, HandlerType.DELETE, HandlerType.PATCH);
 	/**
@@ -46,7 +46,7 @@ public class Application {
 	private static final Duration TEMPORARY_FILE_MAX_AGE = Duration.ofHours(24);
 	private static final String UI_CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
 		"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
-
+	
 	static void main() throws SqlException {
 		Env env = Env.ofSystem();
 		Server server = start(ServerConfig.from(env), DatabaseConfig.from(env));
@@ -56,7 +56,7 @@ public class Application {
 			LOGGER.info("LArtifactory stopped");
 		}));
 	}
-
+	
 	/**
 	 * Initializes the database and storage and starts the http server.<br>
 	 */
@@ -64,7 +64,7 @@ public class Application {
 		DatabaseProvider databaseProvider = new DatabaseProvider(databaseConfig, SqlAuditUserProvider.empty());
 		databaseProvider.initialize();
 		SqlDatabase database = databaseProvider.getDatabase();
-
+		
 		BlobStore blobStore = new BlobStore(serverConfig.storagePath(), serverConfig.maxUploadSize(), ORPHAN_GRACE_PERIOD);
 		UserService userService = new UserService(database);
 		userService.bootstrapAdmin(serverConfig.adminUsername(), serverConfig.adminPassword());
@@ -78,15 +78,15 @@ public class Application {
 			new PackageService(database),
 			new BodyReader(Math.min(serverConfig.maxBufferedUploadSize(), serverConfig.maxUploadSize() * 2), Runtime.getRuntime().maxMemory())
 		);
-
+		
 		Javalin app = createApp(services, databaseProvider).start(serverConfig.port());
 		LOGGER.info("LArtifactory started on port {}", app.port());
-
+		
 		ScheduledExecutorService maintenance = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("maintenance").daemon().factory());
 		maintenance.scheduleWithFixedDelay(() -> runMaintenance(services), 1, serverConfig.maintenanceIntervalMinutes(), TimeUnit.MINUTES);
 		return new Server(app, databaseProvider, services, maintenance);
 	}
-
+	
 	/**
 	 * Removes orphaned blobs, stale temporary files and expired sessions.<br>
 	 */
@@ -103,14 +103,14 @@ public class Application {
 			LOGGER.error("Maintenance failed", e);
 		}
 	}
-
+	
 	private static @NonNull Javalin createApp(@NonNull Services services, @NonNull DatabaseProvider databaseProvider) {
 		ServerConfig serverConfig = services.config();
 		var healthHandler = new HealthHandler(databaseProvider);
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);
 		var userAdminHandler = new UserAdminHandler(services);
 		var dispatcher = new RepositoryDispatcher(services);
-
+		
 		return Javalin.create(config -> {
 			config.startup.showJavalinBanner = false;
 			config.http.defaultContentType = "application/json";
@@ -118,7 +118,7 @@ public class Application {
 			// Only applies to bodies read as a whole (json requests), uploads are streamed or read through the BodyReader with their own limits
 			config.http.maxRequestSize = BodyReader.MAX_JSON_BODY;
 			config.jsonMapper(new JavalinJackson3(Json.MAPPER, false));
-
+			
 			// Package managers send encoded slashes (npm: @scope%2fname), which jetty rejects by default
 			config.jetty.modifyHttpConfiguration(httpConfig -> httpConfig.setUriCompliance(UriCompliance.LEGACY));
 			config.jetty.modifyServletContextHandler(handler -> handler.getServletHandler().setDecodeAmbiguousURIs(true));
@@ -126,7 +126,7 @@ public class Application {
 			config.jetty.multipartConfig.maxTotalRequestSize(serverConfig.maxUploadSize() * 2, SizeUnit.BYTES);
 			config.jetty.multipartConfig.maxInMemoryFileSize(1, SizeUnit.MB);
 			config.jetty.multipartConfig.cacheDirectory(serverConfig.storagePath().resolve("tmp").toString());
-
+			
 			// The OpenAPI spec and Swagger UI are served without authentication, keep them disabled unless explicitly enabled.
 			if (serverConfig.apiDocsEnabled()) {
 				config.registerPlugin(new OpenApiPlugin(pluginConfig ->
@@ -138,7 +138,7 @@ public class Application {
 				));
 				config.registerPlugin(new SwaggerPlugin());
 			}
-
+			
 			// Web ui (built from ui/ into the classpath), client side routing uses the url hash
 			config.staticFiles.add(staticFiles -> {
 				staticFiles.hostedPath = "/ui";
@@ -150,7 +150,7 @@ public class Application {
 				staticFiles.headers.put("X-Content-Type-Options", "nosniff");
 			});
 			config.spaRoot.addFile("/ui", "/ui/index.html", Location.CLASSPATH);
-
+			
 			config.routes.before(ctx -> {
 				String traceId = UUID.randomUUID().toString();
 				MDC.put("trace_id", traceId);
@@ -165,19 +165,19 @@ public class Application {
 					ctx.header("X-Frame-Options", "DENY");
 				}
 			});
-
+			
 			config.routes.before(dispatcher::handleMappedHost);
-
+			
 			config.routes.after(ctx -> {
 				Long start = ctx.attribute("request_start");
 				if (start != null) {
 					MDC.put("duration_ms", String.valueOf((System.nanoTime() - start) / 1_000_000));
 				}
-
+				
 				LOGGER.info("{} {} {}", ctx.method(), Requests.sanitizePath(ctx.path()), ctx.status());
 				MDC.clear();
 			});
-
+			
 			config.routes.exception(HttpError.class, (e, ctx) -> {
 				ctx.status(e.status());
 				// The web ui handles authentication itself, a challenge would open the login dialog of the browser
@@ -205,14 +205,14 @@ public class Application {
 				LOGGER.error("Unhandled exception on {} {}", ctx.method(), Requests.sanitizePath(ctx.path()), e);
 				ctx.status(500).json(new ErrorResponse("Internal server error"));
 			});
-
+			
 			// Health
 			config.routes.get("/health", healthHandler::health);
-
+			
 			// Web ui
 			config.routes.get("/", ctx -> ctx.redirect("/ui/"));
 			config.routes.get("/ui", ctx -> ctx.redirect("/ui/"));
-
+			
 			// Management api
 			config.routes.get("/api/me", userAdminHandler::me);
 			config.routes.post("/api/session", userAdminHandler::createSession);
@@ -235,7 +235,7 @@ public class Application {
 			config.routes.get("/api/tokens", userAdminHandler::listTokens);
 			config.routes.post("/api/tokens", userAdminHandler::createToken);
 			config.routes.delete("/api/tokens/{id}", userAdminHandler::deleteToken);
-
+			
 			// Repositories: /{type}/{repository}/...
 			for (RepositoryType type : RepositoryType.values()) {
 				for (HandlerType method : REPOSITORY_METHODS) {
@@ -245,16 +245,16 @@ public class Application {
 			}
 		});
 	}
-
+	
 	/**
 	 * A running server with its resources.<br>
 	 */
 	public record Server(@NonNull Javalin app, @NonNull DatabaseProvider databaseProvider, @NonNull Services services, @NonNull ScheduledExecutorService maintenance) {
-
+		
 		public int port() {
 			return this.app.port();
 		}
-
+		
 		public void stop() {
 			this.maintenance.shutdownNow();
 			this.app.stop();

@@ -17,7 +17,8 @@ import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.*;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -37,16 +38,6 @@ public class CargoHandler extends FormatHandler {
 		super(services);
 	}
 	
-	@Override
-	public @NonNull RepositoryType type() {
-		return RepositoryType.CARGO;
-	}
-	
-	@Override
-	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
-		return "Cargo login_url=\"" + this.repositoryUrl(ctx, repository) + "/me\"";
-	}
-	
 	/**
 	 * Returns the path of the index file of a crate as defined by the Cargo registry index format.<br>
 	 */
@@ -58,6 +49,109 @@ public class CargoHandler extends FormatHandler {
 			case 3 -> "3/" + name.charAt(0) + "/" + name;
 			default -> name.substring(0, 2) + "/" + name.substring(2, 4) + "/" + name;
 		};
+	}
+	
+	/**
+	 * Translates the publish metadata into an index line.<br>
+	 */
+	private static @NonNull ObjectNode indexLine(@NonNull JsonNode payload, @NonNull String name, @NonNull String version, @NonNull String checksum) {
+		ObjectNode line = Json.object();
+		line.put("name", name);
+		line.put("vers", version);
+		ArrayNode deps = line.putArray("deps");
+		JsonNode payloadDeps = payload.get("deps");
+		if (payloadDeps != null && payloadDeps.isArray()) {
+			for (JsonNode dep : payloadDeps) {
+				ObjectNode node = deps.addObject();
+				String depName = Json.text(dep, "name", "");
+				String explicitName = Json.text(dep, "explicit_name_in_toml");
+				node.put("name", explicitName != null ? explicitName : depName);
+				node.put("req", Json.text(dep, "version_req", "*"));
+				node.set("features", dep.has("features") ? dep.get("features") : Json.array());
+				node.put("optional", dep.path("optional").asBoolean(false));
+				node.put("default_features", dep.path("default_features").asBoolean(true));
+				String target = Json.text(dep, "target");
+				if (target == null) {
+					node.putNull("target");
+				} else {
+					node.put("target", target);
+				}
+				node.put("kind", Json.text(dep, "kind", "normal"));
+				String registry = Json.text(dep, "registry");
+				if (registry != null) {
+					node.put("registry", registry);
+				}
+				if (explicitName != null) {
+					node.put("package", depName);
+				}
+			}
+		}
+		line.put("cksum", checksum);
+		
+		ObjectNode features = line.putObject("features");
+		ObjectNode features2 = Json.object();
+		JsonNode payloadFeatures = payload.get("features");
+		if (payloadFeatures != null && payloadFeatures.isObject()) {
+			for (Map.Entry<String, JsonNode> entry : payloadFeatures.properties()) {
+				boolean extended = false;
+				for (JsonNode value : entry.getValue()) {
+					String text = value.asString();
+					if (text.startsWith("dep:") || text.contains("?/")) {
+						extended = true;
+					}
+				}
+				(extended ? features2 : features).set(entry.getKey(), entry.getValue());
+			}
+		}
+		if (!features2.isEmpty()) {
+			line.set("features2", features2);
+			line.put("v", 2);
+		}
+		line.put("yanked", false);
+		String links = Json.text(payload, "links");
+		if (links != null) {
+			line.put("links", links);
+		}
+		String rustVersion = Json.text(payload, "rust_version");
+		if (rustVersion != null) {
+			line.put("rust_version", rustVersion);
+		}
+		ObjectNode publish = Json.object();
+		for (String field : List.of("description", "license", "repository", "homepage", "documentation")) {
+			String value = Json.text(payload, field);
+			if (value != null) {
+				publish.put(field, value);
+			}
+		}
+		if (!publish.isEmpty()) {
+			line.set("_publish", publish);
+		}
+		return line;
+	}
+	
+	private static @NonNull String cratePath(@NonNull String crate, @NonNull String version) {
+		return "crates/" + crate + "/" + crate + "-" + version + ".crate";
+	}
+	
+	private static @NonNull String stripBuild(@NonNull String version) {
+		int plus = version.indexOf('+');
+		return plus < 0 ? version : version.substring(0, plus);
+	}
+	
+	private static @NonNull HttpError cargoError(int status, @NonNull String message) {
+		ObjectNode root = Json.object();
+		root.putArray("errors").addObject().put("detail", message);
+		return HttpError.json(status, message, Json.write(root));
+	}
+	
+	@Override
+	public @NonNull RepositoryType type() {
+		return RepositoryType.CARGO;
+	}
+	
+	@Override
+	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+		return "Cargo login_url=\"" + this.repositoryUrl(ctx, repository) + "/me\"";
 	}
 	
 	@Override
@@ -258,84 +352,6 @@ public class CargoHandler extends FormatHandler {
 		json(ctx, 200, root);
 	}
 	
-	/**
-	 * Translates the publish metadata into an index line.<br>
-	 */
-	private static @NonNull ObjectNode indexLine(@NonNull JsonNode payload, @NonNull String name, @NonNull String version, @NonNull String checksum) {
-		ObjectNode line = Json.object();
-		line.put("name", name);
-		line.put("vers", version);
-		ArrayNode deps = line.putArray("deps");
-		JsonNode payloadDeps = payload.get("deps");
-		if (payloadDeps != null && payloadDeps.isArray()) {
-			for (JsonNode dep : payloadDeps) {
-				ObjectNode node = deps.addObject();
-				String depName = Json.text(dep, "name", "");
-				String explicitName = Json.text(dep, "explicit_name_in_toml");
-				node.put("name", explicitName != null ? explicitName : depName);
-				node.put("req", Json.text(dep, "version_req", "*"));
-				node.set("features", dep.has("features") ? dep.get("features") : Json.array());
-				node.put("optional", dep.path("optional").asBoolean(false));
-				node.put("default_features", dep.path("default_features").asBoolean(true));
-				String target = Json.text(dep, "target");
-				if (target == null) {
-					node.putNull("target");
-				} else {
-					node.put("target", target);
-				}
-				node.put("kind", Json.text(dep, "kind", "normal"));
-				String registry = Json.text(dep, "registry");
-				if (registry != null) {
-					node.put("registry", registry);
-				}
-				if (explicitName != null) {
-					node.put("package", depName);
-				}
-			}
-		}
-		line.put("cksum", checksum);
-		
-		ObjectNode features = line.putObject("features");
-		ObjectNode features2 = Json.object();
-		JsonNode payloadFeatures = payload.get("features");
-		if (payloadFeatures != null && payloadFeatures.isObject()) {
-			for (Map.Entry<String, JsonNode> entry : payloadFeatures.properties()) {
-				boolean extended = false;
-				for (JsonNode value : entry.getValue()) {
-					String text = value.asString();
-					if (text.startsWith("dep:") || text.contains("?/")) {
-						extended = true;
-					}
-				}
-				(extended ? features2 : features).set(entry.getKey(), entry.getValue());
-			}
-		}
-		if (!features2.isEmpty()) {
-			line.set("features2", features2);
-			line.put("v", 2);
-		}
-		line.put("yanked", false);
-		String links = Json.text(payload, "links");
-		if (links != null) {
-			line.put("links", links);
-		}
-		String rustVersion = Json.text(payload, "rust_version");
-		if (rustVersion != null) {
-			line.put("rust_version", rustVersion);
-		}
-		ObjectNode publish = Json.object();
-		for (String field : List.of("description", "license", "repository", "homepage", "documentation")) {
-			String value = Json.text(payload, field);
-			if (value != null) {
-				publish.put(field, value);
-			}
-		}
-		if (!publish.isEmpty()) {
-			line.set("_publish", publish);
-		}
-		return line;
-	}
-	
 	private void yank(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String crate, @NonNull String version, boolean yanked) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.WRITE);
 		if (!this.services.packages().setYanked(repository.name(), crate, version, yanked)) {
@@ -366,20 +382,5 @@ public class CargoHandler extends FormatHandler {
 			root.put("msg", "owners are managed with repository permissions");
 		}
 		json(ctx, 200, root);
-	}
-	
-	private static @NonNull String cratePath(@NonNull String crate, @NonNull String version) {
-		return "crates/" + crate + "/" + crate + "-" + version + ".crate";
-	}
-	
-	private static @NonNull String stripBuild(@NonNull String version) {
-		int plus = version.indexOf('+');
-		return plus < 0 ? version : version.substring(0, plus);
-	}
-	
-	private static @NonNull HttpError cargoError(int status, @NonNull String message) {
-		ObjectNode root = Json.object();
-		root.putArray("errors").addObject().put("detail", message);
-		return HttpError.json(status, message, Json.write(root));
 	}
 }

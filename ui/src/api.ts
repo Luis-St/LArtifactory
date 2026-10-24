@@ -1,4 +1,4 @@
-import type { AccessLevel, FileEntry, Health, Package, Permission, Principal, Repository, Token, User } from './types';
+import type {AccessLevel, FileEntry, Health, Package, Permission, Principal, Repository, Token, User} from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -52,7 +52,7 @@ export function onUnauthorized(listener: () => void): void {
 
 function headers(extra?: Record<string, string>): Record<string, string> {
 	// X-Requested-With prevents the server from sending a WWW-Authenticate challenge, which would open the browser login dialog
-	const result: Record<string, string> = { 'X-Requested-With': 'XMLHttpRequest', ...extra };
+	const result: Record<string, string> = {'X-Requested-With': 'XMLHttpRequest', ...extra};
 	if (authorization) {
 		result.Authorization = authorization;
 	}
@@ -78,7 +78,7 @@ async function errorMessage(response: Response): Promise<string> {
 async function send(method: string, path: string, body?: unknown, silent = false, extraHeaders?: Record<string, string>): Promise<Response> {
 	const response = await fetch(path, {
 		method,
-		headers: { ...headers(body === undefined ? undefined : { 'Content-Type': 'application/json' }), ...extraHeaders },
+		headers: {...headers(body === undefined ? undefined : {'Content-Type': 'application/json'}), ...extraHeaders},
 		body: body === undefined ? undefined : JSON.stringify(body),
 	});
 	if (!response.ok) {
@@ -107,8 +107,8 @@ async function request<T>(method: string, path: string, body?: unknown, silent =
  */
 async function requestAll<T>(path: string, params: Record<string, string | undefined>, pageSize: number): Promise<T[]> {
 	const result: T[] = [];
-	for (;;) {
-		const response = await send('GET', `${path}${query({ ...params, offset: String(result.length), limit: String(pageSize) })}`);
+	for (; ;) {
+		const response = await send('GET', `${path}${query({...params, offset: String(result.length), limit: String(pageSize)})}`);
 		const page = await parse<T[]>(response);
 		result.push(...page);
 		const total = Number(response.headers.get('X-Total-Count') ?? result.length);
@@ -137,9 +137,9 @@ export const api = {
 	me: () => request<Principal>('GET', '/api/me', undefined, true),
 	// Signs in with the password once, only the returned session token is kept
 	createSession: async (username: string, password: string, remember: boolean) =>
-		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', { remember }, true, { Authorization: basicAuthorization(username, password) })),
+		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', {remember}, true, {Authorization: basicAuthorization(username, password)})),
 	deleteSession: () => request<void>('DELETE', '/api/session', undefined, true),
-
+	
 	repositories: () => request<Repository[]>('GET', '/api/repositories'),
 	repository: (name: string) => request<Repository>('GET', `/api/repositories/${enc(name)}`),
 	createRepository: (body: { name: string; type: string; description?: string; publicRead: boolean; allowRedeploy: boolean }) =>
@@ -147,21 +147,21 @@ export const api = {
 	updateRepository: (name: string, body: { description?: string; publicRead?: boolean; allowRedeploy?: boolean }) =>
 		request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
 	deleteRepository: (name: string) => request<void>('DELETE', `/api/repositories/${enc(name)}`),
-	packages: (name: string, q?: string) => requestAll<Package>(`/api/repositories/${enc(name)}/packages`, { q }, 500),
+	packages: (name: string, q?: string) => requestAll<Package>(`/api/repositories/${enc(name)}/packages`, {q}, 500),
 	deletePackage: (name: string, pkg: string, version?: string) =>
-		request<void>('DELETE', `/api/repositories/${enc(name)}/packages${query({ package: pkg, version })}`),
-	files: (name: string, prefix?: string) => requestAll<FileEntry>(`/api/repositories/${enc(name)}/files`, { prefix }, 5000),
-
+		request<void>('DELETE', `/api/repositories/${enc(name)}/packages${query({package: pkg, version})}`),
+	files: (name: string, prefix?: string) => requestAll<FileEntry>(`/api/repositories/${enc(name)}/files`, {prefix}, 5000),
+	
 	users: () => request<User[]>('GET', '/api/users'),
 	createUser: (body: { username: string; password: string; admin: boolean }) => request<User>('POST', '/api/users', body),
 	updateUser: (username: string, body: { password?: string; admin?: boolean }) => request<User>('PATCH', `/api/users/${enc(username)}`, body),
 	deleteUser: (username: string) => request<void>('DELETE', `/api/users/${enc(username)}`),
-
+	
 	permissions: (filter: { repository?: string; username?: string } = {}) => request<Permission[]>('GET', `/api/permissions${query(filter)}`),
 	setPermission: (body: { repository: string; username: string; level: AccessLevel }) => request<Permission>('PUT', '/api/permissions', body),
-	deletePermission: (repository: string, username: string) => request<void>('DELETE', `/api/permissions${query({ repository, username })}`),
-
-	tokens: (username?: string) => request<Token[]>('GET', `/api/tokens${query({ username })}`),
+	deletePermission: (repository: string, username: string) => request<void>('DELETE', `/api/permissions${query({repository, username})}`),
+	
+	tokens: (username?: string) => request<Token[]>('GET', `/api/tokens${query({username})}`),
 	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number }) => request<Token>('POST', '/api/tokens', body),
 	deleteToken: (id: string) => request<void>('DELETE', `/api/tokens/${enc(id)}`),
 };
@@ -190,7 +190,7 @@ function downloadPath(repository: Repository, file: FileEntry): string {
  * Downloads a file of a repository with the current credentials, plain links would not carry the authorization header.
  */
 export async function downloadFile(repository: Repository, file: FileEntry): Promise<void> {
-	const response = await fetch(`/${repository.type}/${enc(repository.name)}/${downloadPath(repository, file)}`, { headers: headers() });
+	const response = await fetch(`/${repository.type}/${enc(repository.name)}/${downloadPath(repository, file)}`, {headers: headers()});
 	if (!response.ok) {
 		throw new ApiError(response.status, await errorMessage(response));
 	}

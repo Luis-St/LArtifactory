@@ -28,11 +28,11 @@ public enum AccessLevel {
 		}
 	}
 	
-	public boolean includes(@NonNull AccessLevel other) {
-		return this.ordinal() >= other.ordinal();
-	}
-	
 	public static @NonNull AccessLevel min(@NonNull AccessLevel first, @NonNull AccessLevel second) {
 		return first.ordinal() <= second.ordinal() ? first : second;
+	}
+	
+	public boolean includes(@NonNull AccessLevel other) {
+		return this.ordinal() >= other.ordinal();
 	}
 }
