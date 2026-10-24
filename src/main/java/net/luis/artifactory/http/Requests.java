@@ -33,10 +33,13 @@ public final class Requests {
 	}
 	
 	/**
-	 * Returns the address of the client, the first {@code X-Forwarded-For} entry is only honored behind a trusted proxy.<br>
+	 * Returns the address of the client, the last {@code X-Forwarded-For} entry is only honored behind a trusted proxy.<br>
+	 * The proxy appends the address it received the request from, all entries before it are sent by the client and can be forged.<br>
 	 */
 	public static @NonNull String clientIp(@NonNull Context ctx, @NonNull ServerConfig config) {
-		String forwarded = config.trustProxy() ? firstHeaderValue(ctx.header("X-Forwarded-For")) : null;
+		// A client sent header may arrive as its own header line before the one of the proxy
+		List<String> values = config.trustProxy() ? Collections.list(ctx.req().getHeaders("X-Forwarded-For")) : List.of();
+		String forwarded = values.isEmpty() ? null : lastHeaderValue(values.getLast());
 		return forwarded == null ? ctx.req().getRemoteAddr() : forwarded;
 	}
 	
@@ -46,6 +49,14 @@ public final class Requests {
 		}
 		int comma = value.indexOf(',');
 		return (comma < 0 ? value : value.substring(0, comma)).strip();
+	}
+	
+	private static @Nullable String lastHeaderValue(@Nullable String value) {
+		if (value == null || value.isBlank()) {
+			return null;
+		}
+		String last = value.substring(value.lastIndexOf(',') + 1).strip();
+		return last.isEmpty() ? null : last;
 	}
 	
 	/**

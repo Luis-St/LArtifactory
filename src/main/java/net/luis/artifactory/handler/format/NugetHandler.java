@@ -38,6 +38,7 @@ public class NugetHandler extends FormatHandler {
 	
 	private static final int MAX_NUSPEC_SIZE = 8 * 1024 * 1024;
 	private static final int MAX_TAKE = 1000;
+	private static final int SEARCH_BATCH_SIZE = 100;
 	private static final Pattern PACKAGE_ID = Pattern.compile("\\w+(?:[.\\-_]\\w+)*");
 	
 	public NugetHandler(@NonNull Services services) {
@@ -372,11 +373,17 @@ public class NugetHandler extends FormatHandler {
 		boolean prerelease = Boolean.parseBoolean(ctx.queryParam("prerelease"));
 		String base = this.repositoryUrl(ctx, repository);
 		
-		// Versions are loaded one package at a time, only the requested page is kept in memory
+		// Versions are loaded for a batch of packages at a time, only the requested page is kept in memory
 		List<ObjectNode> results = new ArrayList<>();
 		int totalHits = 0;
-		for (String lowerId : this.services.packages().packageNames(repository.name())) {
-			List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), lowerId).stream()
+		List<String> names = this.services.packages().packageNames(repository.name());
+		Map<String, List<PackageVersionEntity>> versionsByName = Map.of();
+		for (int index = 0; index < names.size(); index++) {
+			if (index % SEARCH_BATCH_SIZE == 0) {
+				versionsByName = this.services.packages().versions(repository.name(), names.subList(index, Math.min(names.size(), index + SEARCH_BATCH_SIZE)));
+			}
+			String lowerId = names.get(index);
+			List<PackageVersionEntity> versions = versionsByName.getOrDefault(lowerId, List.of()).stream()
 				.filter(version -> Json.parseObject(version.metadata()).path("listed").asBoolean(true))
 				.filter(version -> prerelease || !Versions.isPrerelease(version.version()))
 				.sorted(Comparator.comparing(PackageVersionEntity::version, Versions.SEMVER))

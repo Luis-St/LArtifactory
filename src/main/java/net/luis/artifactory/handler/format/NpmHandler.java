@@ -37,6 +37,7 @@ public class NpmHandler extends FormatHandler {
 	private static final Pattern NAME = Pattern.compile("(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9._~][a-z0-9._~-]*");
 	private static final Pattern TAG = Pattern.compile("[A-Za-z][A-Za-z0-9._-]*");
 	private static final int MAX_SEARCH_SIZE = 250;
+	private static final int SEARCH_BATCH_SIZE = 100;
 	
 	public NpmHandler(@NonNull Services services) {
 		super(services);
@@ -138,6 +139,16 @@ public class NpmHandler extends FormatHandler {
 	
 	private static @NonNull String hex(@NonNull String algorithm, byte @NonNull [] data) {
 		return HexFormat.of().formatHex(digest(algorithm, data));
+	}
+	
+	private static @NonNull JsonNode latestManifest(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
+		String latest = tags.get("latest");
+		for (PackageVersionEntity version : versions) {
+			if (version.version().equals(latest)) {
+				return Json.parseObject(version.metadata());
+			}
+		}
+		return Json.parseObject(versions.getLast().metadata());
 	}
 	
 	@Override
@@ -275,37 +286,47 @@ public class NpmHandler extends FormatHandler {
 		int size = Math.min(parseInt(ctx.queryParam("size"), 20), MAX_SEARCH_SIZE);
 		int from = parseInt(ctx.queryParam("from"), 0);
 		
-		// Versions are loaded one package at a time, only the requested page is kept in memory
-		List<Map.Entry<String, List<PackageVersionEntity>>> page = new ArrayList<>();
+		// Versions and tags are loaded for a batch of packages at a time, only the requested page is kept in memory
+		List<SearchHit> page = new ArrayList<>();
 		int total = 0;
-		for (String packageName : this.services.packages().packageNames(repository.name())) {
-			List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), packageName);
-			if (versions.isEmpty()) {
-				continue;
-			}
-			if (text.isEmpty() || packageName.contains(text) || this.latestManifest(repository, packageName, versions).toString().toLowerCase(Locale.ROOT).contains(text)) {
-				if (total >= from && page.size() < size) {
-					page.add(Map.entry(packageName, versions));
+		List<String> names = this.services.packages().packageNames(repository.name());
+		for (int start = 0; start < names.size(); start += SEARCH_BATCH_SIZE) {
+			List<String> batch = names.subList(start, Math.min(names.size(), start + SEARCH_BATCH_SIZE));
+			Map<String, List<PackageVersionEntity>> versionsByName = this.services.packages().versions(repository.name(), batch);
+			Map<String, Map<String, String>> tagsByName = this.services.packages().tags(repository.name(), batch);
+			for (String packageName : batch) {
+				List<PackageVersionEntity> versions = versionsByName.getOrDefault(packageName, List.of());
+				if (versions.isEmpty()) {
+					continue;
 				}
-				total++;
+				boolean onPage = total >= from && page.size() < size;
+				boolean nameMatches = text.isEmpty() || packageName.contains(text);
+				// The manifest is only parsed when it is searched or shown
+				JsonNode manifest = nameMatches && !onPage ? null : latestManifest(versions, tagsByName.getOrDefault(packageName, Map.of()));
+				if (nameMatches || manifest.toString().toLowerCase(Locale.ROOT).contains(text)) {
+					if (onPage) {
+						page.add(new SearchHit(packageName, versions, manifest));
+					}
+					total++;
+				}
 			}
 		}
 		
 		ObjectNode root = Json.object();
 		ArrayNode objects = root.putArray("objects");
-		for (Map.Entry<String, List<PackageVersionEntity>> entry : page) {
-			JsonNode manifest = this.latestManifest(repository, entry.getKey(), entry.getValue());
+		for (SearchHit hit : page) {
+			JsonNode manifest = hit.manifest();
 			ObjectNode object = objects.addObject();
 			ObjectNode pkg = object.putObject("package");
-			pkg.put("name", entry.getKey());
+			pkg.put("name", hit.name());
 			pkg.put("version", Json.text(manifest, "version", ""));
 			pkg.put("description", Json.text(manifest, "description", ""));
-			pkg.put("date", DateTimeFormatter.ISO_INSTANT.format(entry.getValue().getLast().createdAt()));
+			pkg.put("date", DateTimeFormatter.ISO_INSTANT.format(hit.versions().getLast().createdAt()));
 			if (manifest.has("keywords")) {
 				pkg.set("keywords", manifest.get("keywords"));
 			}
 			pkg.putObject("links");
-			String publisher = Objects.requireNonNullElse(entry.getValue().getLast().createdBy(), "unknown");
+			String publisher = Objects.requireNonNullElse(hit.versions().getLast().createdBy(), "unknown");
 			pkg.putObject("publisher").put("username", publisher).put("email", "");
 			pkg.putArray("maintainers").addObject().put("username", publisher).put("email", "");
 			ObjectNode score = object.putObject("score");
@@ -316,16 +337,6 @@ public class NpmHandler extends FormatHandler {
 		root.put("total", total);
 		root.put("time", DateTimeFormatter.ISO_INSTANT.format(Instant.now()));
 		json(ctx, 200, root);
-	}
-	
-	private @NonNull JsonNode latestManifest(@NonNull RepositoryEntity repository, @NonNull String name, @NonNull List<PackageVersionEntity> versions) throws Exception {
-		String latest = this.services.packages().tags(repository.name(), name).get("latest");
-		for (PackageVersionEntity version : versions) {
-			if (version.version().equals(latest)) {
-				return Json.parseObject(version.metadata());
-			}
-		}
-		return Json.parseObject(versions.getLast().metadata());
 	}
 	
 	private void distTags(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments, @NonNull String method) throws Exception {
@@ -508,9 +519,12 @@ public class NpmHandler extends FormatHandler {
 				}
 				
 				Map<String, String> tags = this.services.packages().tags(work, repository.name(), name);
+				Set<String> known = new HashSet<>(manifests.keySet());
+				this.services.packages().versions(work, repository.name(), name).forEach(version -> known.add(version.version()));
 				if (distTags != null && distTags.isObject()) {
 					for (Map.Entry<String, JsonNode> entry : distTags.properties()) {
-						if (entry.getValue().isString() && TAG.matcher(entry.getKey()).matches()) {
+						// A tag can only point to a version that exists, otherwise clients resolving it would fail
+						if (entry.getValue().isString() && known.contains(entry.getValue().asString()) && TAG.matcher(entry.getKey()).matches()) {
 							this.services.packages().setTag(work, repository.name(), name, entry.getKey(), entry.getValue().asString());
 							tags.put(entry.getKey(), entry.getValue().asString());
 						}
@@ -639,4 +653,6 @@ public class NpmHandler extends FormatHandler {
 	private void releaseUploads(@NonNull RepositoryEntity repository, @NonNull Collection<StoredBlob> blobs) throws SqlException {
 		this.services.artifacts().releaseBlobs(blobs.stream().map(blob -> PathRepositoryHandler.fakeFile(repository, blob)).toList());
 	}
+	
+	private record SearchHit(@NonNull String name, @NonNull List<PackageVersionEntity> versions, @NonNull JsonNode manifest) {}
 }

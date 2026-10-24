@@ -202,6 +202,11 @@ public class Application {
 					ctx.status(409).json(new ErrorResponse("Conflict", "The resource was created concurrently, retry the request"));
 					return;
 				}
+				// A request supplied value (path, package name, version) exceeds the length of its column
+				if (SqlErrors.isValueTooLong(e)) {
+					ctx.status(400).json(new ErrorResponse("Bad request", "A value of the request is too long"));
+					return;
+				}
 				LOGGER.error("Unhandled exception on {} {}", ctx.method(), Requests.sanitizePath(ctx.path()), e);
 				ctx.status(500).json(new ErrorResponse("Internal server error"));
 			});

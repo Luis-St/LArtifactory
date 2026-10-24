@@ -12,6 +12,8 @@ import net.luis.utils.function.throwable.ThrowableFunction;
 import net.luis.utils.io.database.*;
 import net.luis.utils.io.database.condition.SqlCondition;
 import net.luis.utils.io.database.exception.SqlException;
+import net.luis.utils.io.database.expression.SqlExpression;
+import net.luis.utils.io.database.type.SqlTypes;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -26,6 +28,11 @@ import static net.luis.artifactory.database.Tables.*;
  * Stores and serves the files of all repositories, file contents live in the {@link BlobStore}.<br>
  */
 public class ArtifactService {
+	
+	/**
+	 * Maximum length of a file path, the length of the path column.<br>
+	 */
+	private static final int MAX_PATH_LENGTH = 1024;
 	
 	private final SqlDatabase database;
 	private final BlobStore blobStore;
@@ -157,6 +164,27 @@ public class ArtifactService {
 	
 	public long count(@NonNull String repository, @NonNull String prefix) throws SqlException {
 		return this.database.from(FILES).select().where(prefixCondition(repository, prefix)).count();
+	}
+	
+	/**
+	 * Lists the direct content of a directory, the subdirectories are computed by the database so a listing does not load the whole subtree.<br>
+	 *
+	 * @param prefix The path of the directory with a trailing slash, empty for the root
+	 */
+	public @NonNull DirectoryListing listDirectory(@NonNull String repository, @NonNull String prefix) throws SqlException {
+		// The part of the path below the directory and the position of its first slash (0 for files directly in the directory)
+		SqlExpression<String> rest = Sql.substring(FILE_PATH, prefix.codePointCount(0, prefix.length()) + 1, MAX_PATH_LENGTH);
+		SqlExpression<Integer> slash = Sql.position(rest, Sql.of("/", SqlTypes.TEXT), SqlTypes.INTEGER);
+		
+		List<String> directories = this.database.from(FILES).select(Sql.left(rest, slash))
+			.where(SqlCondition.allOf(prefixCondition(repository, prefix), Sql.greaterThan(slash, 0)))
+			.distinct()
+			.fetch();
+		List<FileEntity> files = this.database.from(FILES).select()
+			.where(SqlCondition.allOf(prefixCondition(repository, prefix), Sql.equalTo(slash, 0)))
+			.orderBy(FILE_PATH.ascending())
+			.fetch();
+		return new DirectoryListing(new TreeSet<>(directories), files.stream().filter(file -> file.path().startsWith(prefix)).toList());
 	}
 	
 	public @NonNull List<FileEntity> listByPackage(@NonNull String repository, @NonNull String packageName) throws SqlException {
@@ -309,6 +337,19 @@ public class ArtifactService {
 		ctx.contentType(contentType);
 		ctx.header("Content-Length", String.valueOf(file.size()));
 		ctx.result(this.blobStore.open(file.sha256()));
+	}
+	
+	/**
+	 * The direct content of a directory.<br>
+	 *
+	 * @param directories The names of the subdirectories with a trailing slash, sorted
+	 * @param files The files directly in the directory, sorted by path
+	 */
+	public record DirectoryListing(@NonNull SortedSet<String> directories, @NonNull List<FileEntity> files) {
+		
+		public boolean isEmpty() {
+			return this.directories.isEmpty() && this.files.isEmpty();
+		}
 	}
 	
 	private static final class BoundedInputStream extends java.io.FilterInputStream {

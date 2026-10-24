@@ -139,7 +139,7 @@ public class UserAdminHandler {
 	}
 	
 	@OpenApi(
-		summary = "Update a user, users may change their own password",
+		summary = "Update a user, users may change their own password (with their current password)",
 		operationId = "updateUser",
 		path = "/api/users/{username}",
 		methods = HttpMethod.PATCH,
@@ -162,6 +162,10 @@ public class UserAdminHandler {
 		}
 		if (request.password() != null) {
 			validatePassword(request.password());
+			// A stolen session must not be enough to take over the account, failed attempts count towards the login throttle
+			if (self && (request.currentPassword() == null || this.services.auth().login(ctx, username, request.currentPassword()) == null)) {
+				throw HttpError.forbidden("The current password is required and must be correct");
+			}
 		}
 		if (user.admin() && Boolean.FALSE.equals(request.admin()) && this.services.users().countAdmins() <= 1) {
 			throw HttpError.badRequest("Can not remove the administrator privileges of the last administrator");

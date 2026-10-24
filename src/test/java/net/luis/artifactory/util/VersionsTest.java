@@ -38,6 +38,23 @@ class VersionsTest {
 	}
 	
 	@Test
+	void pep440OrdersReleaseSegments() {
+		List<String> versions = new ArrayList<>(List.of("1.0", "1.0.post1", "1.0rc1", "1.0.dev1", "1.0a1", "1.0b2.dev3", "1.0b2", "1.0a1.dev1", "2!0.1", "0.9", "1.0.post1.dev1", "1.1"));
+		versions.sort(Versions.PEP440);
+		assertEquals(List.of("0.9", "1.0.dev1", "1.0a1.dev1", "1.0a1", "1.0b2.dev3", "1.0b2", "1.0rc1", "1.0", "1.0.post1.dev1", "1.0.post1", "1.1", "2!0.1"), versions);
+	}
+	
+	@Test
+	void pep440NormalizesSpellings() {
+		assertEquals(0, Versions.PEP440.compare("1.0", "1.0.0"));
+		assertEquals(0, Versions.PEP440.compare("1.0-alpha-1", "1.0a1"));
+		assertEquals(0, Versions.PEP440.compare("1.0-1", "1.0.post1"));
+		assertEquals(0, Versions.PEP440.compare("1.0+local", "1.0"));
+		assertTrue(Versions.PEP440.compare("1.10", "1.9") > 0);
+		assertTrue(Versions.PEP440.compare("not a version", "0.1") < 0, "invalid versions are older than all valid versions");
+	}
+	
+	@Test
 	void nugetNormalization() {
 		assertEquals("1.0.0", Versions.normalizeNuGet("1.0"));
 		assertEquals("1.0.0", Versions.normalizeNuGet("1.0.0.0"));

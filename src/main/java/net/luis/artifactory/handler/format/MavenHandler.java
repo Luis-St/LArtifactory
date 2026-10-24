@@ -131,7 +131,8 @@ public class MavenHandler extends PathRepositoryHandler {
 			return null;
 		}
 		
-		TreeSet<String> versions = new TreeSet<>(Versions.MAVEN);
+		// Versions that compare equal (1.0 and 1.0.0) are both listed, they are distinct directories
+		TreeSet<String> versions = new TreeSet<>(Versions.MAVEN.thenComparing(Comparator.naturalOrder()));
 		Instant lastUpdated = Instant.EPOCH;
 		for (FileEntity file : files) {
 			if (file.version() != null) {
@@ -284,10 +285,10 @@ public class MavenHandler extends PathRepositoryHandler {
 	}
 	
 	@Override
-	protected void store(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @Nullable String username) throws Exception {
+	protected void store(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @Nullable String username, boolean immutable) throws Exception {
 		Coordinates coordinates = parseCoordinates(path);
 		if (coordinates == null) {
-			super.store(ctx, repository, path, blob, username);
+			super.store(ctx, repository, path, blob, username, immutable);
 			return;
 		}
 		
@@ -296,6 +297,9 @@ public class MavenHandler extends PathRepositoryHandler {
 		metadata.put("artifactId", coordinates.artifactId());
 		// Clients upload the files of a version in parallel, the version is created by whichever upload comes first
 		this.services.artifacts().transaction(work -> {
+			if (this.alreadyStored(work, repository, path, blob, immutable)) {
+				return false;
+			}
 			this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), coordinates.packageName(), coordinates.version(), null, username);
 			return this.services.packages().ensure(work, repository.name(), coordinates.packageName(), coordinates.version(), Json.write(metadata), username);
 		});

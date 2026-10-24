@@ -173,7 +173,7 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 										<div className="file-chips">
 											{versionFiles.map(file => (
 												<button key={file.path} type="button" className="file-chip" title={`${file.path}\nsha256 ${file.sha256}`}
-												        onClick={() => downloadFile(repository, file).catch(error => notify(error.message, 'error'))}>
+														onClick={() => downloadFile(repository, file).catch(error => notify(error.message, 'error'))}>
 													{file.path.substring(file.path.lastIndexOf('/') + 1)} <span className="muted">{formatBytes(file.size)}</span>
 												</button>
 											))}

@@ -8,6 +8,7 @@ import java.sql.SQLException;
 public final class SqlErrors {
 	
 	private static final String UNIQUE_VIOLATION = "23505";
+	private static final String VALUE_TOO_LONG = "22001";
 	
 	private SqlErrors() {}
 	
@@ -18,6 +19,18 @@ public final class SqlErrors {
 	public static boolean isUniqueViolation(@Nullable Throwable throwable) {
 		for (Throwable current = throwable; current != null; current = current.getCause()) {
 			if (current instanceof SqlUniqueConstraintException || (current instanceof SQLException sql && UNIQUE_VIOLATION.equals(sql.getSQLState()))) {
+				return true;
+			}
+		}
+		return false;
+	}
+	
+	/**
+	 * Checks whether the exception was caused by a value that is longer than its column, e.g. a request supplied path or version.<br>
+	 */
+	public static boolean isValueTooLong(@Nullable Throwable throwable) {
+		for (Throwable current = throwable; current != null; current = current.getCause()) {
+			if (current instanceof SQLException sql && VALUE_TOO_LONG.equals(sql.getSQLState())) {
 				return true;
 			}
 		}

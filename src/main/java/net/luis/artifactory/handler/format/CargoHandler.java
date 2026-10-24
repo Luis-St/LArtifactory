@@ -133,6 +133,10 @@ public class CargoHandler extends FormatHandler {
 		return "crates/" + crate + "/" + crate + "-" + version + ".crate";
 	}
 	
+	private static @NonNull String canonicalName(@NonNull String crate) {
+		return crate.toLowerCase(Locale.ROOT).replace('_', '-');
+	}
+	
 	private static @NonNull String stripBuild(@NonNull String version) {
 		int plus = version.indexOf('+');
 		return plus < 0 ? version : version.substring(0, plus);
@@ -317,6 +321,12 @@ public class CargoHandler extends FormatHandler {
 			throw cargoError(400, "Invalid crate version: " + version);
 		}
 		String key = name.toLowerCase(Locale.ROOT);
+		// Cargo treats '-' and '_' in crate names as equal, so foo-bar and foo_bar must not become two crates
+		for (String other : this.services.packages().packageNames(repository.name())) {
+			if (!other.equals(key) && canonicalName(other).equals(canonicalName(key))) {
+				throw cargoError(400, "crate `" + name + "` conflicts with the existing crate `" + other + "`");
+			}
+		}
 		List<PackageVersionEntity> existing = this.services.packages().versions(repository.name(), key);
 		for (PackageVersionEntity entity : existing) {
 			if (stripBuild(entity.version()).equals(stripBuild(version))) {

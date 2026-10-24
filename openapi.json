@@ -692,7 +692,7 @@
 				"tags": [
 					"Users"
 				],
-				"summary": "Update a user, users may change their own password",
+				"summary": "Update a user, users may change their own password (with their current password)",
 				"operationId": "updateUser",
 				"parameters": [
 					{
@@ -875,6 +875,9 @@
 				"type": "object",
 				"properties": {
 					"password": {
+						"type": "string"
+					},
+					"currentPassword": {
 						"type": "string"
 					},
 					"admin": {

@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.net.http.*;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.sql.*;
@@ -72,7 +74,7 @@ class ApplicationIntegrationTest {
 		
 		this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"second-admin\",\"password\":\"second-password-1\",\"admin\":true}");
 		this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"dev\",\"password\":\"developer-pass-1\"}");
-		for (String repository : List.of("{\"name\":\"files\",\"type\":\"generic\"}", "{\"name\":\"maven\",\"type\":\"maven\"}", "{\"name\":\"npm\",\"type\":\"npm\"}")) {
+		for (String repository : List.of("{\"name\":\"files\",\"type\":\"generic\"}", "{\"name\":\"maven\",\"type\":\"maven\"}", "{\"name\":\"npm\",\"type\":\"npm\"}", "{\"name\":\"cargo\",\"type\":\"cargo\"}")) {
 			assertEquals(201, this.send("POST", "/api/repositories", basic("admin", ADMIN_PASSWORD), repository).statusCode());
 		}
 	}
@@ -174,7 +176,7 @@ class ApplicationIntegrationTest {
 				assertEquals(201, result.get());
 			}
 		}
-		JsonNode packages = Json.parse(this.send("GET", "/api/repositories/maven/packages", basic("admin", ADMIN_PASSWORD), null).body());
+		JsonNode packages = Json.parse(this.send("GET", "/api/repositories/maven/packages?q=net.example:lib", basic("admin", ADMIN_PASSWORD), null).body());
 		assertEquals(1, packages.size());
 		assertEquals(1, packages.get(0).get("versions").size());
 	}
@@ -226,6 +228,98 @@ class ApplicationIntegrationTest {
 		HttpResponse<String> response = this.send("GET", "/ui/", null, null);
 		assertTrue(response.headers().firstValue("Content-Security-Policy").orElse("").contains("frame-ancestors 'none'"), response.headers().toString());
 		assertEquals("DENY", response.headers().firstValue("X-Frame-Options").orElse(""));
+	}
+	
+	@Test
+	void concurrentUploadsToAnImmutablePathConflict() throws Exception {
+		List<Callable<Integer>> uploads = new ArrayList<>();
+		for (int i = 0; i < 6; i++) {
+			String content = "content " + i;
+			uploads.add(() -> this.send("PUT", "/generic/files/immutable/race.txt", basic("admin", ADMIN_PASSWORD), content).statusCode());
+		}
+		List<Integer> statuses = new ArrayList<>();
+		try (ExecutorService executor = Executors.newFixedThreadPool(uploads.size())) {
+			for (Future<Integer> result : executor.invokeAll(uploads)) {
+				statuses.add(result.get());
+			}
+		}
+		assertEquals(1, statuses.stream().filter(status -> status == 201).count(), statuses.toString());
+		assertTrue(statuses.stream().allMatch(status -> status == 201 || status == 409), statuses.toString());
+		
+		String stored = this.send("GET", "/generic/files/immutable/race.txt", basic("admin", ADMIN_PASSWORD), null).body();
+		assertEquals(201, this.send("PUT", "/generic/files/immutable/race.txt", basic("admin", ADMIN_PASSWORD), stored).statusCode(), "an identical upload is accepted");
+	}
+	
+	@Test
+	void ownPasswordChangeRequiresCurrentPassword() throws Exception {
+		this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"changer\",\"password\":\"changer-password-1\"}");
+		String session = "Bearer " + Json.parse(this.send("POST", "/api/session", basic("changer", "changer-password-1"), "{}").body()).get("token").asString();
+		
+		assertEquals(403, this.send("PATCH", "/api/users/changer", session, "{\"password\":\"changer-password-2\"}").statusCode());
+		assertEquals(403, this.send("PATCH", "/api/users/changer", session, "{\"password\":\"changer-password-2\",\"currentPassword\":\"wrong-password-1\"}").statusCode());
+		assertEquals(200, this.send("PATCH", "/api/users/changer", session, "{\"password\":\"changer-password-2\",\"currentPassword\":\"changer-password-1\"}").statusCode());
+		assertEquals(200, this.send("PATCH", "/api/users/changer", basic("admin", ADMIN_PASSWORD), "{\"password\":\"changer-password-3\"}").statusCode(), "an admin resets the password of another user");
+	}
+	
+	@Test
+	void directoryListingContainsDirectChildren() throws Exception {
+		for (String path : List.of("listing/a.txt", "listing/sub/b.txt", "listing/sub/deeper/c.txt", "listing/other/d.txt")) {
+			assertEquals(201, this.send("PUT", "/generic/files/" + path, basic("admin", ADMIN_PASSWORD), path).statusCode());
+		}
+		String html = this.send("GET", "/generic/files/listing/", basic("admin", ADMIN_PASSWORD), null).body();
+		assertTrue(html.contains(">a.txt<") && html.contains(">sub/<") && html.contains(">other/<"), html);
+		assertFalse(html.contains("b.txt") || html.contains("deeper"), html);
+		assertEquals(404, this.send("GET", "/generic/files/listing/missing/", basic("admin", ADMIN_PASSWORD), null).statusCode());
+	}
+	
+	@Test
+	void invalidPathsAreRejected() throws Exception {
+		assertEquals(400, this.send("PUT", "/generic/files/a%2F..%2Fb.txt", basic("admin", ADMIN_PASSWORD), "x").statusCode(), "an encoded slash can not hide a '..' segment");
+		assertEquals(400, this.send("PUT", "/generic/files/" + "x".repeat(1100), basic("admin", ADMIN_PASSWORD), "x").statusCode(), "a path longer than the column is a bad request");
+	}
+	
+	@Test
+	void npmTagsOnlyPointToExistingVersions() throws Exception {
+		String body = npmPublishBody("tagged", "1.0.0").replace("\"dist-tags\":{\"latest\":\"1.0.0\"}", "\"dist-tags\":{\"latest\":\"1.0.0\",\"beta\":\"9.9.9\"}");
+		assertEquals(201, this.send("PUT", "/npm/npm/tagged", basic("admin", ADMIN_PASSWORD), body).statusCode());
+		JsonNode tags = Json.parse(this.send("GET", "/npm/npm/tagged", basic("admin", ADMIN_PASSWORD), null).body()).get("dist-tags");
+		assertEquals("1.0.0", tags.get("latest").asString());
+		assertFalse(tags.has("beta"), tags.toString());
+	}
+	
+	@Test
+	void npmSearchFindsPackagesByNameAndDescription() throws Exception {
+		assertEquals(201, this.send("PUT", "/npm/npm/findable-one", basic("admin", ADMIN_PASSWORD), npmPublishBody("findable-one", "1.0.0")).statusCode());
+		String described = npmPublishBody("other-two", "1.0.0").replace("\"version\":\"1.0.0\"}", "\"version\":\"1.0.0\",\"description\":\"also findable\"}");
+		assertEquals(201, this.send("PUT", "/npm/npm/other-two", basic("admin", ADMIN_PASSWORD), described).statusCode());
+		JsonNode result = Json.parse(this.send("GET", "/npm/npm/-/v1/search?text=findable&size=1", basic("admin", ADMIN_PASSWORD), null).body());
+		assertEquals(2, result.get("total").asInt(), result.toString());
+		assertEquals(1, result.get("objects").size());
+	}
+	
+	@Test
+	void mavenMetadataListsEquivalentVersions() throws Exception {
+		assertEquals(201, this.send("PUT", "/maven/maven/net/example/equal/1.0/equal-1.0.jar", basic("admin", ADMIN_PASSWORD), "a").statusCode());
+		assertEquals(201, this.send("PUT", "/maven/maven/net/example/equal/1.0.0/equal-1.0.0.jar", basic("admin", ADMIN_PASSWORD), "b").statusCode());
+		String metadata = this.send("GET", "/maven/maven/net/example/equal/maven-metadata.xml", basic("admin", ADMIN_PASSWORD), null).body();
+		assertTrue(metadata.contains("<version>1.0</version>") && metadata.contains("<version>1.0.0</version>"), metadata);
+	}
+	
+	@Test
+	void cargoCrateNamesTreatDashAndUnderscoreAsEqual() throws Exception {
+		assertEquals(200, this.cargoPublish("dash-crate").statusCode());
+		HttpResponse<String> conflict = this.cargoPublish("dash_crate");
+		assertEquals(400, conflict.statusCode(), conflict.body());
+	}
+	
+	private HttpResponse<String> cargoPublish(String name) throws IOException, InterruptedException {
+		byte[] json = ("{\"name\":\"" + name + "\",\"vers\":\"0.1.0\",\"deps\":[],\"features\":{}}").getBytes(StandardCharsets.UTF_8);
+		byte[] crate = new byte[16];
+		ByteBuffer body = ByteBuffer.allocate(8 + json.length + crate.length).order(ByteOrder.LITTLE_ENDIAN);
+		body.putInt(json.length).put(json).putInt(crate.length).put(crate);
+		return this.client.send(HttpRequest.newBuilder(URI.create(this.base + "/cargo/cargo/api/v1/crates/new"))
+			.header("Authorization", basic("admin", ADMIN_PASSWORD))
+			.PUT(HttpRequest.BodyPublishers.ofByteArray(body.array())).build(), HttpResponse.BodyHandlers.ofString());
 	}
 	
 	private String createToken(String authorization) throws Exception {

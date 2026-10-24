@@ -1,9 +1,12 @@
 package net.luis.artifactory.util;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigInteger;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Version comparators of the supported package ecosystems.<br>
@@ -11,16 +14,27 @@ import java.util.*;
 public final class Versions {
 	
 	private static final List<String> MAVEN_QUALIFIERS = List.of("alpha", "beta", "milestone", "rc", "snapshot", "", "sp");
-	
+	private static final Pattern PEP440_VERSION = Pattern.compile(
+		"v?(?:(\\d+)!)?(\\d+(?:\\.\\d+)*)" +
+			"(?:[-_.]?(a|alpha|b|beta|c|rc|pre|preview)[-_.]?(\\d*))?" +
+			"(?:-(\\d+)|[-_.]?(?:post|rev|r)[-_.]?(\\d*))?" +
+			"(?:[-_.]?dev[-_.]?(\\d*))?" +
+			"(?:\\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?",
+		Pattern.CASE_INSENSITIVE
+	);
 	/**
 	 * Compares versions like Maven's ComparableVersion (simplified).<br>
 	 */
 	public static final Comparator<String> MAVEN = Versions::compareMaven;
-	
 	/**
 	 * Compares semantic versions (npm, Cargo, NuGet), versions with more than three numeric parts are supported.<br>
 	 */
 	public static final Comparator<String> SEMVER = Versions::compareSemver;
+	/**
+	 * Compares Python versions as defined by PEP 440 (local versions are ignored).<br>
+	 * Versions that do not follow PEP 440 are older than all valid versions and are compared as text.<br>
+	 */
+	public static final Comparator<String> PEP440 = Versions::comparePep440;
 	
 	private Versions() {}
 	
@@ -176,6 +190,43 @@ public final class Versions {
 		return Integer.compare(preA.length, preB.length);
 	}
 	
+	private static int comparePep440(@NonNull String first, @NonNull String second) {
+		Pep440Version a = Pep440Version.parse(first);
+		Pep440Version b = Pep440Version.parse(second);
+		if (a == null || b == null) {
+			return a == null && b == null ? first.compareTo(second) : (a == null ? -1 : 1);
+		}
+		int result = a.epoch().compareTo(b.epoch());
+		for (int i = 0; result == 0 && i < Math.max(a.release().size(), b.release().size()); i++) {
+			BigInteger left = i < a.release().size() ? a.release().get(i) : BigInteger.ZERO;
+			BigInteger right = i < b.release().size() ? b.release().get(i) : BigInteger.ZERO;
+			result = left.compareTo(right);
+		}
+		if (result == 0) {
+			result = Integer.compare(a.preRank(), b.preRank());
+		}
+		if (result == 0) {
+			result = a.preNumber().compareTo(b.preNumber());
+		}
+		if (result == 0) {
+			result = compareOptional(a.post(), b.post(), -1);
+		}
+		if (result == 0) {
+			result = compareOptional(a.dev(), b.dev(), 1);
+		}
+		return result;
+	}
+	
+	/**
+	 * Compares two optional numbers, a missing number is lower ({@code missing = -1}) or higher ({@code missing = 1}) than every number.<br>
+	 */
+	private static int compareOptional(@Nullable BigInteger first, @Nullable BigInteger second, int missing) {
+		if (first == null || second == null) {
+			return first == second ? 0 : (first == null ? missing : -missing);
+		}
+		return first.compareTo(second);
+	}
+	
 	public static boolean isPrerelease(@NonNull String version) {
 		return stripBuild(version).contains("-");
 	}
@@ -226,5 +277,53 @@ public final class Versions {
 			numbers.removeLast();
 		}
 		return String.join(".", numbers) + (prerelease == null || prerelease.isEmpty() ? "" : "-" + prerelease);
+	}
+	
+	/**
+	 * A parsed PEP 440 version.<br>
+	 *
+	 * @param preRank The rank of the pre-release phase (alpha 0, beta 1, rc 2), -1 for a dev release without pre- and post-release
+	 *                (older than all pre-releases) and 3 without pre-release
+	 * @param post The post-release number, null without post-release
+	 * @param dev The dev-release number, null without dev-release
+	 */
+	private record Pep440Version(@NonNull BigInteger epoch, @NonNull List<BigInteger> release, int preRank, @NonNull BigInteger preNumber, @Nullable BigInteger post, @Nullable BigInteger dev) {
+		
+		private static @Nullable Pep440Version parse(@NonNull String version) {
+			Matcher matcher = PEP440_VERSION.matcher(version.strip());
+			if (!matcher.matches()) {
+				return null;
+			}
+			List<BigInteger> release = new ArrayList<>();
+			for (String part : matcher.group(2).split("\\.")) {
+				release.add(new BigInteger(part));
+			}
+			String phase = matcher.group(3);
+			BigInteger post = matcher.group(5) != null ? new BigInteger(matcher.group(5)) : optionalNumber(matcher, 6);
+			BigInteger dev = optionalNumber(matcher, 7);
+			int preRank;
+			if (phase == null) {
+				preRank = post == null && dev != null ? -1 : 3;
+			} else {
+				preRank = switch (phase.toLowerCase(Locale.ROOT)) {
+					case "a", "alpha" -> 0;
+					case "b", "beta" -> 1;
+					default -> 2;
+				};
+			}
+			BigInteger preNumber = phase == null || matcher.group(4).isEmpty() ? BigInteger.ZERO : new BigInteger(matcher.group(4));
+			return new Pep440Version(matcher.group(1) == null ? BigInteger.ZERO : new BigInteger(matcher.group(1)), release, preRank, preNumber, post, dev);
+		}
+		
+		/**
+		 * Returns the number of an optional segment, an implicit number is 0 and null if the segment is missing.<br>
+		 */
+		private static @Nullable BigInteger optionalNumber(@NonNull Matcher matcher, int group) {
+			if (matcher.start(group) < 0) {
+				return null;
+			}
+			String number = matcher.group(group);
+			return number.isEmpty() ? BigInteger.ZERO : new BigInteger(number);
+		}
 	}
 }

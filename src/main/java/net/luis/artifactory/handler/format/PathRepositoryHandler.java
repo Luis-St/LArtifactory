@@ -4,11 +4,13 @@ import io.javalin.http.Context;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
+import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.database.UnitOfWork;
 import net.luis.artifactory.database.entity.FileEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.ArtifactService;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
@@ -129,7 +131,8 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	public void handle(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String rawPath) throws Exception {
 		List<String> segments = Requests.decodedSegments(rawPath);
 		for (String segment : segments) {
-			if (".".equals(segment) || "..".equals(segment) || segment.contains("\\")) {
+			// An encoded slash would hide a ".." segment from this check
+			if (".".equals(segment) || "..".equals(segment) || segment.contains("\\") || segment.contains("/")) {
 				throw HttpError.badRequest("Invalid path");
 			}
 		}
@@ -187,20 +190,15 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	
 	private boolean listDirectory(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		String prefix = path.isEmpty() ? "" : path + "/";
-		List<FileEntity> files = this.services.artifacts().list(repository.name(), prefix);
-		if (files.isEmpty() && !path.isEmpty()) {
+		ArtifactService.DirectoryListing listing = this.services.artifacts().listDirectory(repository.name(), prefix);
+		if (listing.isEmpty() && !path.isEmpty()) {
 			return false;
 		}
 		
 		Map<String, FileEntity> entries = new TreeMap<>();
-		for (FileEntity file : files) {
-			String rest = file.path().substring(prefix.length());
-			int slash = rest.indexOf('/');
-			if (slash >= 0) {
-				entries.putIfAbsent(rest.substring(0, slash + 1), null);
-			} else {
-				entries.put(rest, file);
-			}
+		listing.directories().forEach(directory -> entries.put(directory, null));
+		for (FileEntity file : listing.files()) {
+			entries.put(file.path().substring(prefix.length()), file);
 		}
 		
 		StringBuilder html = new StringBuilder();
@@ -244,24 +242,44 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			}
 		}
 		
-		FileEntity existing = this.services.artifacts().get(repository.name(), path);
 		StoredBlob blob;
 		try (InputStream input = ctx.bodyInputStream()) {
 			blob = this.services.artifacts().upload(input);
 		}
-		
-		if (existing != null && !repository.allowRedeploy() && !this.isMutable(path)) {
-			if (existing.sha256().equals(blob.sha256())) {
-				ctx.status(201);
-				return;
-			}
-			this.services.artifacts().releaseBlobs(List.of(fakeFile(repository, blob)));
-			throw HttpError.conflict(this.conflictMessage(path));
-		}
-		
 		this.verifyDeclaredChecksums(ctx, repository, blob);
-		this.store(ctx, repository, path, blob, username(principal));
+		
+		boolean immutable = !repository.allowRedeploy() && !this.isMutable(path);
+		try {
+			this.store(ctx, repository, path, blob, username(principal), immutable);
+		} catch (HttpError | SqlException e) {
+			this.services.artifacts().releaseBlobs(List.of(fakeFile(repository, blob)));
+			// A concurrent upload to the same path committed first
+			if (immutable && SqlErrors.isUniqueViolation(e)) {
+				throw HttpError.conflict(this.conflictMessage(path));
+			}
+			throw e;
+		}
 		ctx.status(201);
+	}
+	
+	/**
+	 * Checks an immutable path inside the transaction of a store, so concurrent uploads of different content can not both succeed.<br>
+	 *
+	 * @return true if the identical file is already stored and nothing has to be written
+	 * @throws HttpError 409 if a file with different content is stored at the path
+	 */
+	protected boolean alreadyStored(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, boolean immutable) throws SqlException {
+		if (!immutable) {
+			return false;
+		}
+		FileEntity existing = this.services.artifacts().get(work, repository.name(), path);
+		if (existing == null) {
+			return false;
+		}
+		if (existing.sha256().equals(blob.sha256())) {
+			return true;
+		}
+		throw HttpError.conflict(this.conflictMessage(path));
 	}
 	
 	/**
@@ -278,8 +296,16 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		}
 	}
 	
-	protected void store(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @Nullable String username) throws Exception {
-		this.services.artifacts().put(repository.name(), path, blob, contentType(path), null, null, null, username);
+	/**
+	 * Records the uploaded file, an immutable path is checked with {@link #alreadyStored} in the same transaction.<br>
+	 */
+	protected void store(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @Nullable String username, boolean immutable) throws Exception {
+		this.services.artifacts().transaction(work -> {
+			if (!this.alreadyStored(work, repository, path, blob, immutable)) {
+				this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), null, null, null, username);
+			}
+			return null;
+		});
 	}
 	
 	protected boolean consumeVirtualUpload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {

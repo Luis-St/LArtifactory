@@ -12,6 +12,7 @@ import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
+import net.luis.artifactory.util.Versions;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import tools.jackson.databind.node.ArrayNode;
@@ -206,7 +207,8 @@ public class PypiHandler extends FormatHandler {
 			throw HttpError.notFound();
 		}
 		List<FileEntity> files = this.services.artifacts().listByPackage(repository.name(), normalized);
-		PackageVersionEntity latest = versions.getLast();
+		// The highest version, not the one uploaded last (e.g. a fix for an older release)
+		PackageVersionEntity latest = versions.stream().max(Comparator.comparing(PackageVersionEntity::version, Versions.PEP440)).orElseThrow();
 		ObjectNode latestMetadata = Json.parseObject(latest.metadata());
 		
 		ObjectNode root = Json.object();

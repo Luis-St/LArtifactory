@@ -102,6 +102,44 @@ public class PackageService {
 		return versions(work.sql(), repository, packageName);
 	}
 	
+	/**
+	 * Returns the versions of several packages with one query, keyed by package name and each ordered by creation time.<br>
+	 * Packages without versions are missing from the result.<br>
+	 */
+	public @NonNull Map<String, List<PackageVersionEntity>> versions(@NonNull String repository, @NonNull Collection<String> packageNames) throws SqlException {
+		Map<String, List<PackageVersionEntity>> result = new HashMap<>();
+		if (packageNames.isEmpty()) {
+			return result;
+		}
+		List<PackageVersionEntity> versions = this.database.from(PACKAGE_VERSIONS).select()
+			.where(SqlCondition.allOf(Sql.equalTo(VERSION_REPOSITORY, repository), Sql.in(VERSION_PACKAGE, packageNames.toArray(String[]::new))))
+			.orderBy(VERSION_CREATED_AT.ascending())
+			.fetch();
+		for (PackageVersionEntity version : versions) {
+			result.computeIfAbsent(version.packageName(), _ -> new ArrayList<>()).add(version);
+		}
+		return result;
+	}
+	
+	/**
+	 * Returns the dist tags of several packages with one query, keyed by package name.<br>
+	 * Packages without tags are missing from the result.<br>
+	 */
+	public @NonNull Map<String, Map<String, String>> tags(@NonNull String repository, @NonNull Collection<String> packageNames) throws SqlException {
+		Map<String, Map<String, String>> result = new HashMap<>();
+		if (packageNames.isEmpty()) {
+			return result;
+		}
+		List<DistTagEntity> entities = this.database.from(DIST_TAGS).select()
+			.where(SqlCondition.allOf(Sql.equalTo(TAG_REPOSITORY, repository), Sql.in(TAG_PACKAGE, packageNames.toArray(String[]::new))))
+			.orderBy(TAG_NAME.ascending())
+			.fetch();
+		for (DistTagEntity entity : entities) {
+			result.computeIfAbsent(entity.packageName(), _ -> new LinkedHashMap<>()).put(entity.tag(), entity.version());
+		}
+		return result;
+	}
+	
 	public @NonNull List<String> packageNames(@NonNull String repository) throws SqlException {
 		return this.packageNames(repository, "", 0, Long.MAX_VALUE);
 	}

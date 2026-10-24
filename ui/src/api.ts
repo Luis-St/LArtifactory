@@ -154,7 +154,7 @@ export const api = {
 	
 	users: () => request<User[]>('GET', '/api/users'),
 	createUser: (body: { username: string; password: string; admin: boolean }) => request<User>('POST', '/api/users', body),
-	updateUser: (username: string, body: { password?: string; admin?: boolean }) => request<User>('PATCH', `/api/users/${enc(username)}`, body),
+	updateUser: (username: string, body: { password?: string; currentPassword?: string; admin?: boolean }) => request<User>('PATCH', `/api/users/${enc(username)}`, body),
 	deleteUser: (username: string) => request<void>('DELETE', `/api/users/${enc(username)}`),
 	
 	permissions: (filter: { repository?: string; username?: string } = {}) => request<Permission[]>('GET', `/api/permissions${query(filter)}`),

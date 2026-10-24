@@ -14,7 +14,7 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_PORT`                         | `8080`                                         | HTTP port                                                                                  |
 | `ARTIFACTORY_BASE_URL`                     | derived from the request                       | Public url used in generated links (e.g. `https://repo.example.com`)                       |
 | `ARTIFACTORY_HOST_REPOSITORIES`            |                                                | Serve repositories at the root of a host, e.g. `npm.example.com=npm-local`                 |
-| `ARTIFACTORY_TRUST_PROXY`                  | `false`                                        | Honor `X-Forwarded-Proto/Host/Prefix` (only enable behind a trusted proxy)                 |
+| `ARTIFACTORY_TRUST_PROXY`                  | `false`                                        | Honor `X-Forwarded-For/Proto/Host/Prefix` (only enable behind a trusted proxy)             |
 | `ARTIFACTORY_ENABLE_API_DOCS`              | `false`                                        | Serve the (unauthenticated) OpenAPI spec and Swagger UI                                    |
 | `ARTIFACTORY_STORAGE_PATH`                 | `data`                                         | Directory for the artifact files                                                           |
 | `ARTIFACTORY_MAX_UPLOAD_SIZE_MB`           | `1024`                                         | Maximum size of a single artifact                                                          |
@@ -38,6 +38,8 @@ Without `ARTIFACTORY_BASE_URL` the public url is derived from the request. The c
 `Host` header and the request scheme are used). **Set `ARTIFACTORY_BASE_URL` in production**, or only enable
 `ARTIFACTORY_TRUST_PROXY` behind a reverse proxy that sets these headers, so generated download urls can not be
 redirected to an attacker host via a forged `Host`/`X-Forwarded-Host` header.
+The client address used for the login lockout is the last `X-Forwarded-For` entry,
+because the proxy appends the address it received the request from and all earlier entries can be forged by the client.
 The database schema is created on startup and later schema changes are applied as versioned migrations (recorded in `_sql_migrations`).
 Files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
 A blob that no file references any more is deleted once it is older than one hour,
@@ -118,8 +120,7 @@ registry=https://repo.example.com/npm/npm-local/
 dotnet nuget push package.nupkg --source https://repo.example.com/nuget/nuget-local/v3/index.json --api-key <token>
 ```
 
-For restores add the source with `packageSourceCredentials` (user name and token) to `nuget.config`.
-**Cargo** (`.cargo/config.toml`)
+For restores add the source with `packageSourceCredentials` (user name and token) to `nuget.config`. **Cargo** (`.cargo/config.toml`)
 
 ```toml
 [registries.lartifactory]
@@ -178,6 +179,8 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | `GET` `POST`           | `/api/tokens`                       | List / create tokens                                                         |
 | `DELETE`               | `/api/tokens/{id}`                  | Revoke a token                                                               |
 
+Users changing their own password also send `currentPassword`,
+so a stolen web ui session alone can not be used to take over the account.
 The package and file lists are paged, the total number of entries is returned in the `X-Total-Count` header.
 A page holds at most 500 packages or 5000 files, so a single request can not load a whole large repository into memory.
 The full api is documented in `openapi.json` and served by Swagger UI at `/swagger`.

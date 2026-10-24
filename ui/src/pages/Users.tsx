@@ -125,8 +125,8 @@ function CreateUserDialog({onClose, onCreated}: { onClose: () => void; onCreated
 		<Modal title="New user" onClose={onClose}>
 			<form className="form" onSubmit={submit}>
 				<Field label="Username"><input value={username} onChange={event => setUsername(event.target.value)} required autoFocus autoComplete="off"/></Field>
-				<Field label="Password" hint="At least 8 characters">
-					<input type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={8} autoComplete="new-password"/>
+				<Field label="Password" hint="At least 12 characters">
+					<input type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={12} autoComplete="new-password"/>
 				</Field>
 				<Toggle checked={admin} onChange={setAdmin} label="Administrator" description="Full access to all repositories and the management api"/>
 				{error && <ErrorBox error={error}/>}
@@ -140,7 +140,10 @@ function CreateUserDialog({onClose, onCreated}: { onClose: () => void; onCreated
 }
 
 export function PasswordDialog({username, onClose}: { username: string; onClose: () => void }) {
-	const {notify} = useSession();
+	const {notify, principal} = useSession();
+	// Changing the own password requires the current one, the server rejects it otherwise
+	const self = principal?.username === username;
+	const [current, setCurrent] = useState('');
 	const [password, setPassword] = useState('');
 	const [confirm, setConfirm] = useState('');
 	const [busy, setBusy] = useState(false);
@@ -155,7 +158,7 @@ export function PasswordDialog({username, onClose}: { username: string; onClose:
 		setBusy(true);
 		setError(undefined);
 		try {
-			await api.updateUser(username, {password});
+			await api.updateUser(username, self ? {password, currentPassword: current} : {password});
 			notify(`Password of ${username} changed`);
 			onClose();
 		} catch (e) {
@@ -167,8 +170,13 @@ export function PasswordDialog({username, onClose}: { username: string; onClose:
 	return (
 		<Modal title={`Set password for ${username}`} onClose={onClose}>
 			<form className="form" onSubmit={submit}>
-				<Field label="New password" hint="At least 8 characters">
-					<input type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={8} autoFocus autoComplete="new-password"/>
+				{self && (
+					<Field label="Current password">
+						<input type="password" value={current} onChange={event => setCurrent(event.target.value)} required autoFocus autoComplete="current-password"/>
+					</Field>
+				)}
+				<Field label="New password" hint="At least 12 characters">
+					<input type="password" value={password} onChange={event => setPassword(event.target.value)} required minLength={12} autoFocus={!self} autoComplete="new-password"/>
 				</Field>
 				<Field label="Confirm password">
 					<input type="password" value={confirm} onChange={event => setConfirm(event.target.value)} required autoComplete="new-password"/>
