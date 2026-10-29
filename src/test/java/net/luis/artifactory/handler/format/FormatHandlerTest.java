@@ -23,6 +23,18 @@ class FormatHandlerTest {
 	}
 	
 	@Test
+	void pypiFileNamesMatchProject() {
+		assertTrue(PypiHandler.matchesProject("lartifactory_test_pkg-1.0.0-py3-none-any.whl", "LArtifactory_Test.Pkg", "1.0.0"));
+		assertTrue(PypiHandler.matchesProject("lartifactory_test_pkg-1.0.0.tar.gz", "LArtifactory_Test.Pkg", "1.0.0"));
+		assertTrue(PypiHandler.matchesProject("Foo-Bar-2.0rc1.zip", "foo-bar", "2.0RC1"));
+		assertFalse(PypiHandler.matchesProject("bar-1.0.0-py3-none-any.whl", "foo", "1.0.0"), "file of another project");
+		assertFalse(PypiHandler.matchesProject("foo-bar-1.0.0.tar.gz", "foo", "1.0.0"), "file of a project with the name as prefix");
+		assertFalse(PypiHandler.matchesProject("foo-1.0.1.tar.gz", "foo", "1.0"), "file of another version");
+		assertFalse(PypiHandler.matchesProject("foo-1.0.1-py3-none-any.whl", "foo", "1.0"), "wheel of another version");
+		assertFalse(PypiHandler.matchesProject("foo-1.0.exe", "foo", "1.0"), "unknown distribution type");
+	}
+	
+	@Test
 	void mavenReleaseCoordinates() {
 		MavenHandler.Coordinates coordinates = MavenHandler.parseCoordinates("net/luisst/toolkit/1.0.7/toolkit-1.0.7-sources.jar");
 		assertNotNull(coordinates);

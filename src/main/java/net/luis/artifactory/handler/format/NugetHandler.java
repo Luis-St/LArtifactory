@@ -291,6 +291,8 @@ public class NugetHandler extends FormatHandler {
 			if (entity == null) {
 				throw HttpError.notFound();
 			}
+			// The nuspec is uploaded content, serve it as a download so a browser never renders it (xml may embed xhtml script)
+			ctx.header("Content-Disposition", "attachment; filename=\"" + lowerId + ".nuspec\"");
 			ctx.status(200).contentType("application/xml").result(Json.text(Json.parseObject(entity.metadata()), "nuspec", ""));
 			return;
 		}

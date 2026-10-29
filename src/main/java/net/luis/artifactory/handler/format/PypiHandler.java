@@ -37,6 +37,7 @@ public class PypiHandler extends FormatHandler {
 	private static final String JSON_TYPE = "application/vnd.pypi.simple.v1+json";
 	private static final Pattern NORMALIZE = Pattern.compile("[-_.]+");
 	private static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._+!-]*");
+	private static final List<String> SDIST_EXTENSIONS = List.of(".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip");
 	private static final Pattern VERSION = Pattern.compile("[A-Za-z0-9][A-Za-z0-9.!+_-]{0,127}");
 	
 	public PypiHandler(@NonNull Services services) {
@@ -45,6 +46,41 @@ public class PypiHandler extends FormatHandler {
 	
 	public static @NonNull String normalize(@NonNull String name) {
 		return NORMALIZE.matcher(name).replaceAll("-").toLowerCase(Locale.ROOT);
+	}
+	
+	/**
+	 * Checks that a distribution file belongs to the project and version.<br>
+	 * <p>
+	 *     Wheels and eggs are named {@code name-version-tags.ext} where neither name nor version contain a dash,
+	 *     source distributions are named {@code name-version.ext} where legacy names may contain dashes but the version does not.
+	 *     Names are compared normalized, versions ignoring case and the underscore escaping of wheels.
+	 * </p>
+	 */
+	public static boolean matchesProject(@NonNull String fileName, @NonNull String name, @NonNull String version) {
+		String lower = fileName.toLowerCase(Locale.ROOT);
+		String fileProject;
+		String fileVersion;
+		if (lower.endsWith(".whl") || lower.endsWith(".egg")) {
+			String[] parts = fileName.substring(0, fileName.length() - 4).split("-");
+			if (parts.length < 3) {
+				return false;
+			}
+			fileProject = parts[0];
+			fileVersion = parts[1];
+		} else {
+			String extension = SDIST_EXTENSIONS.stream().filter(lower::endsWith).findFirst().orElse(null);
+			if (extension == null) {
+				return false;
+			}
+			String stem = fileName.substring(0, fileName.length() - extension.length());
+			int dash = stem.lastIndexOf('-');
+			if (dash <= 0) {
+				return false;
+			}
+			fileProject = stem.substring(0, dash);
+			fileVersion = stem.substring(dash + 1);
+		}
+		return normalize(fileProject).equals(normalize(name)) && fileVersion.replace('_', '-').equalsIgnoreCase(version.replace('_', '-'));
 	}
 	
 	private static boolean wantsJson(@NonNull Context ctx) {
@@ -259,6 +295,11 @@ public class PypiHandler extends FormatHandler {
 		}
 		
 		String normalized = normalize(name);
+		// Files of all projects share one directory, so a file must belong to the uploaded project and version,
+		// otherwise an upload could claim (or with redeploys overwrite) the file name of another project
+		if (!matchesProject(fileName, name, version)) {
+			throw HttpError.badRequest("File name " + fileName + " does not match project " + name + " " + version);
+		}
 		String path = "packages/" + fileName;
 		FileEntity existing = this.services.artifacts().get(repository.name(), path);
 		if (existing != null && !repository.allowRedeploy()) {

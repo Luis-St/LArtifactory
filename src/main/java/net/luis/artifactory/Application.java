@@ -46,6 +46,11 @@ public class Application {
 	private static final Duration TEMPORARY_FILE_MAX_AGE = Duration.ofHours(24);
 	private static final String UI_CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
 		"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+	/**
+	 * Policy of all responses outside the web ui, package content (e.g. an uploaded .nuspec served as xml) must never run script in this origin.<br>
+	 */
+	private static final String CONTENT_SECURITY_POLICY = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox";
+	private static final List<String> API_DOCS_PREFIXES = List.of("/swagger", "/openapi", "/webjars/");
 	
 	static void main() throws SqlException {
 		Env env = Env.ofSystem();
@@ -163,6 +168,8 @@ public class Application {
 				if (ctx.path().equals("/ui") || ctx.path().startsWith("/ui/")) {
 					ctx.header("Content-Security-Policy", UI_CONTENT_SECURITY_POLICY);
 					ctx.header("X-Frame-Options", "DENY");
+				} else if (!serverConfig.apiDocsEnabled() || API_DOCS_PREFIXES.stream().noneMatch(ctx.path()::startsWith)) {
+					ctx.header("Content-Security-Policy", CONTENT_SECURITY_POLICY);
 				}
 			});
 			

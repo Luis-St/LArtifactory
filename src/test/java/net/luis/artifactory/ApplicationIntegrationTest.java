@@ -4,9 +4,9 @@ import net.luis.artifactory.config.*;
 import net.luis.artifactory.util.Json;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
+import org.testcontainers.postgresql.PostgreSQLContainer;
 import tools.jackson.databind.JsonNode;
 
 import java.io.IOException;
@@ -33,7 +33,7 @@ class ApplicationIntegrationTest {
 	private static final String ADMIN_PASSWORD = "admin-password-123";
 	
 	@Container
-	private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
+	private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
 	
 	@TempDir
 	static Path storage;
@@ -228,6 +228,13 @@ class ApplicationIntegrationTest {
 		HttpResponse<String> response = this.send("GET", "/ui/", null, null);
 		assertTrue(response.headers().firstValue("Content-Security-Policy").orElse("").contains("frame-ancestors 'none'"), response.headers().toString());
 		assertEquals("DENY", response.headers().firstValue("X-Frame-Options").orElse(""));
+	}
+	
+	@Test
+	void packageContentCanNotRunScript() throws Exception {
+		assertEquals(201, this.send("PUT", "/generic/files/sandboxed/page.html", basic("admin", ADMIN_PASSWORD), "<script>alert(1)</script>").statusCode());
+		HttpResponse<String> response = this.send("GET", "/generic/files/sandboxed/page.html", basic("admin", ADMIN_PASSWORD), null);
+		assertTrue(response.headers().firstValue("Content-Security-Policy").orElse("").contains("sandbox"), response.headers().toString());
 	}
 	
 	@Test
