@@ -290,7 +290,7 @@ Liveness never touches the database, so a database outage does not cause the con
 Readiness returns `503` while the database is unreachable, so load balancers stop sending traffic until it recovers.
 ### Repository tests
 `test/` contains a package for every repository type and a script that publishes, downloads, lists and installs them
-with the native clients (gradle, mvn, twine, pip, npm, dotnet, cargo) against a running server:
+with the native clients (gradle, mvn, twine, pip, npm, dotnet, cargo, docker) against a running server:
 
 ```bash
 docker compose -f docker-compose.db.yml up -d

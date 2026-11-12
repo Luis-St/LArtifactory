@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs the repository tests against a running LArtifactory server.
 #
-#   ARTIFACTORY_URL=http://localhost:8080 ARTIFACTORY_ADMIN_PASSWORD=... ./run.sh [generic] [maven] [pypi] [npm] [nuget] [cargo]
+#   ARTIFACTORY_URL=http://localhost:8080 ARTIFACTORY_ADMIN_PASSWORD=... ./run.sh [generic] [maven] [pypi] [npm] [nuget] [cargo] [oci]
 #
 # For every type a repository is (re)created, packages are uploaded with the native client,
 # then downloaded, listed and installed again. Users 'lat-ci' (write) and 'lat-reader' (read) are created for the tests.
@@ -11,7 +11,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 TYPES=("$@")
 if [[ ${#TYPES[@]} -eq 0 ]]; then
-	TYPES=(generic maven pypi npm nuget cargo)
+	TYPES=(generic maven pypi npm nuget cargo oci)
 fi
 
 mkdir -p "$WORK_DIR"
@@ -24,7 +24,7 @@ if ! curl -sf "$ARTIFACTORY_URL/health" > /dev/null; then
 fi
 check_status "admin credentials are valid" 200 -u "$ADMIN_USER:$ADMIN_PASSWORD" "$ARTIFACTORY_URL/api/me"
 
-declare -A REPOS=([generic]=generic-local [maven]=maven-releases [pypi]=pypi-local [npm]=npm-local [nuget]=nuget-local [cargo]=cargo-local)
+declare -A REPOS=([generic]=generic-local [maven]=maven-releases [pypi]=pypi-local [npm]=npm-local [nuget]=nuget-local [cargo]=cargo-local [oci]=oci-local)
 for type in "${TYPES[@]}"; do
 	[[ -n "${REPOS[$type]:-}" ]] || continue
 	api -o /dev/null -X DELETE "$ARTIFACTORY_URL/api/repositories/${REPOS[$type]}"
