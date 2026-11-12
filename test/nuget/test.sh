@@ -25,16 +25,35 @@ cat > "$NUGET_DIR/consumer/nuget.config" <<EOF
 </configuration>
 EOF
 
+# Push and delete use their own configuration without credentials, the api key would otherwise compete with the basic auth
+# of the consumer configuration. Current SDKs only accept an http source through a configuration with allowInsecureConnections.
+mkdir -p "$NUGET_DIR/push"
+cat > "$NUGET_DIR/push/nuget.config" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+	<packageSources>
+		<clear />
+		<add key="lartifactory" value="$SOURCE" allowInsecureConnections="true" />
+	</packageSources>
+</configuration>
+EOF
+PUSH_SOURCE=(--source lartifactory --configfile "$NUGET_DIR/push/nuget.config")
+
+# dotnet nuget delete has no --configfile option, it reads the nuget.config of the working directory
+nuget_delete() {
+	(cd "$NUGET_DIR/push" && dotnet nuget delete "$@" --source lartifactory --non-interactive)
+}
+
 # Push
 cd "$NUGET_DIR/library" || return
 check "dotnet pack 1.0.0" dotnet pack -c Release -o "$NUGET_DIR/out" -p:Version=1.0.0
-check "dotnet nuget push 1.0.0" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" --source "$SOURCE" --api-key "$CI_TOKEN"
-check_fails "pushing 1.0.0 again is rejected" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" --source "$SOURCE" --api-key "$CI_TOKEN"
-check "pushing 1.0.0 again with --skip-duplicate succeeds" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" --source "$SOURCE" --api-key "$CI_TOKEN" --skip-duplicate
-check_fails "push with a read only api key is rejected" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" --source "$SOURCE" --api-key "$READER_TOKEN"
+check "dotnet nuget push 1.0.0" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" "${PUSH_SOURCE[@]}" --api-key "$CI_TOKEN"
+check_fails "pushing 1.0.0 again is rejected" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" "${PUSH_SOURCE[@]}" --api-key "$CI_TOKEN"
+check "pushing 1.0.0 again with --skip-duplicate succeeds" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" "${PUSH_SOURCE[@]}" --api-key "$CI_TOKEN" --skip-duplicate
+check_fails "push with a read only api key is rejected" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.0.0.nupkg" "${PUSH_SOURCE[@]}" --api-key "$READER_TOKEN"
 sed -i 's/TestLib 1.0.0/TestLib 1.1.0/' Greeter.cs
 check "dotnet pack 1.1.0" dotnet pack -c Release -o "$NUGET_DIR/out" -p:Version=1.1.0
-check "dotnet nuget push 1.1.0" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.1.0.nupkg" --source "$SOURCE" --api-key "$CI_TOKEN"
+check "dotnet nuget push 1.1.0" dotnet nuget push "$NUGET_DIR/out/LArtifactory.TestLib.1.1.0.nupkg" "${PUSH_SOURCE[@]}" --api-key "$CI_TOKEN"
 
 # Read
 AUTH=(-u "lat-reader:$READER_TOKEN")
@@ -57,8 +76,8 @@ check_equals "dotnet run restores and uses 1.1.0" "hello from TestLib 1.1.0" "$(
 check_contains "dotnet list package shows the resolved version" "1.1.0" "$(dotnet list package -p:TestLibVersion=1.1.0 2>&1)"
 
 # Unlist
-check_fails "reader can not unlist" dotnet nuget delete LArtifactory.TestLib 1.1.0 --source "$SOURCE" --api-key "$READER_TOKEN" --non-interactive
-check "dotnet nuget delete unlists 1.1.0" dotnet nuget delete LArtifactory.TestLib 1.1.0 --source "$SOURCE" --api-key "$CI_TOKEN" --non-interactive
+check_fails "reader can not unlist" nuget_delete LArtifactory.TestLib 1.1.0 --api-key "$READER_TOKEN"
+check "dotnet nuget delete unlists 1.1.0" nuget_delete LArtifactory.TestLib 1.1.0 --api-key "$CI_TOKEN"
 SEARCH="$(curl -sS "${AUTH[@]}" "$FEED/v3/query?q=testlib")"
 check_equals "search shows 1.0.0 after unlisting 1.1.0" "1.0.0" "$(json_get "$SEARCH" "data['data'][0]['version']")"
 check_contains "unlisted version can still be restored" "1.1.0" "$(curl -sS "${AUTH[@]}" "$FEED/v3-flatcontainer/lartifactory.testlib/index.json")"
