@@ -29,6 +29,7 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.*;
 import tools.jackson.core.JacksonException;
 
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
@@ -239,7 +240,18 @@ public class Application {
 			
 			// Web ui
 			config.routes.get("/", ctx -> ctx.redirect("/ui/"));
-			config.routes.get("/ui", ctx -> ctx.redirect("/ui/"));
+			// Trailing slashes are ignored when matching, so this route also receives /ui/ and must only redirect the bare path
+			config.routes.get("/ui", ctx -> {
+				if (!ctx.req().getRequestURI().endsWith("/")) {
+					ctx.redirect("/ui/");
+					return;
+				}
+				InputStream index = Application.class.getResourceAsStream("/ui/index.html");
+				if (index == null) {
+					throw HttpError.notFound("The web ui is not packaged, build it with ./gradlew buildUi");
+				}
+				ctx.contentType("text/html; charset=utf-8").result(index);
+			});
 			
 			// Management api
 			config.routes.get("/api/me", userAdminHandler::me);
