@@ -1,5 +1,6 @@
-import {type ButtonHTMLAttributes, type ReactNode, useEffect, useRef, useState} from 'react';
+import {type ButtonHTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import type {RepositoryType} from '../types';
+import {Icon, type IconName} from './icons';
 
 export const TYPE_INFO: Record<RepositoryType, { label: string; ecosystem: string; color: string }> = {
 	maven: {label: 'Maven', ecosystem: 'Maven & Gradle', color: 'var(--type-maven)'},
@@ -23,8 +24,8 @@ export function TypeIcon({type, size = 36}: { type: RepositoryType; size?: numbe
 	);
 }
 
-export function Badge({children, tone = 'neutral'}: { children: ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'accent' }) {
-	return <span className={`badge badge-${tone}`}>{children}</span>;
+export function Badge({children, tone = 'neutral', className, title}: { children: ReactNode; tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'accent'; className?: string; title?: string }) {
+	return <span className={`badge badge-${tone}${className ? ' ' + className : ''}`} title={title}>{children}</span>;
 }
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary' | 'secondary' | 'danger' | 'ghost'; small?: boolean };
@@ -60,10 +61,11 @@ export function Empty({title, children}: { title: string; children?: ReactNode }
 	);
 }
 
-export function PageHeader({title, subtitle, actions}: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode }) {
+export function PageHeader({title, subtitle, actions, back}: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: { label: string; href: string } }) {
 	return (
 		<header className="page-header">
-			<div>
+			<div className="page-title">
+				{back && <a className="back" href={back.href}><Icon name="arrow-left" size={14}/>{back.label}</a>}
 				<h1>{title}</h1>
 				{subtitle && <p className="muted">{subtitle}</p>}
 			</div>
@@ -86,6 +88,10 @@ export function Card({title, actions, children, className}: { title?: ReactNode;
 	);
 }
 
+export function Stats({children}: { children: ReactNode }) {
+	return <div className="stats-row">{children}</div>;
+}
+
 export function Stat({label, value, hint}: { label: string; value: ReactNode; hint?: ReactNode }) {
 	return (
 		<div className="stat">
@@ -100,6 +106,8 @@ export function Modal({title, onClose, children, footer, wide}: { title: string;
 	const dialog = useRef<HTMLDialogElement>(null);
 	useEffect(() => {
 		dialog.current?.showModal();
+		// showModal focuses the close button, the first form control is where the user wants to type
+		dialog.current?.querySelector<HTMLElement>('.modal-body :is(input, select, textarea):not(:disabled)')?.focus();
 	}, []);
 	return (
 		<dialog ref={dialog} className={`modal${wide ? ' modal-wide' : ''}`} onCancel={event => {
@@ -108,7 +116,7 @@ export function Modal({title, onClose, children, footer, wide}: { title: string;
 		}}>
 			<div className="modal-header">
 				<h2>{title}</h2>
-				<button type="button" className="icon-btn" onClick={onClose} aria-label="Close">×</button>
+				<button type="button" className="icon-btn" onClick={onClose} aria-label="Close"><Icon name="close"/></button>
 			</div>
 			<div className="modal-body">{children}</div>
 			{footer && <div className="modal-footer">{footer}</div>}
@@ -138,18 +146,18 @@ export function ConfirmDialog({title, message, confirmLabel = 'Delete', onConfir
 	};
 	return (
 		<Modal title={title} onClose={onClose} footer={
-												   <>
-													   <Button onClick={onClose} disabled={busy}>Cancel</Button>
-													   <Button variant="danger" onClick={confirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</Button>
-												   </>
-											   }>
+			<>
+				<Button onClick={onClose} disabled={busy}>Cancel</Button>
+				<Button variant="danger" onClick={confirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</Button>
+			</>
+		}>
 			<div className="confirm-message">{message}</div>
 			{error && <ErrorBox error={error}/>}
 		</Modal>
 	);
 }
 
-export function CopyButton({value, label = 'Copy'}: { value: string; label?: string }) {
+export function CopyButton({value, label = 'Copy', iconOnly}: { value: string; label?: string; iconOnly?: boolean }) {
 	const [copied, setCopied] = useState(false);
 	const copy = async () => {
 		try {
@@ -160,7 +168,38 @@ export function CopyButton({value, label = 'Copy'}: { value: string; label?: str
 			// Clipboard access denied, the value stays selectable
 		}
 	};
-	return <Button small variant="ghost" onClick={copy}>{copied ? 'Copied' : label}</Button>;
+	return (
+		<Button small variant="ghost" className={iconOnly ? 'btn-icon' : undefined} onClick={copy} title={iconOnly ? (copied ? 'Copied' : label) : undefined} aria-label={label}>
+			<Icon name={copied ? 'check' : 'copy'} size={15}/>
+			{!iconOnly && <span>{copied ? 'Copied' : label}</span>}
+		</Button>
+	);
+}
+
+/**
+ * Several code snippets shown one at a time, picked with tabs above the code.
+ */
+export function SnippetTabs({snippets}: { snippets: { title: string; code: string }[] }) {
+	const [active, setActive] = useState(0);
+	const snippet = snippets[Math.min(active, snippets.length - 1)];
+	if (!snippet) {
+		return null;
+	}
+	return (
+		<div className="code-block">
+			<div className="code-block-header">
+				<div className="snippet-tabs" role="tablist">
+					{snippets.map((entry, index) => (
+						<button key={entry.title} type="button" role="tab" aria-selected={index === active} className={`snippet-tab${index === active ? ' snippet-tab-active' : ''}`} onClick={() => setActive(index)}>
+							{entry.title}
+						</button>
+					))}
+				</div>
+				<CopyButton value={snippet.code}/>
+			</div>
+			<pre><code>{snippet.code}</code></pre>
+		</div>
+	);
 }
 
 export function CodeBlock({title, code}: { title?: string; code: string }) {
@@ -188,14 +227,18 @@ export function Toggle({checked, onChange, label, description, disabled}: { chec
 	);
 }
 
-export function Field({label, hint, children}: { label: string; hint?: ReactNode; children: ReactNode }) {
-	return (
-		<label className="field">
+/**
+ * A labelled form control, group renders a plain container for controls that bring their own labels (checkbox lists).
+ */
+export function Field({label, hint, children, group}: { label: string; hint?: ReactNode; children: ReactNode; group?: boolean }) {
+	const content = (
+		<>
 			<span className="field-label">{label}</span>
 			{children}
 			{hint && <small className="muted">{hint}</small>}
-		</label>
+		</>
 	);
+	return group ? <div className="field" role="group" aria-label={label}>{content}</div> : <label className="field">{content}</label>;
 }
 
 export function Tabs<T extends string>({tabs, active, onChange}: { tabs: { id: T; label: ReactNode }[]; active: T; onChange: (id: T) => void }) {
@@ -212,4 +255,116 @@ export function Tabs<T extends string>({tabs, active, onChange}: { tabs: { id: T
 
 export function errorText(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Button group to pick one of a few options, e.g. the theme.
+ */
+export function Segmented<T extends string>({options, value, onChange, label}: { options: { id: T; label: ReactNode; icon?: IconName }[]; value: T; onChange: (id: T) => void; label: string }) {
+	return (
+		<div className="segmented" role="radiogroup" aria-label={label}>
+			{options.map(option => (
+				<button key={option.id} type="button" role="radio" aria-checked={option.id === value} className={`segment${option.id === value ? ' segment-active' : ''}`} onClick={() => onChange(option.id)}>
+					{option.icon && <Icon name={option.icon} size={15}/>}
+					<span>{option.label}</span>
+				</button>
+			))}
+		</div>
+	);
+}
+
+export interface MenuItem {
+	label: string;
+	icon?: IconName;
+	onSelect: () => void;
+	danger?: boolean;
+	disabled?: boolean;
+	hidden?: boolean;
+}
+
+/**
+ * Popup menu of a trigger button, positioned fixed so it is not clipped by scrolling table containers.
+ */
+export function Menu({items, trigger, label = 'More actions', align = 'end', header}: { items: MenuItem[]; trigger?: ReactNode; label?: string; align?: 'start' | 'end'; header?: ReactNode }) {
+	const [open, setOpen] = useState(false);
+	const [position, setPosition] = useState<{ top: number; left?: number; right?: number }>({top: 0});
+	const button = useRef<HTMLButtonElement>(null);
+	const popup = useRef<HTMLDivElement>(null);
+	const visible = items.filter(item => !item.hidden);
+	
+	useLayoutEffect(() => {
+		if (!open || !button.current || !popup.current) {
+			return;
+		}
+		const rect = button.current.getBoundingClientRect();
+		const height = popup.current.offsetHeight;
+		const below = rect.bottom + 4 + height <= window.innerHeight;
+		setPosition({
+			top: below ? rect.bottom + 4 : Math.max(8, rect.top - 4 - height),
+			...(align === 'end' ? {right: window.innerWidth - rect.right} : {left: rect.left}),
+		});
+	}, [open, align]);
+	
+	useEffect(() => {
+		if (!open) {
+			return;
+		}
+		const close = (event: Event) => {
+			if (event.type === 'keydown' && (event as KeyboardEvent).key !== 'Escape') {
+				return;
+			}
+			if (event.type === 'mousedown' && (popup.current?.contains(event.target as Node) || button.current?.contains(event.target as Node))) {
+				return;
+			}
+			setOpen(false);
+		};
+		document.addEventListener('mousedown', close);
+		document.addEventListener('keydown', close);
+		window.addEventListener('resize', close);
+		window.addEventListener('scroll', close, true);
+		return () => {
+			document.removeEventListener('mousedown', close);
+			document.removeEventListener('keydown', close);
+			window.removeEventListener('resize', close);
+			window.removeEventListener('scroll', close, true);
+		};
+	}, [open]);
+	
+	if (visible.length === 0) {
+		return null;
+	}
+	return (
+		<>
+			<button ref={button} type="button" className={trigger ? 'menu-trigger' : 'btn btn-ghost btn-small btn-icon'} aria-haspopup="menu" aria-expanded={open} aria-label={label} title={trigger ? undefined : label}
+					onClick={event => {
+						event.stopPropagation();
+						setOpen(value => !value);
+					}}>
+				{trigger ?? <Icon name="more" size={16}/>}
+			</button>
+			{open && (
+				<div ref={popup} className="menu" role="menu" style={position} onClick={event => event.stopPropagation()}>
+					{header && <div className="menu-header">{header}</div>}
+					{visible.map(item => (
+						<button key={item.label} type="button" role="menuitem" className={`menu-item${item.danger ? ' menu-item-danger' : ''}`} disabled={item.disabled} onClick={() => {
+							setOpen(false);
+							item.onSelect();
+						}}>
+							{item.icon && <Icon name={item.icon} size={16}/>}
+							<span>{item.label}</span>
+						</button>
+					))}
+				</div>
+			)}
+		</>
+	);
+}
+
+export function SearchField({value, onChange, placeholder}: { value: string; onChange: (value: string) => void; placeholder: string }) {
+	return (
+		<div className="search-field">
+			<Icon name="search" size={16}/>
+			<input type="search" placeholder={placeholder} aria-label={placeholder} value={value} onChange={event => onChange(event.target.value)}/>
+		</div>
+	);
 }

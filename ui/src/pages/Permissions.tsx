@@ -5,6 +5,7 @@ import {useAsync} from '../hooks';
 import {href} from '../router';
 import {useSession} from '../session';
 import {ACCESS_LEVELS, type AccessLevel} from '../types';
+import {levelTone} from './Users';
 
 export function Permissions({params}: { params: URLSearchParams }) {
 	const {notify} = useSession();
@@ -14,7 +15,7 @@ export function Permissions({params}: { params: URLSearchParams }) {
 	const [userFilter, setUserFilter] = useState(params.get('username') ?? '');
 	const [repositoryFilter, setRepositoryFilter] = useState('');
 	
-	const [username, setUsername] = useState('');
+	const [username, setUsername] = useState(params.get('username') ?? '');
 	const [repository, setRepository] = useState('*');
 	const [level, setLevel] = useState<AccessLevel>('READ');
 	const [busy, setBusy] = useState(false);
@@ -77,14 +78,20 @@ export function Permissions({params}: { params: URLSearchParams }) {
 				</select>
 				<select value={repositoryFilter} onChange={event => setRepositoryFilter(event.target.value)} aria-label="Filter repository">
 					<option value="">All repositories</option>
-					<option value="*">*</option>
+					<option value="*">* (all repositories)</option>
 					{(repositories.data ?? []).map(entry => <option key={entry.name} value={entry.name}>{entry.name}</option>)}
 				</select>
+				{(userFilter || repositoryFilter) && <Button variant="ghost" onClick={() => {
+					setUserFilter('');
+					setRepositoryFilter('');
+				}}>Clear filters</Button>}
+				<div className="toolbar-spacer"/>
+				<span className="muted small">{rows.length} {rows.length === 1 ? 'permission' : 'permissions'}</span>
 			</div>
 			
 			{permissions.loading && !permissions.data && <Spinner/>}
 			{permissions.error && <ErrorBox error={permissions.error} onRetry={permissions.reload}/>}
-			{permissions.data && (rows.length === 0 ? <Empty title="No permissions"/> : (
+			{permissions.data && (rows.length === 0 ? <Empty title="No permissions">{userFilter || repositoryFilter ? 'No permissions match the filters.' : 'Grant a user access to a repository above.'}</Empty> : (
 				<div className="table-wrap">
 					<table className="table">
 						<thead>
@@ -109,7 +116,7 @@ export function Permissions({params}: { params: URLSearchParams }) {
 												</span>
 										)}
 									</td>
-									<td><Badge tone={permission.level === 'DELETE' ? 'danger' : permission.level === 'WRITE' ? 'warning' : 'neutral'}>{permission.level}</Badge></td>
+									<td><Badge tone={levelTone(permission.level)}>{permission.level}</Badge></td>
 									<td className="actions"><Button small variant="ghost" className="danger-text" onClick={() => revoke(permission.repository, permission.username)}>Revoke</Button></td>
 								</tr>
 							);

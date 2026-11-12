@@ -1,5 +1,5 @@
 import {api} from './api';
-import {compareVersions} from './format';
+import {compareVersions, shortDigest} from './format';
 import {type FileEntry, type Package, type Repository, REPOSITORY_TYPES, type RepositoryType} from './types';
 
 export interface RepositoryInventory {
@@ -52,6 +52,23 @@ export function latestVersion(pkg: Package): string | undefined {
 	return versions.sort(compareVersions).at(-1) ?? pkg.versions.map(version => version.version).sort(compareVersions).at(-1);
 }
 
+/**
+ * The version shown as the latest one, OCI versions are manifest digests so the newest tag is shown instead.
+ */
+export function latestLabel(repository: Repository, pkg: Package): string | undefined {
+	if (repository.type !== 'oci') {
+		return latestVersion(pkg);
+	}
+	const tags = Object.keys(pkg.tags);
+	if (tags.includes('latest')) {
+		return 'latest';
+	}
+	const created = new Map(pkg.versions.map(version => [version.version, version.createdAt]));
+	const newestTag = tags.sort((a, b) => (created.get(pkg.tags[b]) ?? '').localeCompare(created.get(pkg.tags[a]) ?? '') || compareVersions(b, a))[0];
+	const latest = latestVersion(pkg);
+	return newestTag ?? (latest ? shortDigest(latest) : undefined);
+}
+
 function newest(values: (string | undefined)[]): string | undefined {
 	return values.reduce<string | undefined>((result, value) => (value && (!result || value > result) ? value : result), undefined);
 }
@@ -62,7 +79,7 @@ export function summarizePackages(inventory: RepositoryInventory): PackageSummar
 		return {
 			repository: inventory.repository,
 			pkg,
-			latest: latestVersion(pkg),
+			latest: latestLabel(inventory.repository, pkg),
 			updatedAt: newest(pkg.versions.map(version => version.createdAt)),
 			size: files.reduce((sum, file) => sum + file.size, 0),
 			fileCount: files.length,
@@ -93,6 +110,8 @@ export interface RecentUpload {
 	version: string;
 	createdAt: string;
 	createdBy: string | null;
+	/** Tags pointing at the version, the readable name of an OCI manifest */
+	tags: string[];
 }
 
 export function recentUploads(inventories: RepositoryInventory[], limit: number): RecentUpload[] {
@@ -103,6 +122,7 @@ export function recentUploads(inventories: RepositoryInventory[], limit: number)
 			version: version.version,
 			createdAt: version.createdAt,
 			createdBy: version.createdBy,
+			tags: Object.entries(pkg.tags).filter(([, target]) => target === version.version).map(([tag]) => tag),
 		}))))
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 		.slice(0, limit);

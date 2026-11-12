@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
-import { Badge, Button, ConfirmDialog, Empty, ErrorBox, Field, Modal, PageHeader, Spinner, errorText } from '../components/ui';
+import { Icon } from '../components/icons';
+import { Badge, Button, ConfirmDialog, Empty, ErrorBox, Field, Menu, Modal, PageHeader, Spinner, errorText } from '../components/ui';
 import { formatDate, formatRelative } from '../format';
 import { useAsync } from '../hooks';
+import { href } from '../router';
 import { useSession } from '../session';
 import { WEBHOOK_EVENTS, type Webhook } from '../types';
 
@@ -18,11 +20,21 @@ export function Webhooks() {
 		setTesting(webhook.id);
 		try {
 			const delivery = await api.testWebhook(webhook.id);
-			notify(delivery.success ? `Ping delivered (HTTP ${delivery.statusCode})` : `Ping failed: ${delivery.error ?? 'no response'}`);
+			notify(delivery.success ? `Ping delivered (HTTP ${delivery.statusCode})` : `Ping failed: ${delivery.error ?? `HTTP ${delivery.statusCode}`}`, delivery.success ? 'success' : 'error');
 		} catch (e) {
-			notify(errorText(e));
+			notify(errorText(e), 'error');
 		} finally {
 			setTesting(null);
+		}
+	};
+
+	const toggle = async (webhook: Webhook) => {
+		try {
+			await api.updateWebhook(webhook.id, { active: !webhook.active });
+			notify(webhook.active ? 'Webhook disabled' : 'Webhook enabled');
+			webhooks.reload();
+		} catch (e) {
+			notify(errorText(e), 'error');
 		}
 	};
 
@@ -31,7 +43,7 @@ export function Webhooks() {
 			<PageHeader
 				title="Webhooks"
 				subtitle="Notify external services when artifacts are published or deleted and when repositories change. Payloads are signed with HMAC-SHA256 when a secret is set."
-				actions={<Button variant="primary" onClick={() => setCreating(true)}>New webhook</Button>}
+				actions={<Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16} />New webhook</Button>}
 			/>
 			{webhooks.loading && !webhooks.data && <Spinner />}
 			{webhooks.error && <ErrorBox error={webhooks.error} onRetry={webhooks.reload} />}
@@ -42,17 +54,25 @@ export function Webhooks() {
 						<tbody>
 							{webhooks.data.map(webhook => (
 								<tr key={webhook.id}>
-									<td className="mono small">{webhook.url}</td>
-									<td>{webhook.repository ?? <span className="muted">All repositories</span>}</td>
-									<td className="small">{webhook.events.length === 0 ? <span className="muted">All events</span> : webhook.events.join(', ')}</td>
-									<td>{webhook.hasSecret ? <Badge tone="success">signed</Badge> : <span className="muted">no</span>}</td>
-									<td>{webhook.active ? <Badge tone="success">active</Badge> : <Badge tone="neutral">disabled</Badge>}</td>
-									<td className="muted" title={formatDate(webhook.createdAt)}>{formatRelative(webhook.createdAt)}</td>
+									<td className="mono small break">{webhook.url}</td>
+									<td className="nowrap">{webhook.repository ? <a className="link" href={href('repositories', webhook.repository)}>{webhook.repository}</a> : <span className="muted">All repositories</span>}</td>
+									<td>
+										{webhook.events.length === 0 ? <span className="muted">All events</span> : (
+											<span className="cell-inline">{webhook.events.map(event => <Badge key={event} className="mono">{event}</Badge>)}</span>
+										)}
+									</td>
+									<td className="shrink">{webhook.hasSecret ? <Badge tone="success">signed</Badge> : <span className="faint">unsigned</span>}</td>
+									<td className="shrink">{webhook.active ? <Badge tone="success">active</Badge> : <Badge tone="neutral">disabled</Badge>}</td>
+									<td className="muted nowrap" title={formatDate(webhook.createdAt)}>{formatRelative(webhook.createdAt)}</td>
 									<td className="actions">
-										<Button small variant="ghost" disabled={testing === webhook.id} onClick={() => test(webhook)}>{testing === webhook.id ? 'Testing…' : 'Test'}</Button>
-										<Button small variant="ghost" onClick={() => setHistory(webhook)}>History</Button>
-										<Button small variant="ghost" onClick={async () => { await api.updateWebhook(webhook.id, { active: !webhook.active }); notify(webhook.active ? 'Webhook disabled' : 'Webhook enabled'); webhooks.reload(); }}>{webhook.active ? 'Disable' : 'Enable'}</Button>
-										<Button small variant="ghost" className="danger-text" onClick={() => setDeleting(webhook)}>Delete</Button>
+										<span className="row-actions">
+											<Button small variant="ghost" disabled={testing === webhook.id} onClick={() => test(webhook)}>{testing === webhook.id ? 'Sending…' : 'Send test'}</Button>
+											<Menu label="Webhook actions" items={[
+												{ label: 'Delivery history', icon: 'audit', onSelect: () => setHistory(webhook) },
+												{ label: webhook.active ? 'Disable' : 'Enable', icon: webhook.active ? 'close' : 'check', onSelect: () => toggle(webhook) },
+												{ label: 'Delete webhook', icon: 'trash', onSelect: () => setDeleting(webhook), danger: true },
+											]} />
+										</span>
 									</td>
 								</tr>
 							))}
@@ -115,10 +135,10 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 				<Field label="Secret" hint="Optional, used to sign payloads with HMAC-SHA256 (X-LArtifactory-Signature)">
 					<input value={secret} onChange={e => setSecret(e.target.value)} placeholder="Unsigned" maxLength={256} />
 				</Field>
-				<Field label="Events" hint="Select none to receive all events">
+				<Field group label="Events" hint="Select none to receive all events">
 					<div className="checkbox-list">
 						{WEBHOOK_EVENTS.map(event => (
-							<label key={event} className="cell-inline">
+							<label key={event}>
 								<input type="checkbox" checked={events.includes(event)} onChange={() => toggleEvent(event)} />
 								<span className="mono small">{event}</span>
 							</label>
@@ -148,7 +168,7 @@ function HistoryDialog({ webhook, onClose }: { webhook: Webhook; onClose: () => 
 						<tbody>
 							{deliveries.data.map(delivery => (
 								<tr key={delivery.id}>
-									<td className="muted small" title={formatDate(delivery.createdAt)}>{formatRelative(delivery.createdAt)}</td>
+									<td className="muted small nowrap" title={formatDate(delivery.createdAt)}>{formatRelative(delivery.createdAt)}</td>
 									<td className="mono small">{delivery.event}</td>
 									<td>{delivery.success
 										? <Badge tone="success">HTTP {delivery.statusCode}</Badge>

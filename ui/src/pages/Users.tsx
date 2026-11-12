@@ -1,16 +1,18 @@
 import {type FormEvent, useState} from 'react';
 import {api} from '../api';
-import {Badge, Button, ConfirmDialog, Empty, ErrorBox, errorText, Field, Modal, PageHeader, Spinner, Toggle} from '../components/ui';
+import {Icon} from '../components/icons';
+import {Badge, Button, ConfirmDialog, Empty, ErrorBox, errorText, Field, Menu, Modal, PageHeader, SearchField, Spinner, Toggle} from '../components/ui';
 import {formatDate} from '../format';
 import {useAsync} from '../hooks';
-import {href} from '../router';
+import {href, navigate} from '../router';
 import {useSession} from '../session';
-import type {User} from '../types';
+import type {AccessLevel, User} from '../types';
 
 export function Users() {
 	const {principal, notify} = useSession();
 	const users = useAsync(() => api.users(), []);
 	const permissions = useAsync(() => api.permissions(), []);
+	const [search, setSearch] = useState('');
 	const [creating, setCreating] = useState(false);
 	const [editing, setEditing] = useState<User | null>(null);
 	const [deleting, setDeleting] = useState<User | null>(null);
@@ -25,17 +27,26 @@ export function Users() {
 		}
 	};
 	
+	const query = search.trim().toLowerCase();
+	const rows = [...(users.data ?? [])].filter(user => !query || user.username.toLowerCase().includes(query)).sort((a, b) => a.username.localeCompare(b.username));
+	
 	return (
 		<>
-			<PageHeader title="Users" subtitle="Users sign in with a password and create access tokens for their clients." actions={<Button variant="primary" onClick={() => setCreating(true)}>New user</Button>}/>
+			<PageHeader title="Users" subtitle="Users sign in with a password and create access tokens for their clients."
+						actions={<Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16}/>New user</Button>}/>
+			{users.data && users.data.length > 5 && (
+				<div className="toolbar">
+					<SearchField placeholder="Search users…" value={search} onChange={setSearch}/>
+				</div>
+			)}
 			{users.loading && !users.data && <Spinner/>}
 			{users.error && <ErrorBox error={users.error} onRetry={users.reload}/>}
-			{users.data && (users.data.length === 0 ? <Empty title="No users"/> : (
+			{users.data && (rows.length === 0 ? <Empty title={users.data.length === 0 ? 'No users' : 'No matching users'}/> : (
 				<div className="table-wrap">
 					<table className="table">
 						<thead>
 						<tr>
-							<th>Username</th>
+							<th>User</th>
 							<th>Role</th>
 							<th>Permissions</th>
 							<th>Created</th>
@@ -43,31 +54,40 @@ export function Users() {
 						</tr>
 						</thead>
 						<tbody>
-						{users.data.sort((a, b) => a.username.localeCompare(b.username)).map(user => {
-							const granted = (permissions.data ?? []).filter(permission => permission.username === user.username);
+						{rows.map(user => {
+							const granted = (permissions.data ?? []).filter(permission => permission.username === user.username)
+								.sort((a, b) => (a.repository === '*' ? -1 : b.repository === '*' ? 1 : a.repository.localeCompare(b.repository)));
 							const self = user.username === principal?.username;
 							return (
 								<tr key={user.username}>
 									<td>
-											<span className="cell-inline">
-												<span className="avatar avatar-small" aria-hidden>{user.username.substring(0, 1).toUpperCase()}</span>
-												<strong>{user.username}</strong>
-												{self && <span className="muted small">(you)</span>}
-											</span>
+										<span className="cell-inline">
+											<span className="avatar avatar-small" aria-hidden>{user.username.substring(0, 1).toUpperCase()}</span>
+											<strong>{user.username}</strong>
+											{self && <Badge>you</Badge>}
+										</span>
 									</td>
-									<td>{user.admin ? <Badge tone="accent">Administrator</Badge> : <Badge>User</Badge>}</td>
+									<td className="shrink">{user.admin ? <Badge tone="accent">Administrator</Badge> : <Badge>User</Badge>}</td>
 									<td>
-										{user.admin ? <span className="muted">All repositories</span> : granted.length === 0 ? <span className="muted">None</span> : (
-											<a className="link" href={`${href('permissions')}?username=${encodeURIComponent(user.username)}`}>
-												{granted.map(permission => `${permission.repository}: ${permission.level}`).slice(0, 3).join(', ')}{granted.length > 3 ? ` +${granted.length - 3}` : ''}
+										{user.admin ? <span className="muted">Full access</span> : granted.length === 0 ? <span className="faint">No access</span> : (
+											<a className="cell-inline" href={`${href('permissions')}?username=${encodeURIComponent(user.username)}`} title="Manage permissions">
+												{granted.slice(0, 3).map(permission => (
+													<Badge key={permission.repository} tone={levelTone(permission.level)}>
+														{permission.repository === '*' ? 'all repositories' : permission.repository} · {permission.level.toLowerCase()}
+													</Badge>
+												))}
+												{granted.length > 3 && <span className="muted small">+{granted.length - 3} more</span>}
 											</a>
 										)}
 									</td>
-									<td className="muted">{formatDate(user.createdAt)}</td>
+									<td className="muted nowrap">{formatDate(user.createdAt)}</td>
 									<td className="actions">
-										<Button small variant="ghost" onClick={() => setEditing(user)}>Set password</Button>
-										<Button small variant="ghost" onClick={() => toggleAdmin(user)} disabled={self}>{user.admin ? 'Revoke admin' : 'Make admin'}</Button>
-										<Button small variant="ghost" className="danger-text" onClick={() => setDeleting(user)} disabled={self}>Delete</Button>
+										<Menu label={`Actions for ${user.username}`} items={[
+											{label: self ? 'Change password' : 'Set password', icon: 'tokens', onSelect: () => setEditing(user)},
+											{label: 'Manage permissions', icon: 'permissions', onSelect: () => navigate(`${href('permissions')}?username=${encodeURIComponent(user.username)}`), hidden: user.admin},
+											{label: user.admin ? 'Revoke administrator' : 'Make administrator', icon: 'users', onSelect: () => toggleAdmin(user), hidden: self},
+											{label: 'Delete user', icon: 'trash', onSelect: () => setDeleting(user), danger: true, hidden: self},
+										]}/>
 									</td>
 								</tr>
 							);
@@ -97,6 +117,10 @@ export function Users() {
 			)}
 		</>
 	);
+}
+
+export function levelTone(level: AccessLevel): 'neutral' | 'warning' | 'danger' {
+	return level === 'DELETE' ? 'danger' : level === 'WRITE' ? 'warning' : 'neutral';
 }
 
 function CreateUserDialog({onClose, onCreated}: { onClose: () => void; onCreated: () => void }) {

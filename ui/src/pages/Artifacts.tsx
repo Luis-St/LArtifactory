@@ -1,6 +1,7 @@
 import {useMemo, useState} from 'react';
 import {downloadFile} from '../api';
-import {Badge, Button, Empty, ErrorBox, PageHeader, Spinner, Stat, Tabs, TYPE_INFO, TypeBadge} from '../components/ui';
+import {Icon} from '../components/icons';
+import {Badge, Button, Empty, ErrorBox, PageHeader, SearchField, Spinner, Stat, Stats, Tabs, TYPE_INFO, TypeBadge} from '../components/ui';
 import {compareVersions, formatBytes, formatNumber, formatRelative} from '../format';
 import {useAsync} from '../hooks';
 import {loadInventory, type PackageSummary, type RepositoryInventory, summarizePackages, summarizeTypes} from '../inventory';
@@ -17,7 +18,10 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 	const [sort, setSort] = useState<Sort>('updated');
 	
 	const all = useMemo(() => (inventory.data ?? []).flatMap(summarizePackages), [inventory.data]);
-	const counts = useMemo(() => Object.fromEntries(REPOSITORY_TYPES.map(id => [id, all.filter(entry => entry.repository.type === id).length])), [all]);
+	// Generic repositories have no packages, their tab counts files instead
+	const counts = useMemo(() => Object.fromEntries(REPOSITORY_TYPES.map(id => [id, id === 'generic'
+		? (inventory.data ?? []).filter(entry => entry.repository.type === id).reduce((sum, entry) => sum + entry.files.length, 0)
+		: all.filter(entry => entry.repository.type === id).length])), [all, inventory.data]);
 	const summary = inventory.data && type ? summarizeTypes(inventory.data).find(entry => entry.type === type) : undefined;
 	const repositories = (inventory.data ?? []).map(entry => entry.repository).filter(entry => !type || entry.type === type);
 	
@@ -38,7 +42,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 	}, [all, type, repository, search, sort]);
 	
 	const tabs = [
-		{id: 'all', label: <>All <span className="tab-count">{all.length}</span></>},
+		{id: 'all', label: <>All packages <span className="tab-count">{all.length}</span></>},
 		...REPOSITORY_TYPES.map(id => ({id, label: <>{TYPE_INFO[id].label} <span className="tab-count">{counts[id] ?? 0}</span></>})),
 	];
 	
@@ -54,13 +58,13 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 			{inventory.error && <ErrorBox error={inventory.error} onRetry={inventory.reload}/>}
 			
 			{summary && (
-				<div className="stats-row">
+				<Stats>
 					<Stat label="Repositories" value={summary.repositories}/>
-					<Stat label="Packages" value={formatNumber(summary.packages)}/>
-					<Stat label="Versions" value={formatNumber(summary.versions)}/>
+					{type !== 'generic' && <Stat label="Packages" value={formatNumber(summary.packages)}/>}
+					{type !== 'generic' && <Stat label="Versions" value={formatNumber(summary.versions)}/>}
 					<Stat label="Files" value={formatNumber(summary.files)}/>
 					<Stat label="Storage" value={formatBytes(summary.size)}/>
-				</div>
+				</Stats>
 			)}
 			
 			{inventory.data && type === 'generic' && <GenericFiles inventory={inventory.data}/>}
@@ -68,11 +72,13 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 			{inventory.data && type !== 'generic' && (
 				<>
 					<div className="toolbar">
-						<input className="search" type="search" placeholder="Search packages…" value={search} onChange={event => setSearch(event.target.value)}/>
+						<SearchField placeholder="Search packages…" value={search} onChange={setSearch}/>
 						<select value={repository} onChange={event => setRepository(event.target.value)} aria-label="Repository">
 							<option value="">All repositories</option>
 							{repositories.map(entry => <option key={entry.name} value={entry.name}>{entry.name}</option>)}
 						</select>
+						<div className="toolbar-spacer"/>
+						<span className="muted small">{rows.length} of {type ? counts[type] ?? 0 : all.length} packages</span>
 						<select value={sort} onChange={event => setSort(event.target.value as Sort)} aria-label="Sort">
 							<option value="updated">Recently updated</option>
 							<option value="name">Name</option>
@@ -105,11 +111,13 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 									return (
 										<tr key={`${entry.repository.name}/${entry.pkg.name}`} className="clickable" onClick={() => navigate(target)}>
 											<td>
-												<a className="mono strong" href={target} onClick={event => event.stopPropagation()}>{entry.pkg.name}</a>
-												{Object.keys(entry.pkg.tags).filter(tag => tag !== 'latest').slice(0, 3).map(tag => <Badge key={tag}>{tag}</Badge>)}
+												<span className="cell-inline">
+													<a className="mono strong" href={target} onClick={event => event.stopPropagation()}>{entry.pkg.name}</a>
+													{Object.keys(entry.pkg.tags).filter(tag => tag !== 'latest' && tag !== entry.latest).slice(0, 3).map(tag => <Badge key={tag}>{tag}</Badge>)}
+												</span>
 											</td>
-											<td className="mono">{entry.latest ?? '—'}</td>
-											<td>
+											<td>{entry.latest ? <Badge tone="accent">{entry.latest}</Badge> : <span className="faint">—</span>}</td>
+											<td className="nowrap">
 												<span className="cell-inline">{!type && <TypeBadge type={entry.repository.type}/>}{entry.repository.name}</span>
 											</td>
 											<td className="num">
@@ -117,7 +125,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 												{yanked > 0 && <span className="muted small"> ({yanked} {entry.repository.type === 'nuget' ? 'unlisted' : 'yanked'})</span>}
 											</td>
 											<td className="num">{formatBytes(entry.size)}</td>
-											<td className="muted" title={entry.pkg.versions.map(version => version.version).sort(compareVersions).join(', ')}>{formatRelative(entry.updatedAt)}</td>
+											<td className="muted nowrap" title={entry.pkg.versions.map(version => version.version).sort(compareVersions).join(', ')}>{formatRelative(entry.updatedAt)}</td>
 										</tr>
 									);
 								})}
@@ -147,7 +155,7 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 	return (
 		<>
 			<div className="toolbar">
-				<input className="search" type="search" placeholder="Search files…" value={search} onChange={event => setSearch(event.target.value)}/>
+				<SearchField placeholder="Search files…" value={search} onChange={setSearch}/>
 			</div>
 			{files.length === 0 ? (
 				<Empty title={query ? 'No matching files' : 'No generic files yet'}/>
@@ -167,10 +175,14 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 						{files.slice(0, 500).map(({repository, file}) => (
 							<tr key={`${repository.name}/${file.path}`}>
 								<td className="mono break">{file.path}</td>
-								<td><a className="link" href={href('repositories', repository.name)}>{repository.name}</a></td>
+								<td className="nowrap"><a className="link" href={`${href('repositories', repository.name)}?tab=files`}>{repository.name}</a></td>
 								<td className="num">{formatBytes(file.size)}</td>
-								<td className="muted">{file.createdBy ? `${file.createdBy} · ` : ''}{formatRelative(file.createdAt)}</td>
-								<td className="actions"><Button small variant="ghost" onClick={() => downloadFile(repository, file).catch(error => notify(error.message, 'error'))}>Download</Button></td>
+								<td className="muted nowrap" title={file.createdAt}>{file.createdBy ? `${file.createdBy} · ` : ''}{formatRelative(file.createdAt)}</td>
+								<td className="actions">
+									<Button small variant="ghost" className="btn-icon" title="Download" aria-label={`Download ${file.path}`} onClick={() => downloadFile(repository, file).catch(error => notify(error.message, 'error'))}>
+										<Icon name="download" size={16}/>
+									</Button>
+								</td>
 							</tr>
 						))}
 						</tbody>

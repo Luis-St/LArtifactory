@@ -21,6 +21,11 @@ export default defineConfig({
 			'/npm': target,
 			'/nuget': target,
 			'/cargo': target,
+			'/oci': target,
+			'/v2': target,
+			'/openapi': target,
+			'/swagger': target,
+			'/webjars': target,
 		},
 	},
 });

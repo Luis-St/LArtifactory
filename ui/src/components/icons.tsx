@@ -1,6 +1,7 @@
 import type {ReactNode} from 'react';
 
-export type IconName = 'overview' | 'artifacts' | 'repositories' | 'users' | 'permissions' | 'tokens' | 'account' | 'audit' | 'webhooks' | 'docs' | 'collapse' | 'expand' | 'menu';
+export type IconName = 'overview' | 'artifacts' | 'repositories' | 'users' | 'permissions' | 'tokens' | 'account' | 'audit' | 'webhooks' | 'docs' | 'collapse' | 'expand' | 'menu'
+	| 'sun' | 'moon' | 'monitor' | 'search' | 'chevron-down' | 'chevron-right' | 'more' | 'folder' | 'file' | 'logout' | 'external' | 'trash' | 'copy' | 'check' | 'plus' | 'close' | 'download' | 'arrow-left';
 
 const PATHS: Record<IconName, ReactNode> = {
 	overview: <>
@@ -66,6 +67,55 @@ const PATHS: Record<IconName, ReactNode> = {
 		<path d="m14 10 2 2-2 2"/>
 	</>,
 	menu: <path d="M4 7h16M4 12h16M4 17h16"/>,
+	sun: <>
+		<circle cx="12" cy="12" r="4"/>
+		<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+	</>,
+	moon: <path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>,
+	monitor: <>
+		<rect x="3" y="4" width="18" height="12" rx="2"/>
+		<path d="M8 20h8M12 16v4"/>
+	</>,
+	search: <>
+		<circle cx="11" cy="11" r="7"/>
+		<path d="m20 20-3.5-3.5"/>
+	</>,
+	'chevron-down': <path d="m6 9 6 6 6-6"/>,
+	'chevron-right': <path d="m9 6 6 6-6 6"/>,
+	more: <>
+		<circle cx="5" cy="12" r="1.2"/>
+		<circle cx="12" cy="12" r="1.2"/>
+		<circle cx="19" cy="12" r="1.2"/>
+	</>,
+	folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
+	file: <>
+		<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
+		<path d="M14 3v5h5"/>
+	</>,
+	logout: <>
+		<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/>
+		<path d="M10 17l-5-5 5-5M5 12h11"/>
+	</>,
+	external: <>
+		<path d="M14 4h6v6M20 4l-9 9"/>
+		<path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/>
+	</>,
+	trash: <>
+		<path d="M4 7h16M10 11v6M14 11v6"/>
+		<path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>
+	</>,
+	copy: <>
+		<rect x="8" y="8" width="12" height="12" rx="2"/>
+		<path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>
+	</>,
+	check: <path d="m5 12 5 5 9-10"/>,
+	plus: <path d="M12 5v14M5 12h14"/>,
+	close: <path d="M6 6l12 12M18 6 6 18"/>,
+	download: <>
+		<path d="M12 4v11M7 10l5 5 5-5"/>
+		<path d="M4 19h16"/>
+	</>,
+	'arrow-left': <path d="M19 12H5M11 6l-6 6 6 6"/>,
 };
 
 export function Icon({name, size = 18}: { name: IconName; size?: number }) {

@@ -1,6 +1,8 @@
 import {type FormEvent, useState} from 'react';
 import {api} from '../api';
+import {Icon} from '../components/icons';
 import {Badge, Button, CodeBlock, ConfirmDialog, Empty, ErrorBox, errorText, Field, Modal, PageHeader, Spinner} from '../components/ui';
+import {levelTone} from './Users';
 import {formatDate, formatRelative} from '../format';
 import {useAsync} from '../hooks';
 import {useSession} from '../session';
@@ -31,12 +33,12 @@ export function Tokens() {
 			<PageHeader
 				title="Access tokens"
 				subtitle="Tokens authenticate package managers and CI. They can be restricted to a lower access level and expire."
-				actions={<Button variant="primary" onClick={() => setCreating(true)}>New token</Button>}
+				actions={<Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16}/>New token</Button>}
 			/>
 			{principal?.admin && (
 				<div className="toolbar">
 					<label className="cell-inline">
-						<span className="muted">Tokens of</span>
+						<span className="muted">Showing tokens of</span>
 						<select value={owner} onChange={event => setOwner(event.target.value)}>
 							{(users.data ?? [{username: principal.username}]).map(user => <option key={user.username} value={user.username}>{user.username}</option>)}
 						</select>
@@ -65,19 +67,19 @@ export function Tokens() {
 							return (
 								<tr key={token.id}>
 									<td><strong>{token.name}</strong> <span className="muted small mono">{token.id.substring(0, 8)}</span></td>
-									<td><Badge tone={token.level === 'DELETE' ? 'danger' : token.level === 'WRITE' ? 'warning' : 'neutral'}>{token.level}</Badge></td>
+									<td><Badge tone={levelTone(token.level)}>{token.level}</Badge></td>
 									<td className="small">
 										{token.allowedIps && <div title={token.allowedIps}>IP allowlist</div>}
 										{token.rateLimit > 0 && <div className="muted">{token.rateLimit}/min</div>}
 										{!token.allowedIps && token.rateLimit === 0 && <span className="muted">None</span>}
 									</td>
-									<td className="muted small">
+									<td className="muted small nowrap">
 										{token.lastUsedAt
 											? <span title={`${formatDate(token.lastUsedAt)}${token.lastUsedIp ? ` from ${token.lastUsedIp}` : ''}`}>{formatRelative(token.lastUsedAt)}</span>
 											: <span className="muted">Never</span>}
 									</td>
-									<td className="muted" title={formatDate(token.createdAt)}>{formatRelative(token.createdAt)}</td>
-									<td>{token.expiresAt ? (expired ? <Badge tone="danger">expired</Badge> : <span className="muted" title={formatDate(token.expiresAt)}>{formatRelative(token.expiresAt)}</span>) :
+									<td className="muted nowrap" title={formatDate(token.createdAt)}>{formatRelative(token.createdAt)}</td>
+									<td className="nowrap">{token.expiresAt ? (expired ? <Badge tone="danger">expired</Badge> : <span className="muted" title={formatDate(token.expiresAt)}>{formatRelative(token.expiresAt)}</span>) :
 										<span className="muted">Never</span>}</td>
 									<td className="actions"><Button small variant="ghost" className="danger-text" onClick={() => setRevoking(token)}>Revoke</Button></td>
 								</tr>

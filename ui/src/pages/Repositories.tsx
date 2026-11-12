@@ -1,6 +1,7 @@
 import {type FormEvent, useState} from 'react';
 import {api} from '../api';
-import {Badge, Button, Empty, ErrorBox, errorText, Field, Modal, PageHeader, Spinner, Toggle, TYPE_INFO, TypeBadge} from '../components/ui';
+import {Icon} from '../components/icons';
+import {Badge, Button, Empty, ErrorBox, errorText, Field, Modal, PageHeader, SearchField, Spinner, Tabs, Toggle, TYPE_INFO, TypeBadge} from '../components/ui';
 import {formatDate} from '../format';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
@@ -27,15 +28,19 @@ export function Repositories() {
 			<PageHeader
 				title="Repositories"
 				subtitle="Every repository hosts one package format and is served at /{type}/{name}/."
-				actions={principal?.admin && <Button variant="primary" onClick={() => setCreating(true)}>New repository</Button>}
+				actions={principal?.admin && <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16}/>New repository</Button>}
 			/>
 			
+			<Tabs
+				tabs={[
+					{id: '' as RepositoryType | '', label: <>All <span className="tab-count">{repositories.data?.length ?? 0}</span></>},
+					...REPOSITORY_TYPES.map(type => ({id: type as RepositoryType | '', label: <>{TYPE_INFO[type].label} <span className="tab-count">{(repositories.data ?? []).filter(entry => entry.type === type).length}</span></>})),
+				]}
+				active={filter}
+				onChange={setFilter}
+			/>
 			<div className="toolbar">
-				<input className="search" type="search" placeholder="Search repositories…" value={search} onChange={event => setSearch(event.target.value)}/>
-				<select value={filter} onChange={event => setFilter(event.target.value as RepositoryType | '')} aria-label="Type">
-					<option value="">All types</option>
-					{REPOSITORY_TYPES.map(type => <option key={type} value={type}>{TYPE_INFO[type].label}</option>)}
-				</select>
+				<SearchField placeholder="Search repositories…" value={search} onChange={setSearch}/>
 			</div>
 			
 			{repositories.loading && !repositories.data && <Spinner/>}
@@ -60,17 +65,20 @@ export function Repositories() {
 						{rows.map(repository => (
 							<tr key={repository.name} className="clickable" onClick={() => navigate(href('repositories', repository.name))}>
 								<td>
-									<a className="strong" href={href('repositories', repository.name)} onClick={event => event.stopPropagation()}>{repository.name}</a>
-									{repository.kind === 'REMOTE' && <> <Badge tone="accent">remote</Badge></>}
-									{repository.kind === 'VIRTUAL' && <> <Badge tone="accent">virtual</Badge></>}
+									<span className="cell-inline">
+										<a className="strong nowrap" href={href('repositories', repository.name)} onClick={event => event.stopPropagation()}>{repository.name}</a>
+										{repository.kind !== 'LOCAL' && <Badge tone="accent">{repository.kind.toLowerCase()}</Badge>}
+									</span>
 								</td>
-								<td><TypeBadge type={repository.type}/></td>
-								<td className="muted">{repository.description || '—'}</td>
-								<td className="cell-inline">
-									{repository.publicRead ? <Badge tone="success">public read</Badge> : <Badge>private</Badge>}
-									{repository.allowRedeploy && <Badge tone="warning">redeploy</Badge>}
+								<td className="shrink"><TypeBadge type={repository.type}/></td>
+								<td className="muted">{repository.description || <span className="faint">—</span>}</td>
+								<td className="shrink">
+									<span className="cell-inline">
+										{repository.publicRead ? <Badge tone="success">public</Badge> : <Badge>private</Badge>}
+										{repository.allowRedeploy && <Badge tone="warning">redeploy</Badge>}
+									</span>
 								</td>
-								<td className="muted">{formatDate(repository.createdAt)}</td>
+								<td className="muted nowrap">{formatDate(repository.createdAt)}</td>
 							</tr>
 						))}
 						</tbody>
@@ -137,6 +145,9 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 							<button key={id} type="button" className={`type-option${type === id ? ' selected' : ''}`} onClick={() => {
 								setType(id);
 								setMembers([]);
+								if (!PROXYABLE_TYPES.includes(id)) {
+									setKind('LOCAL');
+								}
 							}} aria-pressed={type === id}>
 								<TypeBadge type={id}/>
 								<small className="muted">{TYPE_INFO[id].ecosystem}</small>
@@ -173,12 +184,12 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 					</>
 				)}
 				{kind === 'VIRTUAL' && (
-					<Field label="Members" hint="Repositories resolved in order, the first match wins">
+					<Field group label="Members" hint="Repositories resolved in order, the first match wins">
 						{candidates.length === 0
 							? <span className="muted small">No other {type} repositories to group yet</span>
 							: <div className="checkbox-list">
 								{candidates.map(repo => (
-									<label key={repo.name} className="cell-inline">
+									<label key={repo.name}>
 										<input type="checkbox" checked={members.includes(repo.name)} onChange={() => toggleMember(repo.name)}/>
 										<span>{repo.name}</span>
 										{repo.kind === 'REMOTE' && <Badge tone="accent">remote</Badge>}

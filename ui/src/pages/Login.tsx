@@ -1,4 +1,5 @@
 import {type FormEvent, useState} from 'react';
+import {ThemeToggle} from '../components/Layout';
 import {Button, ErrorBox, errorText, Field} from '../components/ui';
 import {useSession} from '../session';
 
@@ -24,6 +25,7 @@ export function Login() {
 	
 	return (
 		<div className="login">
+			<div className="login-theme"><ThemeToggle/></div>
 			<form className="login-card" onSubmit={submit}>
 				<div className="brand brand-large">
 					<img src="./favicon.svg" alt="" width={40} height={40}/>

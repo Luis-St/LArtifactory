@@ -1,6 +1,6 @@
 import {api} from '../api';
-import {Badge, Card, Empty, ErrorBox, PageHeader, Spinner, Stat, TYPE_INFO, TypeBadge, TypeIcon} from '../components/ui';
-import {formatBytes, formatNumber, formatRelative} from '../format';
+import {Badge, Card, Empty, ErrorBox, PageHeader, Spinner, Stat, Stats, TYPE_INFO, TypeBadge, TypeIcon} from '../components/ui';
+import {formatBytes, formatNumber, formatRelative, shortDigest} from '../format';
 import {useAsync} from '../hooks';
 import {loadInventory, recentUploads, summarizeTypes} from '../inventory';
 import {href} from '../router';
@@ -44,18 +44,18 @@ export function Overview() {
 			
 			{inventory.data && (
 				<>
-					<div className="stats-row">
+					<Stats>
 						<Stat label="Repositories" value={formatNumber(totals.repositories)}/>
 						<Stat label="Packages" value={formatNumber(totals.packages)}/>
 						<Stat label="Versions" value={formatNumber(totals.versions)}/>
 						<Stat label="Files" value={formatNumber(totals.files)}/>
 						<Stat label="Storage" value={formatBytes(totals.size)} hint="Before deduplication"/>
-					</div>
+					</Stats>
 					
 					<h2 className="section-title">Artifacts by type</h2>
 					<div className="type-grid">
 						{types.map(type => (
-							<a key={type.type} className="type-card" href={href('artifacts', type.type)}>
+							<a key={type.type} className={`type-card${type.repositories === 0 ? ' type-card-empty' : ''}`} href={href('artifacts', type.type)} style={{'--badge': TYPE_INFO[type.type].color} as React.CSSProperties}>
 								<div className="type-card-head">
 									<TypeIcon type={type.type}/>
 									<div>
@@ -104,7 +104,7 @@ export function Overview() {
 												<TypeBadge type={entry.repository.type}/>
 												<span className="list-main">{entry.repository.name}</span>
 												{entry.repository.publicRead && <Badge tone="success">public</Badge>}
-												<span className="muted small">{entry.packages.length} pkg · {formatBytes(entry.files.reduce((sum, file) => sum + file.size, 0))}</span>
+												<span className="list-meta">{entry.repository.type === 'generic' ? plural(entry.files.length, 'file') : plural(entry.packages.length, 'package')} · {formatBytes(entry.files.reduce((sum, file) => sum + file.size, 0))}</span>
 											</a>
 										</li>
 									))}
@@ -116,6 +116,10 @@ export function Overview() {
 			)}
 		</>
 	);
+}
+
+function plural(count: number, word: string): string {
+	return `${formatNumber(count)} ${word}${count === 1 ? '' : 's'}`;
 }
 
 function RecentList({inventory}: { inventory: Parameters<typeof recentUploads>[0] }) {
@@ -131,9 +135,9 @@ function RecentList({inventory}: { inventory: Parameters<typeof recentUploads>[0
 						<TypeBadge type={entry.repository.type}/>
 						<span className="list-main">
 							<span className="mono">{entry.packageName}</span>
-							<span className="muted"> {entry.version}</span>
+							<span className="muted"> {entry.tags.length > 0 ? entry.tags.join(', ') : shortDigest(entry.version)}</span>
 						</span>
-						<span className="muted small">{entry.createdBy ? `${entry.createdBy} · ` : ''}{formatRelative(entry.createdAt)}</span>
+						<span className="list-meta">{entry.createdBy ? `${entry.createdBy} · ` : ''}{formatRelative(entry.createdAt)}</span>
 					</a>
 				</li>
 			))}
