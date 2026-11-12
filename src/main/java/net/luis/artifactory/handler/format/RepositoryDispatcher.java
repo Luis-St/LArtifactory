@@ -22,7 +22,7 @@ public class RepositoryDispatcher {
 	
 	public RepositoryDispatcher(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
-		for (FormatHandler handler : List.of(new MavenHandler(services), new GenericHandler(services), new PypiHandler(services), new NpmHandler(services), new NugetHandler(services), new CargoHandler(services))) {
+		for (FormatHandler handler : List.of(new MavenHandler(services), new GenericHandler(services), new PypiHandler(services), new NpmHandler(services), new NugetHandler(services), new CargoHandler(services), new OciHandler(services))) {
 			this.handlers.put(handler.type(), handler);
 		}
 	}
@@ -57,6 +57,34 @@ public class RepositoryDispatcher {
 		ctx.attribute(HOST_MAPPED_ATTRIBUTE, true);
 		ctx.skipRemainingHandlers();
 		this.handlers.get(type).handle(ctx, repository, rawPath.startsWith("/") ? rawPath.substring(1) : rawPath);
+	}
+	
+	/**
+	 * Handles the OCI distribution api at the root of the host ({@code /v2/...}), the only location Docker supports.<br>
+	 * The first component of the image name selects the repository: {@code docker push host/{repository}/{image}:{tag}}.<br>
+	 */
+	public void handleRegistry(@NonNull Context ctx) throws Exception {
+		OciHandler oci = (OciHandler) this.handlers.get(RepositoryType.OCI);
+		String rawPath = Requests.rawPath(ctx);
+		String rest = rawPath.length() > "/v2/".length() ? rawPath.substring("/v2/".length()) : "";
+		List<String> segments = Requests.decodedSegments(rest);
+		if (segments.isEmpty()) {
+			oci.ping(ctx, "Basic realm=\"artifactory\"");
+			return;
+		}
+		if (segments.equals(List.of("_catalog"))) {
+			oci.catalog(ctx);
+			return;
+		}
+		String[] parts = rest.split("/", 2);
+		String name = Requests.decode(parts[0]);
+		RepositoryEntity repository = this.services.repositories().get(name);
+		if (repository == null || !RepositoryType.OCI.id().equals(repository.type())) {
+			ctx.header(OciHandler.API_VERSION_HEADER, OciHandler.API_VERSION);
+			throw OciHandler.error(404, "NAME_UNKNOWN", "No such OCI repository: " + name);
+		}
+		ctx.attribute(OciHandler.ROOT_ATTRIBUTE, true);
+		oci.handle(ctx, repository, "v2/" + (parts.length == 2 ? parts[1] : ""));
 	}
 	
 	public void handle(@NonNull Context ctx) throws Exception {

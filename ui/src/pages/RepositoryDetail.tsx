@@ -6,7 +6,7 @@ import {useAsync} from '../hooks';
 import {latestVersion} from '../inventory';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {setupSnippets} from '../setup';
+import {ociRegistry, setupSnippets} from '../setup';
 import {ACCESS_LEVELS, type AccessLevel, type FileEntry, type Package, type Repository} from '../types';
 
 type Tab = 'packages' | 'files' | 'setup' | 'settings' | 'access';
@@ -52,8 +52,8 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 				subtitle={repo.description || `${TYPE_INFO[repo.type].label} repository`}
 				actions={
 					<div className="url-chip">
-						<code>{repo.type === 'cargo' ? `sparse+${repo.url}/index/` : repo.type === 'nuget' ? `${repo.url}/v3/index.json` : repo.url}</code>
-						<CopyButton value={repo.type === 'cargo' ? `sparse+${repo.url}/index/` : repo.type === 'nuget' ? `${repo.url}/v3/index.json` : repo.url}/>
+						<code>{repo.type === 'cargo' ? `sparse+${repo.url}/index/` : repo.type === 'nuget' ? `${repo.url}/v3/index.json` : repo.type === 'oci' ? `${ociRegistry(repo.url)}/${repo.name}` : repo.url}</code>
+						<CopyButton value={repo.type === 'cargo' ? `sparse+${repo.url}/index/` : repo.type === 'nuget' ? `${repo.url}/v3/index.json` : repo.type === 'oci' ? `${ociRegistry(repo.url)}/${repo.name}` : repo.url}/>
 					</div>
 				}
 			/>

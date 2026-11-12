@@ -69,6 +69,15 @@ public class BodyReader {
 	}
 	
 	/**
+	 * Reads a small body with a custom size limit (e.g. an OCI manifest).<br>
+	 *
+	 * @throws HttpError 413 if the body is larger than the limit
+	 */
+	public byte @NonNull [] bounded(@NonNull Context ctx, long max) throws IOException {
+		return read(ctx, max);
+	}
+	
+	/**
 	 * Reads a publish request body and passes it to the action while holding one of the bounded package slots.<br>
 	 *
 	 * @throws HttpError 413 if the body is too large, 503 if no slot becomes available in time

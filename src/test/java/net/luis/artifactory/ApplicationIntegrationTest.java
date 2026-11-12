@@ -1,5 +1,6 @@
 package net.luis.artifactory;
 
+import net.luis.artifactory.config.*;
 import net.luis.artifactory.util.Json;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -73,7 +74,7 @@ class ApplicationIntegrationTest {
 		
 		this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"second-admin\",\"password\":\"second-password-1\",\"admin\":true}");
 		this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"dev\",\"password\":\"developer-pass-1\"}");
-		for (String repository : List.of("{\"name\":\"files\",\"type\":\"generic\"}", "{\"name\":\"maven\",\"type\":\"maven\"}", "{\"name\":\"npm\",\"type\":\"npm\"}", "{\"name\":\"cargo\",\"type\":\"cargo\"}")) {
+		for (String repository : List.of("{\"name\":\"files\",\"type\":\"generic\"}", "{\"name\":\"maven\",\"type\":\"maven\"}", "{\"name\":\"npm\",\"type\":\"npm\"}", "{\"name\":\"cargo\",\"type\":\"cargo\"}", "{\"name\":\"oci\",\"type\":\"oci\"}")) {
 			assertEquals(201, this.send("POST", "/api/repositories", basic("admin", ADMIN_PASSWORD), repository).statusCode());
 		}
 	}
@@ -326,6 +327,83 @@ class ApplicationIntegrationTest {
 		return this.client.send(HttpRequest.newBuilder(URI.create(this.base + "/cargo/cargo/api/v1/crates/new"))
 			.header("Authorization", basic("admin", ADMIN_PASSWORD))
 			.PUT(HttpRequest.BodyPublishers.ofByteArray(body.array())).build(), HttpResponse.BodyHandlers.ofString());
+	}
+	
+	@Test
+	void ociPushAndPullImage() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		HttpResponse<String> ping = this.send("GET", "/v2/", null, null);
+		assertEquals(401, ping.statusCode());
+		assertEquals("registry/2.0", ping.headers().firstValue("Docker-Distribution-API-Version").orElse(null));
+		assertEquals(200, this.send("GET", "/v2/", admin, null).statusCode());
+		
+		// Chunked upload of a layer: POST, PATCH, PUT with digest
+		byte[] layer = "layer-content".getBytes(StandardCharsets.UTF_8);
+		String layerDigest = sha256(layer);
+		HttpResponse<String> start = this.send("POST", "/v2/oci/team/app/blobs/uploads/", admin, null);
+		assertEquals(202, start.statusCode(), start.body());
+		String location = start.headers().firstValue("Location").orElseThrow();
+		HttpResponse<String> patch = this.sendBytes("PATCH", URI.create(location), admin, null, layer);
+		assertEquals(202, patch.statusCode(), patch.body());
+		assertEquals("0-" + (layer.length - 1), patch.headers().firstValue("Range").orElse(null));
+		HttpResponse<String> wrong = this.sendBytes("PUT", URI.create(location + "?digest=" + sha256(new byte[1])), admin, null, new byte[0]);
+		assertEquals(400, wrong.statusCode(), "the digest must match the content");
+		
+		start = this.send("POST", "/v2/oci/team/app/blobs/uploads/", admin, null);
+		location = start.headers().firstValue("Location").orElseThrow();
+		assertEquals(202, this.sendBytes("PATCH", URI.create(location), admin, null, layer).statusCode());
+		HttpResponse<String> put = this.sendBytes("PUT", URI.create(location + "?digest=" + layerDigest), admin, null, new byte[0]);
+		assertEquals(201, put.statusCode(), put.body());
+		assertEquals(layerDigest, put.headers().firstValue("Docker-Content-Digest").orElse(null));
+		
+		// Monolithic upload of the config
+		byte[] config = "{}".getBytes(StandardCharsets.UTF_8);
+		String configDigest = sha256(config);
+		assertEquals(201, this.sendBytes("POST", URI.create(this.base + "/v2/oci/team/app/blobs/uploads/?digest=" + configDigest), admin, null, config).statusCode());
+		assertEquals(200, this.send("HEAD", "/v2/oci/team/app/blobs/" + configDigest, admin, null).statusCode());
+		assertEquals(404, this.send("HEAD", "/v2/oci/team/app/blobs/" + sha256(new byte[2]), admin, null).statusCode());
+		
+		String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\"," +
+			"\"config\":{\"mediaType\":\"application/vnd.oci.image.config.v1+json\",\"digest\":\"" + configDigest + "\",\"size\":" + config.length + "}," +
+			"\"layers\":[{\"mediaType\":\"application/vnd.oci.image.layer.v1.tar\",\"digest\":\"" + layerDigest + "\",\"size\":" + layer.length + "}]}";
+		byte[] manifestBytes = manifest.getBytes(StandardCharsets.UTF_8);
+		String manifestType = "application/vnd.oci.image.manifest.v1+json";
+		HttpResponse<String> pushed = this.sendBytes("PUT", URI.create(this.base + "/v2/oci/team/app/manifests/1.0"), admin, manifestType, manifestBytes);
+		assertEquals(201, pushed.statusCode(), pushed.body());
+		assertEquals(sha256(manifestBytes), pushed.headers().firstValue("Docker-Content-Digest").orElse(null));
+		
+		String missing = manifest.replace(layerDigest, sha256(new byte[3]));
+		assertEquals(400, this.sendBytes("PUT", URI.create(this.base + "/v2/oci/team/app/manifests/broken"), admin, manifestType, missing.getBytes(StandardCharsets.UTF_8)).statusCode(), "referenced blobs must exist");
+		String other = manifest.replace("\"layers\"", "\"annotations\":{\"a\":\"b\"},\"layers\"");
+		assertEquals(409, this.sendBytes("PUT", URI.create(this.base + "/v2/oci/team/app/manifests/1.0"), admin, manifestType, other.getBytes(StandardCharsets.UTF_8)).statusCode(), "tags are immutable without redeploy");
+		
+		HttpResponse<String> pulled = this.send("GET", "/v2/oci/team/app/manifests/1.0", admin, null);
+		assertEquals(200, pulled.statusCode());
+		assertEquals(manifest, pulled.body());
+		assertEquals(manifestType, pulled.headers().firstValue("Content-Type").orElse(null));
+		assertEquals("layer-content", this.send("GET", "/v2/oci/team/app/blobs/" + layerDigest, admin, null).body());
+		assertEquals(manifest, this.send("GET", "/oci/oci/v2/team/app/manifests/" + sha256(manifestBytes), admin, null).body(), "the api is also served below the repository");
+		
+		JsonNode tags = Json.parse(this.send("GET", "/v2/oci/team/app/tags/list", admin, null).body());
+		assertEquals("oci/team/app", tags.get("name").asString());
+		assertEquals("1.0", tags.get("tags").get(0).asString());
+		JsonNode catalog = Json.parse(this.send("GET", "/v2/_catalog", admin, null).body());
+		assertTrue(catalog.get("repositories").toString().contains("oci/team/app"), catalog.toString());
+		
+		assertEquals(202, this.send("DELETE", "/v2/oci/team/app/manifests/" + sha256(manifestBytes), admin, null).statusCode());
+		assertEquals(404, this.send("GET", "/v2/oci/team/app/manifests/1.0", admin, null).statusCode(), "deleting a manifest removes its tags");
+	}
+	
+	private static String sha256(byte[] data) throws Exception {
+		return "sha256:" + HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data));
+	}
+	
+	private HttpResponse<String> sendBytes(String method, URI uri, String authorization, String contentType, byte[] body) throws IOException, InterruptedException {
+		HttpRequest.Builder builder = HttpRequest.newBuilder(uri).method(method, HttpRequest.BodyPublishers.ofByteArray(body)).header("Authorization", authorization);
+		if (contentType != null) {
+			builder.header("Content-Type", contentType);
+		}
+		return this.client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
 	}
 	
 	private String createToken(String authorization) throws Exception {

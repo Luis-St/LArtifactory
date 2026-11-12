@@ -203,6 +203,15 @@ function downloadPath(repository: Repository, file: FileEntry): string {
 			return `v3-flatcontainer/${encodePath(file.path)}`;
 		case 'cargo':
 			return file.packageName && file.version ? `api/v1/crates/${enc(file.packageName)}/${enc(file.version)}/download` : encodePath(file.path);
+		case 'oci': {
+			// Blobs are stored as blobs/sha256/{hex} and shared by all images, manifests as {image}/manifests/sha256/{hex}
+			const blob = /^blobs\/sha256\/([a-f0-9]{64})$/.exec(file.path);
+			if (blob) {
+				return `v2/blob/blobs/sha256:${blob[1]}`;
+			}
+			const manifest = /^(.+)\/manifests\/sha256\/([a-f0-9]{64})$/.exec(file.path);
+			return manifest ? `v2/${manifest[1]}/manifests/sha256:${manifest[2]}` : encodePath(file.path);
+		}
 		default:
 			return encodePath(file.path);
 	}

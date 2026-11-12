@@ -131,6 +131,14 @@ public class BlobStore {
 		return this.store(new ByteArrayInputStream(data));
 	}
 	
+	/**
+	 * Creates an empty file in the temporary directory, it is deleted by {@link #cleanTemporaryFiles(Duration)} once it was not modified for a while.<br>
+	 */
+	@NonNull
+	public Path createTemporaryFile(@NonNull String prefix) throws IOException {
+		return Files.createTempFile(this.tempRoot, prefix, ".tmp");
+	}
+	
 	public boolean exists(@NonNull String sha256) {
 		return Files.exists(this.path(sha256));
 	}

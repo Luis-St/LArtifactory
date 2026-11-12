@@ -65,5 +65,21 @@ export function setupSnippets(repository: Repository, username: string): Snippet
 				{title: 'Login & publish', code: `cargo login --registry ${id} <token>\ncargo publish --registry ${id}`},
 				{title: 'Cargo.toml dependency', code: `[dependencies]\nmy-crate = { version = "1.0", registry = "${id}" }`},
 			];
+		case 'oci': {
+			const image = `${ociRegistry(url)}/${id}/my-image`;
+			return [
+				{title: 'Login', code: `docker login ${ociRegistry(url)} -u ${username}`},
+				{title: 'Push', code: `docker tag my-image:1.0 ${image}:1.0\ndocker push ${image}:1.0`},
+				{title: 'Pull', code: `docker pull ${image}:1.0`},
+				{title: 'Other OCI artifacts (oras)', code: `oras push ${image}:1.0 ./artifact.tar.gz`},
+			];
+		}
 	}
+}
+
+/**
+ * The registry host of an OCI repository, Docker only talks to /v2/ at the root of a host.
+ */
+export function ociRegistry(url: string): string {
+	return url.replace(/^https?:\/\//, '').replace(/\/oci\/[^/]+$/, '');
 }

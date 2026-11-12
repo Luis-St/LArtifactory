@@ -1,4 +1,4 @@
-export const REPOSITORY_TYPES = ['maven', 'generic', 'pypi', 'npm', 'nuget', 'cargo'] as const;
+export const REPOSITORY_TYPES = ['maven', 'generic', 'pypi', 'npm', 'nuget', 'cargo', 'oci'] as const;
 export type RepositoryType = (typeof REPOSITORY_TYPES)[number];
 
 export const ACCESS_LEVELS = ['READ', 'WRITE', 'DELETE'] as const;

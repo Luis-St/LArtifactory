@@ -223,7 +223,7 @@
       "post" : {
         "tags" : [ "Repositories" ],
         "summary" : "Create a repository",
-        "description" : "Types: maven, generic, pypi, npm, nuget, cargo",
+        "description" : "Types: maven, generic, pypi, npm, nuget, cargo, oci",
         "operationId" : "createRepository",
         "requestBody" : {
           "content" : {

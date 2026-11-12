@@ -15,6 +15,7 @@ import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.dto.response.ErrorResponse;
 import net.luis.artifactory.handler.HealthHandler;
 import net.luis.artifactory.handler.admin.*;
+import net.luis.artifactory.handler.format.OciHandler;
 import net.luis.artifactory.handler.format.RepositoryDispatcher;
 import net.luis.artifactory.http.*;
 import net.luis.artifactory.repository.*;
@@ -42,6 +43,10 @@ public class Application {
 	 */
 	private static final Duration ORPHAN_GRACE_PERIOD = Duration.ofHours(1);
 	private static final Duration TEMPORARY_FILE_MAX_AGE = Duration.ofHours(24);
+	/**
+	 * OCI blobs no manifest references are kept this long, a push uploads all blobs before its manifest.<br>
+	 */
+	private static final Duration OCI_BLOB_MIN_AGE = Duration.ofHours(24);
 	private static final String UI_CONTENT_SECURITY_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
 		"connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 	/**
@@ -105,9 +110,10 @@ public class Application {
 			int blobs = services.artifacts().sweepOrphanedBlobs();
 			int temporary = services.artifacts().blobStore().cleanTemporaryFiles(TEMPORARY_FILE_MAX_AGE);
 			int sessions = services.users().deleteExpiredSessions();
+			int ociBlobs = OciHandler.collectGarbage(services, OCI_BLOB_MIN_AGE);
 			services.auth().cleanup();
-			if (blobs > 0 || temporary > 0 || sessions > 0) {
-				LOGGER.info("Maintenance removed {} orphaned blobs, {} temporary files and {} expired sessions", blobs, temporary, sessions);
+			if (blobs > 0 || temporary > 0 || sessions > 0 || ociBlobs > 0) {
+				LOGGER.info("Maintenance removed {} orphaned blobs, {} temporary files, {} expired sessions and {} unreferenced OCI blobs", blobs, temporary, sessions, ociBlobs);
 			}
 		} catch (Exception e) {
 			LOGGER.error("Maintenance failed", e);
@@ -265,6 +271,12 @@ public class Application {
 			config.routes.delete("/api/webhooks/{id}", webhookAdminHandler::delete);
 			config.routes.post("/api/webhooks/{id}/test", webhookAdminHandler::test);
 			config.routes.get("/api/webhooks/{id}/deliveries", webhookAdminHandler::deliveries);
+			
+			// OCI distribution api, Docker only supports it at the root of the host
+			for (HandlerType method : REPOSITORY_METHODS) {
+				config.routes.addHttpHandler(method, "/v2", dispatcher::handleRegistry);
+				config.routes.addHttpHandler(method, "/v2/<path>", dispatcher::handleRegistry);
+			}
 			
 			// Repositories: /{type}/{repository}/...
 			for (RepositoryType type : RepositoryType.values()) {

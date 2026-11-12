@@ -12,7 +12,8 @@ public enum RepositoryType {
 	PYPI("pypi"),
 	NPM("npm"),
 	NUGET("nuget"),
-	CARGO("cargo");
+	CARGO("cargo"),
+	OCI("oci");
 	
 	private final String id;
 	

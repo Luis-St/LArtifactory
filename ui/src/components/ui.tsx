@@ -8,6 +8,7 @@ export const TYPE_INFO: Record<RepositoryType, { label: string; ecosystem: strin
 	npm: {label: 'npm', ecosystem: 'npm, yarn & pnpm', color: 'var(--type-npm)'},
 	nuget: {label: 'NuGet', ecosystem: 'dotnet & nuget', color: 'var(--type-nuget)'},
 	cargo: {label: 'Cargo', ecosystem: 'Rust crates', color: 'var(--type-cargo)'},
+	oci: {label: 'OCI', ecosystem: 'Docker & OCI images', color: 'var(--type-oci)'},
 };
 
 export function TypeBadge({type}: { type: RepositoryType }) {

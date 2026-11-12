@@ -1,6 +1,6 @@
 # LArtifactory
 Artifact repository server built with Java 25, Javalin, HikariCP, Log4j2 and LUtils.
-It hosts packages for Maven/Gradle, PyPI, npm, NuGet, Cargo and generic files with token based authentication.
+It hosts packages for Maven/Gradle, PyPI, npm, NuGet, Cargo, Docker/OCI images and generic files with token based authentication.
 ## Requirements
 
 - JDK 25
@@ -74,6 +74,7 @@ Repositories are created with the management api, every repository has one of th
 | `npm`     | `{base}/npm/{repo}/`                                              | publish, dist-tags, deprecate, unpublish, search, legacy login       |
 | `nuget`   | `{base}/nuget/{repo}/v3/index.json`                               | V3 feed: flat container, registrations, search, push, unlist/relist  |
 | `cargo`   | `sparse+{base}/cargo/{repo}/index/`                               | Sparse index: publish, download, yank/unyank, search, owners         |
+| `oci`     | `{host}/{repo}/{image}` (docker), `{base}/v2/`                    | OCI distribution api: push, pull, tags, referrers, catalog, delete   |
 
 Released versions are immutable: uploading a different file over an existing release returns `409 Conflict`
 (Maven snapshots can always be redeployed, repositories can allow redeploys with `allowRedeploy`).
@@ -155,6 +156,32 @@ index = "sparse+https://repo.example.com/cargo/cargo-local/index/"
 cargo login --registry lartifactory <token>
 cargo publish --registry lartifactory
 ```
+
+**Docker / OCI** (the first component of the image name is the repository)
+
+```bash
+docker login repo.example.com -u ci
+docker tag my-image:1.0 repo.example.com/oci-local/team/my-image:1.0
+docker push repo.example.com/oci-local/team/my-image:1.0
+```
+
+### OCI images
+Docker only talks to `/v2/` at the root of a host and knows no path prefix,
+so the OCI distribution api is served at `{base}/v2/{repo}/{image}/...` and the repository is the first component of the image name.
+On a host mapped to an `oci` repository with `ARTIFACTORY_HOST_REPOSITORIES` the repository component is dropped (`docker.example.com/team/my-image`),
+and `{base}/oci/{repo}/v2/` serves the same api for clients that support a path prefix.
+Docker requires https for every registry except `localhost`, so a production server needs TLS in front of it or an `insecure-registries` entry in the Docker daemon.
+Images, multi-arch indexes and other OCI artifacts (e.g. pushed with `oras`) are supported,
+any OCI client works because the api follows the distribution spec instead of the Docker tooling.
+
+Blobs (layers and configs) are stored once per repository and shared by all of its images, so a cross-image mount always succeeds.
+A manifest is stored as version `sha256:{digest}` of the package `{image}` and tags are its dist tags,
+which makes images, versions and tags show up in the web ui like the packages of the other types.
+Tags are immutable like releases, moving an existing tag to another manifest returns `409 Conflict` unless the repository allows redeploys.
+This is stricter than Docker Hub, but a moved tag silently changes what a deployment pulls, so it is opt-in per repository like every other redeploy.
+Deleting a manifest removes its tags, its layers stay until the maintenance task removes blobs no manifest references once they are older than a day.
+The age protects a push in progress, which uploads all blobs before its manifest.
+Chunked uploads are kept in memory and in a temporary file, an upload interrupted by a restart of the server has to be started again.
 
 ### One host per ecosystem
 With `ARTIFACTORY_HOST_REPOSITORIES` a repository can be served at the root of its own host, which allows urls like

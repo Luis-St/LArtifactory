@@ -22,6 +22,7 @@
 	--type-npm: #cb3837;
 	--type-nuget: #7c3aed;
 	--type-cargo: #b45309;
+	--type-oci: #0e7490;
 	--font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 	--mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 	color-scheme: light;
@@ -51,6 +52,7 @@
 		--type-npm: #f87171;
 		--type-nuget: #a78bfa;
 		--type-cargo: #fbbf24;
+		--type-oci: #22d3ee;
 		color-scheme: dark;
 	}
 }
