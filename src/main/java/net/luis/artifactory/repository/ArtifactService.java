@@ -257,6 +257,7 @@ public class ArtifactService {
 	
 	/**
 	 * Records a file in the repository, replacing an existing file at the same path.<br>
+	 * A file at the path that was committed concurrently is not replaced, the insert fails with a unique violation instead.<br>
 	 */
 	@NonNull
 	public FileEntity put(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
@@ -280,7 +281,11 @@ public class ArtifactService {
 	private FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify) throws SqlException {
 		FileEntity file = new FileEntity(repository, path, packageName, version, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), contentType, metadata, Instant.now(), createdBy);
 		FileEntity previous = get(work.sql(), repository, path);
-		work.sql().from(FILES).delete().where(fileCondition(repository, path)).execute();
+		// Only the file read here is replaced: a file a concurrent upload committed after this read is not deleted,
+		// the insert then fails with a unique violation instead of silently overwriting an immutable path
+		if (previous != null) {
+			work.sql().from(FILES).delete().where(fileCondition(repository, path)).execute();
+		}
 		work.sql().from(FILES).insert(file).execute();
 		if (previous != null && !previous.sha256().equals(blob.sha256())) {
 			work.removed(List.of(previous));

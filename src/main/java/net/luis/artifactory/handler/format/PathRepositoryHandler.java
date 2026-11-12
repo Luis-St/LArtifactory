@@ -289,7 +289,19 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			return cached;
 		}
 		String contentType = response.contentType() != null && !response.contentType().isBlank() ? response.contentType() : contentType(path);
-		return this.services.artifacts().putCached(repository.name(), path, blob, contentType);
+		try {
+			return this.services.artifacts().putCached(repository.name(), path, blob, contentType);
+		} catch (SqlException e) {
+			if (!SqlErrors.isUniqueViolation(e)) {
+				throw e;
+			}
+			// A concurrent request for the same path cached it first, its copy is served
+			FileEntity concurrent = this.services.artifacts().get(repository.name(), path);
+			if (concurrent == null) {
+				throw e;
+			}
+			return concurrent;
+		}
 	}
 	
 	/**
