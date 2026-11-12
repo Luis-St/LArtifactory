@@ -33,7 +33,10 @@ public class ArtifactService {
 	 * Maximum length of a file path, the length of the path column.<br>
 	 */
 	private static final int MAX_PATH_LENGTH = 1024;
-	
+	/**
+	 * Marks a range header that is valid but can not be satisfied, answered with 416.<br>
+	 */
+	private static final long[] UNSATISFIABLE = new long[0];
 	private final SqlDatabase database;
 	private final BlobStore blobStore;
 	private final WebhookService webhooks;
@@ -83,11 +86,6 @@ public class ArtifactService {
 	private static SqlCondition versionCondition(@NonNull String repository, @NonNull String packageName, @NonNull String version) {
 		return SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PACKAGE, packageName), Sql.equalTo(FILE_VERSION, version));
 	}
-	
-	/**
-	 * Marks a range header that is valid but can not be satisfied, answered with 416.<br>
-	 */
-	private static final long[] UNSATISFIABLE = new long[0];
 	
 	/**
 	 * Parses a single byte range header.<br>

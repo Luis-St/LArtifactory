@@ -118,7 +118,7 @@ public final class Requests {
 		String accept = ctx.header("Accept");
 		return accept != null && accept.toLowerCase(Locale.ROOT).contains(mediaType.toLowerCase(Locale.ROOT));
 	}
-
+	
 	/**
 	 * Selects the offered media type the client prefers according to the quality values of its {@code Accept} header.<br>
 	 * The quality of an offered type is taken from the most specific matching range ({@code type/subtype} before {@code type/*} before {@code *}{@code /*}),
@@ -149,7 +149,7 @@ public final class Requests {
 			}
 			ranges.add(new String[] { range, quality });
 		}
-
+		
 		String best = null;
 		double bestQuality = 0;
 		for (String type : offered) {
@@ -171,7 +171,7 @@ public final class Requests {
 		}
 		return best;
 	}
-
+	
 	private static double parseQuality(@NonNull String value) {
 		try {
 			return Math.clamp(Double.parseDouble(value), 0, 1);

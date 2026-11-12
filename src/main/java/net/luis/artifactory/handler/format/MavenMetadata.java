@@ -11,7 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-import static net.luis.artifactory.http.Requests.escapeXml;
+import static net.luis.artifactory.http.Requests.*;
 
 /**
  * Artifact and group level {@code maven-metadata.xml}: the versions of an artifact and the plugins of a group.<br>
@@ -34,17 +34,17 @@ record MavenMetadata(
 	@Nullable String lastUpdated,
 	@NonNull List<Plugin> plugins
 ) {
-
+	
 	/**
 	 * Versions that compare equal (1.0 and 1.0.0) are both listed, they are distinct directories.<br>
 	 */
 	private static final Comparator<String> ORDER = Versions.MAVEN.thenComparing(Comparator.naturalOrder());
-
+	
 	MavenMetadata {
 		versions = List.copyOf(versions);
 		plugins = List.copyOf(plugins);
 	}
-
+	
 	@NonNull
 	static MavenMetadata ofVersions(@NonNull String groupId, @NonNull String artifactId, @NonNull Collection<String> versions, @NonNull String lastUpdated) {
 		TreeSet<String> sorted = new TreeSet<>(ORDER);
@@ -52,7 +52,7 @@ record MavenMetadata(
 		String release = sorted.descendingSet().stream().filter(version -> !version.endsWith("-SNAPSHOT")).findFirst().orElse(null);
 		return new MavenMetadata(groupId, artifactId, sorted.isEmpty() ? null : sorted.last(), release, new ArrayList<>(sorted), lastUpdated, List.of());
 	}
-
+	
 	/**
 	 * Parses xml without doctype and external entities.<br>
 	 */
@@ -64,7 +64,7 @@ record MavenMetadata(
 		factory.setExpandEntityReferences(false);
 		return factory.newDocumentBuilder().parse(new ByteArrayInputStream(data));
 	}
-
+	
 	@Nullable
 	static Element child(@Nullable Element parent, @NonNull String name) {
 		if (parent == null) {
@@ -78,7 +78,7 @@ record MavenMetadata(
 		}
 		return null;
 	}
-
+	
 	@NonNull
 	private static List<Element> children(@Nullable Element parent, @NonNull String name) {
 		List<Element> result = new ArrayList<>();
@@ -92,7 +92,7 @@ record MavenMetadata(
 		}
 		return result;
 	}
-
+	
 	@Nullable
 	static String childText(@Nullable Element parent, @NonNull String name) {
 		Element element = child(parent, name);
@@ -102,7 +102,7 @@ record MavenMetadata(
 		String text = element.getTextContent().strip();
 		return text.isEmpty() ? null : text;
 	}
-
+	
 	/**
 	 * Merges the metadata files of several repositories.<br>
 	 * <p>
@@ -127,7 +127,7 @@ record MavenMetadata(
 		if (roots.isEmpty()) {
 			return documents.getFirst();
 		}
-
+		
 		boolean snapshot = roots.values().stream().anyMatch(root -> child(child(root, "versioning"), "snapshot") != null);
 		if (snapshot) {
 			return roots.entrySet().stream()
@@ -135,7 +135,7 @@ record MavenMetadata(
 				.map(Map.Entry::getKey)
 				.orElseThrow();
 		}
-
+		
 		String groupId = null;
 		String artifactId = null;
 		TreeSet<String> versions = new TreeSet<>(ORDER);
@@ -173,12 +173,12 @@ record MavenMetadata(
 		}
 		return new MavenMetadata(groupId, artifactId, latest.isEmpty() ? null : latest.last(), releases.isEmpty() ? null : releases.last(), new ArrayList<>(versions), lastUpdated, new ArrayList<>(plugins.values())).toXml();
 	}
-
+	
 	@NonNull
 	MavenMetadata withPlugins(@NonNull List<Plugin> plugins) {
 		return new MavenMetadata(this.groupId, this.artifactId, this.latest, this.release, this.versions, this.lastUpdated, plugins);
 	}
-
+	
 	@NonNull
 	String toXml() {
 		StringBuilder xml = new StringBuilder();
@@ -221,7 +221,7 @@ record MavenMetadata(
 		xml.append("</metadata>\n");
 		return xml.toString();
 	}
-
+	
 	/**
 	 * A Maven plugin of a group, {@code mvn prefix:goal} is resolved to the plugin with the prefix.<br>
 	 */

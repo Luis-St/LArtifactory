@@ -66,18 +66,6 @@ public class OciHandler extends FormatHandler {
 	private static final Duration UPLOAD_MAX_AGE = Duration.ofHours(24);
 	private static final String BLOB_CONTENT_TYPE = "application/octet-stream";
 	/**
-	 * Set by the dispatcher for requests to the root {@code /v2/{repository}/...} api, the client side name then starts with the repository.<br>
-	 */
-	public static final String ROOT_ATTRIBUTE = "artifactory.ociRoot";
-	public static final String API_VERSION_HEADER = "Docker-Distribution-API-Version";
-	public static final String API_VERSION = "registry/2.0";
-	public static final String OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
-	public static final String OCI_INDEX = "application/vnd.oci.image.index.v1+json";
-	public static final String DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json";
-	public static final String DOCKER_MANIFEST_LIST = "application/vnd.docker.distribution.manifest.list.v2+json";
-	private static final Set<String> INDEX_TYPES = Set.of(OCI_INDEX, DOCKER_MANIFEST_LIST);
-	private static final Set<String> MANIFEST_TYPES = Set.of(OCI_MANIFEST, OCI_INDEX, DOCKER_MANIFEST, DOCKER_MANIFEST_LIST);
-	/**
 	 * Lifetime of a session created by the token endpoint for a password, clients fetch a new token once it expired.<br>
 	 */
 	private static final Duration TOKEN_LIFETIME = Duration.ofHours(1);
@@ -92,6 +80,18 @@ public class OciHandler extends FormatHandler {
 	 * otherwise a manifest could be committed for a blob that is deleted at the same time.<br>
 	 */
 	private static final Striped<ReadWriteLock> REFERENCE_LOCKS = Striped.readWriteLock(64);
+	/**
+	 * Set by the dispatcher for requests to the root {@code /v2/{repository}/...} api, the client side name then starts with the repository.<br>
+	 */
+	public static final String ROOT_ATTRIBUTE = "artifactory.ociRoot";
+	public static final String API_VERSION_HEADER = "Docker-Distribution-API-Version";
+	public static final String API_VERSION = "registry/2.0";
+	public static final String OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
+	public static final String OCI_INDEX = "application/vnd.oci.image.index.v1+json";
+	public static final String DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json";
+	public static final String DOCKER_MANIFEST_LIST = "application/vnd.docker.distribution.manifest.list.v2+json";
+	private static final Set<String> INDEX_TYPES = Set.of(OCI_INDEX, DOCKER_MANIFEST_LIST);
+	private static final Set<String> MANIFEST_TYPES = Set.of(OCI_MANIFEST, OCI_INDEX, DOCKER_MANIFEST, DOCKER_MANIFEST_LIST);
 	private final Map<String, UploadSession> uploads = new ConcurrentHashMap<>();
 	
 	public OciHandler(@NonNull Services services) {

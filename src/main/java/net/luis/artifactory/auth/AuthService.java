@@ -31,19 +31,17 @@ import java.util.concurrent.*;
  */
 public class AuthService {
 	
-	/**
-	 * Bearer token handed out by the registry token endpoint to anonymous clients, it authenticates as anonymous.<br>
-	 */
-	public static final String ANONYMOUS_TOKEN = "anonymous";
 	private static final String PRINCIPAL_ATTRIBUTE = "artifactory.principal";
 	private static final long CACHE_TTL_MILLIS = 60_000;
-	
 	// Bound the number of concurrent (deliberately expensive) password hashes so a flood of authentication attempts
 	// can not exhaust CPU, and verify a dummy hash for unknown users to keep the timing independent of user existence.
 	private static final Semaphore HASH_SLOTS = new Semaphore(Math.max(2, Runtime.getRuntime().availableProcessors()));
 	private static final long HASH_WAIT_MILLIS = 5_000;
 	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
-	
+	/**
+	 * Bearer token handed out by the registry token endpoint to anonymous clients, it authenticates as anonymous.<br>
+	 */
+	public static final String ANONYMOUS_TOKEN = "anonymous";
 	private final UserService userService;
 	private final TokenUsageService tokenUsage;
 	private final ServerConfig config;

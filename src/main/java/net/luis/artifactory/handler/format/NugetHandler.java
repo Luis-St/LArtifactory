@@ -262,6 +262,16 @@ public class NugetHandler extends FormatHandler {
 		}
 	}
 	
+	@NonNull
+	private static String catalogUrl(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
+		return base + "/v3/catalog/" + lowerId + "/" + version.version() + ".json";
+	}
+	
+	@NonNull
+	private static String packageContent(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
+		return base + "/v3-flatcontainer/" + lowerId + "/" + version.version() + "/" + lowerId + "." + version.version() + ".nupkg";
+	}
+	
 	@Override
 	@NonNull
 	public RepositoryType type() {
@@ -436,16 +446,6 @@ public class NugetHandler extends FormatHandler {
 			throw HttpError.notFound();
 		}
 		json(ctx, 200, this.catalogEntryNode(this.repositoryUrl(ctx, repository), lowerId, entity));
-	}
-	
-	@NonNull
-	private static String catalogUrl(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
-		return base + "/v3/catalog/" + lowerId + "/" + version.version() + ".json";
-	}
-	
-	@NonNull
-	private static String packageContent(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
-		return base + "/v3-flatcontainer/" + lowerId + "/" + version.version() + "/" + lowerId + "." + version.version() + ".nupkg";
 	}
 	
 	@NonNull

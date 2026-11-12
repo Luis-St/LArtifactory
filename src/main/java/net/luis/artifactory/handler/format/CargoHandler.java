@@ -236,7 +236,7 @@ public class CargoHandler extends FormatHandler {
 		ctx.header("ETag", etag);
 		ctx.header("Cache-Control", "no-cache");
 		String ifNoneMatch = ctx.header("If-None-Match");
-		if (ifNoneMatch != null && Arrays.stream(ifNoneMatch.split(",")).map(String::strip).anyMatch(value -> value.equals(etag) || value.equals("W/" + etag) || value.equals("*"))) {
+		if (ifNoneMatch != null && Arrays.stream(ifNoneMatch.split(",")).map(String::strip).anyMatch(value -> value.equals(etag) || value.equals("W/" + etag) || "*".equals(value))) {
 			ctx.status(304);
 			return;
 		}
