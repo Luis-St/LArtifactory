@@ -1,6 +1,5 @@
 package net.luis.artifactory;
 
-import net.luis.artifactory.config.*;
 import net.luis.artifactory.util.Json;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;

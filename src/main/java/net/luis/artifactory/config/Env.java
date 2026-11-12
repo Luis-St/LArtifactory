@@ -16,15 +16,18 @@ public final class Env {
 		this.lookup = lookup;
 	}
 	
-	public static @NonNull Env ofSystem() {
+	@NonNull
+	public static Env ofSystem() {
 		return new Env(System::getenv);
 	}
 	
-	public static @NonNull Env of(@NonNull Map<String, String> values) {
+	@NonNull
+	public static Env of(@NonNull Map<String, String> values) {
 		return new Env(values::get);
 	}
 	
-	public @NonNull String string(@NonNull String key, @NonNull String defaultValue) {
+	@NonNull
+	public String string(@NonNull String key, @NonNull String defaultValue) {
 		Objects.requireNonNull(key, "Key must not be null");
 		Objects.requireNonNull(defaultValue, "Default value must not be null");
 		
@@ -32,7 +35,8 @@ public final class Env {
 		return value == null || value.isBlank() ? defaultValue : value;
 	}
 	
-	public @NonNull String requireString(@NonNull String key) {
+	@NonNull
+	public String requireString(@NonNull String key) {
 		Objects.requireNonNull(key, "Key must not be null");
 		
 		String value = this.lookup.apply(key);
@@ -42,7 +46,8 @@ public final class Env {
 		return value;
 	}
 	
-	public @Nullable String optional(@NonNull String key) {
+	@Nullable
+	public String optional(@NonNull String key) {
 		Objects.requireNonNull(key, "Key must not be null");
 		
 		String value = this.lookup.apply(key);

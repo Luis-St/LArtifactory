@@ -6,15 +6,10 @@ import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
 import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.database.UnitOfWork;
-import net.luis.artifactory.database.entity.FileEntity;
-import net.luis.artifactory.database.entity.RemoteConfigEntity;
-import net.luis.artifactory.database.entity.RepositoryEntity;
-import net.luis.artifactory.database.entity.VirtualMemberEntity;
+import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
-import net.luis.artifactory.repository.ArtifactService;
-import net.luis.artifactory.repository.ProxyService;
-import net.luis.artifactory.repository.RepositoryClass;
+import net.luis.artifactory.repository.*;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
@@ -52,13 +47,15 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		}
 	}
 	
-	private static @NonNull String encodeSegment(@NonNull String name) {
+	@NonNull
+	private static String encodeSegment(@NonNull String name) {
 		boolean dir = name.endsWith("/");
 		String bare = dir ? name.substring(0, name.length() - 1) : name;
 		return java.net.URLEncoder.encode(bare, StandardCharsets.UTF_8).replace("+", "%20") + (dir ? "/" : "");
 	}
 	
-	private static @NonNull String readChecksum(@NonNull Context ctx) throws IOException {
+	@NonNull
+	private static String readChecksum(@NonNull Context ctx) throws IOException {
 		try (InputStream input = ctx.bodyInputStream()) {
 			byte[] data = input.readNBytes(1024);
 			String value = new String(data, StandardCharsets.UTF_8).strip();
@@ -67,7 +64,8 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		}
 	}
 	
-	protected static @Nullable String checksumExtension(@NonNull String path) {
+	@Nullable
+	protected static String checksumExtension(@NonNull String path) {
 		int dot = path.lastIndexOf('.');
 		if (dot < 0) {
 			return null;
@@ -76,15 +74,18 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		return CHECKSUM_EXTENSIONS.contains(extension) ? extension : null;
 	}
 	
-	protected static @NonNull String stripExtension(@NonNull String path) {
+	@NonNull
+	protected static String stripExtension(@NonNull String path) {
 		return path.substring(0, path.lastIndexOf('.'));
 	}
 	
-	protected static @NonNull String fileName(@NonNull String path) {
+	@NonNull
+	protected static String fileName(@NonNull String path) {
 		return path.substring(path.lastIndexOf('/') + 1);
 	}
 	
-	protected static @NonNull String digest(@NonNull FileEntity file, @NonNull String algorithm) {
+	@NonNull
+	protected static String digest(@NonNull FileEntity file, @NonNull String algorithm) {
 		return switch (algorithm) {
 			case "sha1" -> file.sha1();
 			case "md5" -> file.md5();
@@ -94,7 +95,8 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		};
 	}
 	
-	protected static @NonNull String digestHex(@NonNull String algorithm, byte @NonNull [] data) {
+	@NonNull
+	protected static String digestHex(@NonNull String algorithm, byte @NonNull [] data) {
 		String name = switch (algorithm) {
 			case "sha1" -> "SHA-1";
 			case "md5" -> "MD5";
@@ -109,11 +111,13 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		}
 	}
 	
-	protected static @NonNull FileEntity fakeFile(@NonNull RepositoryEntity repository, @NonNull StoredBlob blob) {
+	@NonNull
+	protected static FileEntity fakeFile(@NonNull RepositoryEntity repository, @NonNull StoredBlob blob) {
 		return new FileEntity(repository.name(), "", null, null, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), "", null, java.time.Instant.now(), null);
 	}
 	
-	public static @NonNull String contentType(@NonNull String path) {
+	@NonNull
+	public static String contentType(@NonNull String path) {
 		String name = fileName(path).toLowerCase(Locale.ROOT);
 		if (checksumExtension(name) != null || name.endsWith(".asc") || name.endsWith(".txt")) {
 			return "text/plain";
@@ -129,6 +133,17 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			case "html", "htm" -> "text/html";
 			default -> "application/octet-stream";
 		};
+	}
+	
+	private static void serveBytes(@NonNull Context ctx, @NonNull String path, byte @NonNull [] body, @NonNull String contentType) {
+		String name = path.substring(path.lastIndexOf('/') + 1);
+		ctx.status(200).contentType(contentType);
+		ctx.header("X-Content-Type-Options", "nosniff");
+		ctx.header("Content-Disposition", "attachment; filename=\"" + name.replaceAll("[^A-Za-z0-9._-]", "_") + "\"");
+		ctx.header("Content-Length", String.valueOf(body.length));
+		if (!Requests.isHead(ctx)) {
+			ctx.result(body);
+		}
 	}
 	
 	@Override
@@ -159,7 +174,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	protected void get(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, boolean directory) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());
-
+		
 		if (!directory && !path.isEmpty()) {
 			if (this.serveResolved(ctx, repository, kind, path)) {
 				return;
@@ -179,12 +194,12 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 				}
 			}
 		}
-
+		
 		if (!this.listDirectory(ctx, repository, kind, path)) {
 			throw HttpError.notFound();
 		}
 	}
-
+	
 	/**
 	 * Resolves a file according to the repository class: a local file, a cached/upstream copy for a remote repository,
 	 * or the first match across the members of a virtual repository.<br>
@@ -213,7 +228,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			}
 		};
 	}
-
+	
 	private boolean serveLocal(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		FileEntity file = this.services.artifacts().get(repository.name(), path);
 		if (file == null) {
@@ -222,7 +237,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		this.services.artifacts().serve(ctx, file);
 		return true;
 	}
-
+	
 	private boolean serveRemote(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		RemoteConfigEntity remote = this.services.repositories().remoteConfig(repository.name());
 		if (remote == null) {
@@ -241,17 +256,6 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			serveBytes(ctx, path, result.body(), contentType);
 		}
 		return true;
-	}
-
-	private static void serveBytes(@NonNull Context ctx, @NonNull String path, byte @NonNull [] body, @NonNull String contentType) {
-		String name = path.substring(path.lastIndexOf('/') + 1);
-		ctx.status(200).contentType(contentType);
-		ctx.header("X-Content-Type-Options", "nosniff");
-		ctx.header("Content-Disposition", "attachment; filename=\"" + name.replaceAll("[^A-Za-z0-9._-]", "_") + "\"");
-		ctx.header("Content-Length", String.valueOf(body.length));
-		if (!Requests.isHead(ctx)) {
-			ctx.result(body);
-		}
 	}
 	
 	/**
@@ -321,7 +325,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		if (this.services.repositories().classOf(repository.name()) != RepositoryClass.LOCAL) {
 			throw HttpError.badRequest("Can not publish to a remote or virtual repository");
 		}
-
+		
 		if (this.consumeVirtualUpload(ctx, repository, path)) {
 			return;
 		}
@@ -413,7 +417,8 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		return false;
 	}
 	
-	protected @NonNull String conflictMessage(@NonNull String path) {
+	@NonNull
+	protected String conflictMessage(@NonNull String path) {
 		return "File " + path + " already exists; redeploy is not allowed";
 	}
 	

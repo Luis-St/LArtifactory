@@ -14,23 +14,28 @@ public final class Json {
 	
 	private Json() {}
 	
-	public static @NonNull ObjectNode object() {
+	@NonNull
+	public static ObjectNode object() {
 		return MAPPER.createObjectNode();
 	}
 	
-	public static @NonNull ArrayNode array() {
+	@NonNull
+	public static ArrayNode array() {
 		return MAPPER.createArrayNode();
 	}
 	
-	public static @NonNull JsonNode parse(@NonNull String json) {
+	@NonNull
+	public static JsonNode parse(@NonNull String json) {
 		return MAPPER.readTree(json);
 	}
 	
-	public static @NonNull JsonNode parse(byte @NonNull [] json) {
+	@NonNull
+	public static JsonNode parse(byte @NonNull [] json) {
 		return MAPPER.readTree(json);
 	}
 	
-	public static @NonNull ObjectNode parseObject(@Nullable String json) {
+	@NonNull
+	public static ObjectNode parseObject(@Nullable String json) {
 		if (json == null || json.isBlank()) {
 			return object();
 		}
@@ -42,11 +47,13 @@ public final class Json {
 		}
 	}
 	
-	public static @NonNull String write(@NonNull Object value) {
+	@NonNull
+	public static String write(@NonNull Object value) {
 		return MAPPER.writeValueAsString(value);
 	}
 	
-	public static @Nullable String text(@Nullable JsonNode node, @NonNull String field) {
+	@Nullable
+	public static String text(@Nullable JsonNode node, @NonNull String field) {
 		if (node == null) {
 			return null;
 		}
@@ -57,7 +64,8 @@ public final class Json {
 		return value.asString();
 	}
 	
-	public static @NonNull String text(@Nullable JsonNode node, @NonNull String field, @NonNull String defaultValue) {
+	@NonNull
+	public static String text(@Nullable JsonNode node, @NonNull String field, @NonNull String defaultValue) {
 		String value = text(node, field);
 		return value == null ? defaultValue : value;
 	}

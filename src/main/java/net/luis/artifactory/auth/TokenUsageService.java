@@ -8,9 +8,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.net.InetAddress;
 import java.time.Instant;
-import java.util.Arrays;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -22,11 +20,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * </p>
  */
 public class TokenUsageService {
-
+	
 	private static final long META_CACHE_TTL_MILLIS = 15_000;
 	private static final long USAGE_PERSIST_INTERVAL_MILLIS = 60_000;
 	private static final long WINDOW_MILLIS = 60_000;
-
+	
 	private final UserService userService;
 	// token id -> cached settings (empty = no settings row, i.e. an unrestricted legacy token)
 	private final ConcurrentHashMap<String, CachedMeta> metaCache = new ConcurrentHashMap<>();
@@ -34,78 +32,15 @@ public class TokenUsageService {
 	private final ConcurrentHashMap<String, long[]> windows = new ConcurrentHashMap<>();
 	// token id -> last time the usage was persisted
 	private final ConcurrentHashMap<String, Long> lastPersist = new ConcurrentHashMap<>();
-
+	
 	public TokenUsageService(@NonNull UserService userService) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
 	}
-
-	/**
-	 * Clears the cached settings of a token (call after the token or its settings change).<br>
-	 */
-	public void invalidate(@NonNull String tokenId) {
-		this.metaCache.remove(tokenId);
-		this.windows.remove(tokenId);
-		this.lastPersist.remove(tokenId);
-	}
-
-	/**
-	 * Enforces the ip allowlist and the rate limit of a token and records that it was used.<br>
-	 *
-	 * @throws HttpError 403 if the client ip is not in the token allowlist, 429 if the rate limit is exceeded
-	 */
-	public void enforceAndRecord(@NonNull String tokenId, @Nullable String clientIp) throws SqlException {
-		TokenMetaEntity meta = this.meta(tokenId);
-		if (meta == null) {
-			return; // Legacy token without a settings row, unrestricted and not tracked
-		}
-		if (!ipAllowed(clientIp, meta.allowedIps())) {
-			throw HttpError.forbidden("Token is not permitted from this address");
-		}
-		if (meta.rateLimit() > 0 && !this.allowRequest(tokenId, meta.rateLimit())) {
-			throw HttpError.rateLimited(secondsUntilNextWindow());
-		}
-		this.recordUsage(tokenId, clientIp);
-	}
-
-	private @Nullable TokenMetaEntity meta(@NonNull String tokenId) throws SqlException {
-		CachedMeta cached = this.metaCache.get(tokenId);
-		if (cached != null && cached.expiresAt() > System.currentTimeMillis()) {
-			return cached.meta().orElse(null);
-		}
-		TokenMetaEntity meta = this.userService.getTokenMeta(tokenId);
-		this.metaCache.put(tokenId, new CachedMeta(Optional.ofNullable(meta), System.currentTimeMillis() + META_CACHE_TTL_MILLIS));
-		return meta;
-	}
-
-	private boolean allowRequest(@NonNull String tokenId, long limit) {
-		long now = System.currentTimeMillis();
-		long windowStart = now - (now % WINDOW_MILLIS);
-		long[] window = this.windows.compute(tokenId, (_, current) -> {
-			if (current == null || current[0] != windowStart) {
-				return new long[] { windowStart, 1 };
-			}
-			current[1]++;
-			return current;
-		});
-		return window[1] <= limit;
-	}
-
+	
 	private static long secondsUntilNextWindow() {
 		return (WINDOW_MILLIS - System.currentTimeMillis() % WINDOW_MILLIS) / 1000 + 1;
 	}
-
-	private void recordUsage(@NonNull String tokenId, @Nullable String clientIp) throws SqlException {
-		long now = System.currentTimeMillis();
-		Long previous = this.lastPersist.get(tokenId);
-		if (previous != null && now - previous < USAGE_PERSIST_INTERVAL_MILLIS) {
-			return;
-		}
-		this.lastPersist.put(tokenId, now);
-		this.userService.recordTokenUsage(tokenId, Instant.now(), clientIp);
-		this.metaCache.remove(tokenId); // Next read reflects the recorded usage
-	}
-
-	//region IP allowlist matching
+	
 	/**
 	 * Whether the client ip is allowed by the (comma/whitespace separated) allowlist of IPs and CIDR ranges.<br>
 	 * A null or blank allowlist allows any address, an unparseable client ip is denied.<br>
@@ -139,7 +74,7 @@ public class TokenUsageService {
 		}
 		return false;
 	}
-
+	
 	private static boolean cidrMatch(@NonNull InetAddress client, @NonNull String cidr) {
 		int slash = cidr.indexOf('/');
 		InetAddress base = parse(cidr.substring(0, slash));
@@ -170,11 +105,12 @@ public class TokenUsageService {
 		}
 		return true;
 	}
-
+	
 	/**
 	 * Parses a literal IPv4/IPv6 address without a DNS lookup, returns null if the value is not a literal address.<br>
 	 */
-	private static @Nullable InetAddress parse(@NonNull String value) {
+	@Nullable
+	private static InetAddress parse(@NonNull String value) {
 		String host = value.strip();
 		if (host.startsWith("[") && host.endsWith("]")) {
 			host = host.substring(1, host.length() - 1);
@@ -189,7 +125,7 @@ public class TokenUsageService {
 			return null;
 		}
 	}
-
+	
 	/**
 	 * Validates an ip allowlist (used when creating a token), returns false if any entry is not a valid IP or CIDR.<br>
 	 */
@@ -221,7 +157,72 @@ public class TokenUsageService {
 		}
 		return true;
 	}
+	
+	/**
+	 * Clears the cached settings of a token (call after the token or its settings change).<br>
+	 */
+	public void invalidate(@NonNull String tokenId) {
+		this.metaCache.remove(tokenId);
+		this.windows.remove(tokenId);
+		this.lastPersist.remove(tokenId);
+	}
+	
+	//region IP allowlist matching
+	
+	/**
+	 * Enforces the ip allowlist and the rate limit of a token and records that it was used.<br>
+	 *
+	 * @throws HttpError 403 if the client ip is not in the token allowlist, 429 if the rate limit is exceeded
+	 */
+	public void enforceAndRecord(@NonNull String tokenId, @Nullable String clientIp) throws SqlException {
+		TokenMetaEntity meta = this.meta(tokenId);
+		if (meta == null) {
+			return; // Legacy token without a settings row, unrestricted and not tracked
+		}
+		if (!ipAllowed(clientIp, meta.allowedIps())) {
+			throw HttpError.forbidden("Token is not permitted from this address");
+		}
+		if (meta.rateLimit() > 0 && !this.allowRequest(tokenId, meta.rateLimit())) {
+			throw HttpError.rateLimited(secondsUntilNextWindow());
+		}
+		this.recordUsage(tokenId, clientIp);
+	}
+	
+	@Nullable
+	private TokenMetaEntity meta(@NonNull String tokenId) throws SqlException {
+		CachedMeta cached = this.metaCache.get(tokenId);
+		if (cached != null && cached.expiresAt() > System.currentTimeMillis()) {
+			return cached.meta().orElse(null);
+		}
+		TokenMetaEntity meta = this.userService.getTokenMeta(tokenId);
+		this.metaCache.put(tokenId, new CachedMeta(Optional.ofNullable(meta), System.currentTimeMillis() + META_CACHE_TTL_MILLIS));
+		return meta;
+	}
+	
+	private boolean allowRequest(@NonNull String tokenId, long limit) {
+		long now = System.currentTimeMillis();
+		long windowStart = now - (now % WINDOW_MILLIS);
+		long[] window = this.windows.compute(tokenId, (_, current) -> {
+			if (current == null || current[0] != windowStart) {
+				return new long[] { windowStart, 1 };
+			}
+			current[1]++;
+			return current;
+		});
+		return window[1] <= limit;
+	}
+	
+	private void recordUsage(@NonNull String tokenId, @Nullable String clientIp) throws SqlException {
+		long now = System.currentTimeMillis();
+		Long previous = this.lastPersist.get(tokenId);
+		if (previous != null && now - previous < USAGE_PERSIST_INTERVAL_MILLIS) {
+			return;
+		}
+		this.lastPersist.put(tokenId, now);
+		this.userService.recordTokenUsage(tokenId, Instant.now(), clientIp);
+		this.metaCache.remove(tokenId); // Next read reflects the recorded usage
+	}
 	//endregion
-
+	
 	private record CachedMeta(@NonNull Optional<TokenMetaEntity> meta, long expiresAt) {}
 }

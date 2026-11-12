@@ -56,7 +56,8 @@ public class AuthService {
 	/**
 	 * Returns the session secret of the request, null if the request is not authenticated with a session.<br>
 	 */
-	public static @Nullable String sessionSecret(@NonNull Context ctx) {
+	@Nullable
+	public static String sessionSecret(@NonNull Context ctx) {
 		String authorization = ctx.header("Authorization");
 		if (authorization == null) {
 			return null;
@@ -69,7 +70,8 @@ public class AuthService {
 		return null;
 	}
 	
-	private static @NonNull String describe(@NonNull AccessLevel level) {
+	@NonNull
+	private static String describe(@NonNull AccessLevel level) {
 		return switch (level) {
 			case READ -> "read from";
 			case WRITE -> "publish to";
@@ -119,7 +121,8 @@ public class AuthService {
 	 * @return The user, null if the user does not exist or the password is wrong
 	 * @throws HttpError 429 if the client is locked out because of too many failed logins
 	 */
-	public @Nullable UserEntity login(@NonNull Context ctx, @NonNull String username, @NonNull String password) throws SqlException {
+	@Nullable
+	public UserEntity login(@NonNull Context ctx, @NonNull String username, @NonNull String password) throws SqlException {
 		String address = Requests.clientIp(ctx, this.config);
 		this.throttle.check(address, username);
 		
@@ -144,7 +147,8 @@ public class AuthService {
 	 *
 	 * @throws HttpError 401 if credentials are present but invalid
 	 */
-	public @Nullable Principal authenticate(@NonNull Context ctx) throws SqlException {
+	@Nullable
+	public Principal authenticate(@NonNull Context ctx) throws SqlException {
 		if (ctx.attributeMap().containsKey(PRINCIPAL_ATTRIBUTE)) {
 			return ctx.attribute(PRINCIPAL_ATTRIBUTE);
 		}
@@ -154,7 +158,8 @@ public class AuthService {
 		return principal;
 	}
 	
-	public @NonNull Principal requireAuthenticated(@NonNull Context ctx, @NonNull String challenge) throws SqlException {
+	@NonNull
+	public Principal requireAuthenticated(@NonNull Context ctx, @NonNull String challenge) throws SqlException {
 		Principal principal = this.authenticate(ctx);
 		if (principal == null) {
 			throw HttpError.unauthorized(challenge);
@@ -165,7 +170,8 @@ public class AuthService {
 	/**
 	 * Requires a principal that signed in with a password or a session, tokens are rejected with 403.<br>
 	 */
-	public @NonNull Principal requirePassword(@NonNull Context ctx, @NonNull String action) throws SqlException {
+	@NonNull
+	public Principal requirePassword(@NonNull Context ctx, @NonNull String action) throws SqlException {
 		Principal principal = this.requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		if (principal.tokenLevel() != null) {
 			throw HttpError.forbidden(action + " requires signing in with a password, access tokens can not be used");
@@ -173,7 +179,8 @@ public class AuthService {
 		return principal;
 	}
 	
-	public @NonNull Principal requireAdmin(@NonNull Context ctx) throws SqlException {
+	@NonNull
+	public Principal requireAdmin(@NonNull Context ctx) throws SqlException {
 		Principal principal = this.requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		if (!principal.isAdmin()) {
 			throw HttpError.forbidden("Administrator privileges required");
@@ -187,7 +194,8 @@ public class AuthService {
 	 * @return The principal of the request, null if anonymous read access was granted
 	 * @throws HttpError 401 if the request is anonymous and access is denied, 403 if the user lacks the permission
 	 */
-	public @Nullable Principal authorize(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull AccessLevel required, @NonNull String challenge) throws SqlException {
+	@Nullable
+	public Principal authorize(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull AccessLevel required, @NonNull String challenge) throws SqlException {
 		Principal principal = this.authenticate(ctx);
 		if (required == AccessLevel.READ && repository.publicRead()) {
 			return principal;
@@ -213,7 +221,8 @@ public class AuthService {
 		return this.effectiveLevel(principal, repository.name()) != null;
 	}
 	
-	public @Nullable AccessLevel effectiveLevel(@NonNull Principal principal, @NonNull String repository) throws SqlException {
+	@Nullable
+	public AccessLevel effectiveLevel(@NonNull Principal principal, @NonNull String repository) throws SqlException {
 		AccessLevel level = principal.admin() ? AccessLevel.DELETE : this.userService.permissionLevel(repository, principal.username());
 		if (level != null && principal.tokenLevel() != null) {
 			level = AccessLevel.min(level, principal.tokenLevel());
@@ -221,7 +230,8 @@ public class AuthService {
 		return level;
 	}
 	
-	private @Nullable Principal resolve(@NonNull Context ctx) throws SqlException {
+	@Nullable
+	private Principal resolve(@NonNull Context ctx) throws SqlException {
 		String authorization = ctx.header("Authorization");
 		if (authorization != null && !authorization.isBlank()) {
 			authorization = authorization.strip();
@@ -243,7 +253,7 @@ public class AuthService {
 			}
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-
+		
 		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
 			String apiKey = ctx.header(header);
 			if (apiKey != null && !apiKey.isBlank()) {
@@ -253,7 +263,8 @@ public class AuthService {
 		return null;
 	}
 	
-	private @NonNull Principal basic(@NonNull Context ctx, @NonNull String encoded) throws SqlException {
+	@NonNull
+	private Principal basic(@NonNull Context ctx, @NonNull String encoded) throws SqlException {
 		String decoded;
 		try {
 			decoded = new String(Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
@@ -286,7 +297,8 @@ public class AuthService {
 		return principal;
 	}
 	
-	private @NonNull Principal requireToken(@NonNull Context ctx, @NonNull String secret, @Nullable String expectedUser) throws SqlException {
+	@NonNull
+	private Principal requireToken(@NonNull Context ctx, @NonNull String secret, @Nullable String expectedUser) throws SqlException {
 		String cacheKey = "token:" + UserService.hashToken(secret);
 		CacheEntry cached = this.cached(cacheKey);
 		Principal principal;
@@ -308,7 +320,7 @@ public class AuthService {
 			tokenId = token.id();
 			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt(), token.id()));
 		}
-
+		
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
@@ -317,7 +329,8 @@ public class AuthService {
 		return principal;
 	}
 	
-	private @NonNull Principal requireSession(@NonNull String secret) throws SqlException {
+	@NonNull
+	private Principal requireSession(@NonNull String secret) throws SqlException {
 		String cacheKey = "session:" + UserService.hashToken(secret);
 		CacheEntry cached = this.cached(cacheKey);
 		if (cached != null) {
@@ -340,7 +353,8 @@ public class AuthService {
 	 * Returns the cached entry, entries are re-checked against the expiry of their token or session so a credential that
 	 * expires within the cache window stops working immediately.<br>
 	 */
-	private @Nullable CacheEntry cached(@NonNull String cacheKey) {
+	@Nullable
+	private CacheEntry cached(@NonNull String cacheKey) {
 		CacheEntry cached = this.cache.get(cacheKey);
 		if (cached != null && cached.expiresAt() > System.currentTimeMillis() && (cached.credentialExpiresAt() == null || cached.credentialExpiresAt().isAfter(Instant.now()))) {
 			return cached;

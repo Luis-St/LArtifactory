@@ -6,29 +6,60 @@ import net.luis.artifactory.Services;
 import net.luis.artifactory.database.entity.WebhookEntity;
 import net.luis.artifactory.dto.request.CreateWebhookRequest;
 import net.luis.artifactory.dto.request.UpdateWebhookRequest;
-import net.luis.artifactory.dto.response.ErrorResponse;
-import net.luis.artifactory.dto.response.WebhookDeliveryResponse;
-import net.luis.artifactory.dto.response.WebhookResponse;
+import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.repository.WebhookService;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
-import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
+import java.util.*;
 
 /**
  * Management of webhooks (administrators only).<br>
  */
 public class WebhookAdminHandler {
-
+	
 	private final Services services;
-
+	
 	public WebhookAdminHandler(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
 	}
-
+	
+	@NonNull
+	private static String validateUrl(@Nullable String url) {
+		if (url == null || url.isBlank()) {
+			throw HttpError.badRequest("url is required");
+		}
+		String trimmed = url.strip();
+		String lower = trimmed.toLowerCase(Locale.ROOT);
+		if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+			throw HttpError.badRequest("url must be an http or https url");
+		}
+		if (trimmed.length() > 1024) {
+			throw HttpError.badRequest("url must have at most 1024 characters");
+		}
+		return trimmed;
+	}
+	
+	@Nullable
+	private static String validateEvents(@Nullable List<String> events) {
+		if (events == null || events.isEmpty()) {
+			return null;
+		}
+		StringBuilder joined = new StringBuilder();
+		for (String event : events) {
+			if (event == null || event.isBlank()) {
+				continue;
+			}
+			String normalized = event.strip().toLowerCase(Locale.ROOT);
+			if (!WebhookService.EVENTS.contains(normalized)) {
+				throw HttpError.badRequest("Unknown event '" + event + "', allowed: " + WebhookService.EVENTS);
+			}
+			joined.append(joined.isEmpty() ? "" : ",").append(normalized);
+		}
+		return joined.isEmpty() ? null : joined.toString();
+	}
+	
 	@OpenApi(
 		summary = "List webhooks",
 		operationId = "listWebhooks",
@@ -42,7 +73,7 @@ public class WebhookAdminHandler {
 		this.services.auth().requireAdmin(ctx);
 		ctx.json(this.services.webhooks().list(ctx.queryParam("repository")).stream().map(WebhookResponse::of).toList());
 	}
-
+	
 	@OpenApi(
 		summary = "Create a webhook",
 		description = "Events: artifact.published, artifact.deleted, package.deleted, repository.created, repository.deleted (empty = all)",
@@ -69,7 +100,7 @@ public class WebhookAdminHandler {
 		WebhookEntity webhook = this.services.webhooks().create(repository, url, secret, events, request.active() == null || request.active(), principal.username());
 		ctx.status(201).json(WebhookResponse.of(webhook));
 	}
-
+	
 	@OpenApi(
 		summary = "Get a webhook",
 		operationId = "getWebhook",
@@ -86,7 +117,7 @@ public class WebhookAdminHandler {
 		this.services.auth().requireAdmin(ctx);
 		ctx.json(WebhookResponse.of(this.require(ctx)));
 	}
-
+	
 	@OpenApi(
 		summary = "Update a webhook",
 		operationId = "updateWebhook",
@@ -106,7 +137,7 @@ public class WebhookAdminHandler {
 		this.services.webhooks().update(webhook.id(), url, events, request.active());
 		ctx.json(WebhookResponse.of(Objects.requireNonNull(this.services.webhooks().get(webhook.id()))));
 	}
-
+	
 	@OpenApi(
 		summary = "Delete a webhook",
 		operationId = "deleteWebhook",
@@ -122,7 +153,7 @@ public class WebhookAdminHandler {
 		this.services.webhooks().delete(webhook.id());
 		ctx.status(204);
 	}
-
+	
 	@OpenApi(
 		summary = "Send a test ping to a webhook and return the delivery result",
 		operationId = "testWebhook",
@@ -137,7 +168,7 @@ public class WebhookAdminHandler {
 		WebhookEntity webhook = this.require(ctx);
 		ctx.json(WebhookDeliveryResponse.of(this.services.webhooks().test(webhook)));
 	}
-
+	
 	@OpenApi(
 		summary = "List the recent delivery attempts of a webhook (newest first)",
 		operationId = "listWebhookDeliveries",
@@ -152,31 +183,18 @@ public class WebhookAdminHandler {
 		WebhookEntity webhook = this.require(ctx);
 		ctx.json(this.services.webhooks().deliveries(webhook.id(), 50).stream().map(WebhookDeliveryResponse::of).toList());
 	}
-
-	private @NonNull WebhookEntity require(@NonNull Context ctx) throws Exception {
+	
+	@NonNull
+	private WebhookEntity require(@NonNull Context ctx) throws Exception {
 		WebhookEntity webhook = this.services.webhooks().get(ctx.pathParam("id"));
 		if (webhook == null) {
 			throw HttpError.notFound("No such webhook");
 		}
 		return webhook;
 	}
-
-	private static @NonNull String validateUrl(@Nullable String url) {
-		if (url == null || url.isBlank()) {
-			throw HttpError.badRequest("url is required");
-		}
-		String trimmed = url.strip();
-		String lower = trimmed.toLowerCase(Locale.ROOT);
-		if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
-			throw HttpError.badRequest("url must be an http or https url");
-		}
-		if (trimmed.length() > 1024) {
-			throw HttpError.badRequest("url must have at most 1024 characters");
-		}
-		return trimmed;
-	}
-
-	private @Nullable String validateRepository(@Nullable String repository) throws Exception {
+	
+	@Nullable
+	private String validateRepository(@Nullable String repository) throws Exception {
 		if (repository == null || repository.isBlank()) {
 			return null;
 		}
@@ -184,23 +202,5 @@ public class WebhookAdminHandler {
 			throw HttpError.notFound("No such repository: " + repository);
 		}
 		return repository;
-	}
-
-	private static @Nullable String validateEvents(@Nullable List<String> events) {
-		if (events == null || events.isEmpty()) {
-			return null;
-		}
-		StringBuilder joined = new StringBuilder();
-		for (String event : events) {
-			if (event == null || event.isBlank()) {
-				continue;
-			}
-			String normalized = event.strip().toLowerCase(Locale.ROOT);
-			if (!WebhookService.EVENTS.contains(normalized)) {
-				throw HttpError.badRequest("Unknown event '" + event + "', allowed: " + WebhookService.EVENTS);
-			}
-			joined.append(joined.isEmpty() ? "" : ",").append(normalized);
-		}
-		return joined.isEmpty() ? null : joined.toString();
 	}
 }

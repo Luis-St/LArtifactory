@@ -20,8 +20,9 @@ public record WebhookResponse(
 	@NonNull Instant createdAt,
 	@Nullable String createdBy
 ) {
-
-	public static @NonNull WebhookResponse of(@NonNull WebhookEntity entity) {
+	
+	@NonNull
+	public static WebhookResponse of(@NonNull WebhookEntity entity) {
 		List<String> events = entity.events() == null || entity.events().isBlank()
 			? List.of()
 			: List.of(entity.events().split("[,\\s]+"));

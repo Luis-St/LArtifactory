@@ -14,7 +14,8 @@ public record SessionResponse(
 	@NonNull Instant expiresAt
 ) {
 	
-	public static @NonNull SessionResponse of(UserService.@NonNull CreatedSession session) {
+	@NonNull
+	public static SessionResponse of(UserService.@NonNull CreatedSession session) {
 		return new SessionResponse(session.session().username(), session.secret(), session.session().expiresAt());
 	}
 }

@@ -45,7 +45,8 @@ public class DatabaseProvider {
 		LOGGER.info("Database connection pool initialized (pool={}, url={})", databaseConfig.poolSize(), databaseConfig.safeUrl());
 	}
 	
-	public @NonNull SqlDatabase getDatabase() {
+	@NonNull
+	public SqlDatabase getDatabase() {
 		return this.database;
 	}
 	

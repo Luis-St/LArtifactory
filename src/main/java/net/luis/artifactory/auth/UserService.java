@@ -31,7 +31,8 @@ public class UserService {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 	}
 	
-	public static @NonNull String hashToken(@NonNull String secret) {
+	@NonNull
+	public static String hashToken(@NonNull String secret) {
 		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
 	}
 	
@@ -49,15 +50,18 @@ public class UserService {
 		LOGGER.info("Created initial admin user '{}'", username);
 	}
 	
-	public @NonNull List<UserEntity> list() throws SqlException {
+	@NonNull
+	public List<UserEntity> list() throws SqlException {
 		return this.database.from(USERS).select().orderBy(USER_NAME.ascending()).fetch();
 	}
 	
-	public @Nullable UserEntity get(@NonNull String username) throws SqlException {
+	@Nullable
+	public UserEntity get(@NonNull String username) throws SqlException {
 		return this.database.from(USERS).select().where(Sql.equalTo(USER_NAME, username)).fetchOneOrNull();
 	}
 	
-	public @NonNull UserEntity create(@NonNull String username, @NonNull String password, boolean admin) throws SqlException {
+	@NonNull
+	public UserEntity create(@NonNull String username, @NonNull String password, boolean admin) throws SqlException {
 		UserEntity user = new UserEntity(username, PasswordHasher.hash(password), admin, Instant.now());
 		this.database.from(USERS).insert(user).execute();
 		return user;
@@ -94,7 +98,8 @@ public class UserService {
 		});
 	}
 	
-	public @NonNull List<PermissionEntity> listPermissions(@Nullable String repository, @Nullable String username) throws SqlException {
+	@NonNull
+	public List<PermissionEntity> listPermissions(@Nullable String repository, @Nullable String username) throws SqlException {
 		List<SqlCondition> conditions = new ArrayList<>();
 		if (repository != null) {
 			conditions.add(Sql.equalTo(PERMISSION_REPOSITORY, repository));
@@ -123,7 +128,8 @@ public class UserService {
 	/**
 	 * Returns the highest access level the given user has on the repository, considering wildcard ({@code *}) permissions.<br>
 	 */
-	public @Nullable AccessLevel permissionLevel(@NonNull String repository, @NonNull String username) throws SqlException {
+	@Nullable
+	public AccessLevel permissionLevel(@NonNull String repository, @NonNull String username) throws SqlException {
 		List<PermissionEntity> permissions = this.database.from(PERMISSIONS).select().where(SqlCondition.allOf(
 			Sql.equalTo(PERMISSION_USERNAME, username),
 			SqlCondition.anyOf(Sql.equalTo(PERMISSION_REPOSITORY, repository), Sql.equalTo(PERMISSION_REPOSITORY, "*"))
@@ -139,7 +145,8 @@ public class UserService {
 		return best;
 	}
 	
-	public @NonNull List<TokenEntity> listTokens(@Nullable String username) throws SqlException {
+	@NonNull
+	public List<TokenEntity> listTokens(@Nullable String username) throws SqlException {
 		var query = this.database.from(TOKENS).select();
 		if (username != null) {
 			query = query.where(Sql.equalTo(TOKEN_USERNAME, username));
@@ -147,25 +154,29 @@ public class UserService {
 		return query.orderBy(TOKEN_CREATED_AT.ascending()).fetch();
 	}
 	
-	public @Nullable TokenEntity getToken(@NonNull String id) throws SqlException {
+	@Nullable
+	public TokenEntity getToken(@NonNull String id) throws SqlException {
 		return this.database.from(TOKENS).select().where(Sql.equalTo(TOKEN_ID, id)).fetchOneOrNull();
 	}
 	
-	public @Nullable TokenEntity findTokenBySecret(@NonNull String secret) throws SqlException {
+	@Nullable
+	public TokenEntity findTokenBySecret(@NonNull String secret) throws SqlException {
 		return this.database.from(TOKENS).select().where(Sql.equalTo(TOKEN_HASH, hashToken(secret))).fetchOneOrNull();
 	}
 	
 	/**
 	 * Creates a new token and returns the plain secret, the secret is not stored and can not be retrieved later.<br>
 	 */
-	public @NonNull CreatedToken createToken(@NonNull String username, @NonNull String name, @NonNull AccessLevel level, @Nullable Instant expiresAt) throws SqlException {
+	@NonNull
+	public CreatedToken createToken(@NonNull String username, @NonNull String name, @NonNull AccessLevel level, @Nullable Instant expiresAt) throws SqlException {
 		return this.createToken(username, name, level, expiresAt, null, 0);
 	}
-
+	
 	/**
 	 * Creates a new token together with its {@link TokenMetaEntity settings} (ip allowlist and rate limit) atomically.<br>
 	 */
-	public @NonNull CreatedToken createToken(@NonNull String username, @NonNull String name, @NonNull AccessLevel level, @Nullable Instant expiresAt, @Nullable String allowedIps, long rateLimit) throws SqlException {
+	@NonNull
+	public CreatedToken createToken(@NonNull String username, @NonNull String name, @NonNull AccessLevel level, @Nullable Instant expiresAt, @Nullable String allowedIps, long rateLimit) throws SqlException {
 		String secret = "lat_" + PasswordHasher.randomSecret(32);
 		TokenEntity token = new TokenEntity(UUID.randomUUID().toString(), username, name, hashToken(secret), level.name(), Instant.now(), expiresAt);
 		TokenMetaEntity meta = new TokenMetaEntity(token.id(), allowedIps, Math.max(0, rateLimit), null, null);
@@ -175,12 +186,12 @@ public class UserService {
 		});
 		return new CreatedToken(token, secret);
 	}
-
+	
 	public int deleteToken(@NonNull String id) throws SqlException {
 		this.database.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, id)).execute();
 		return this.database.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
 	}
-
+	
 	public int deleteTokenBySecret(@NonNull String secret) throws SqlException {
 		TokenEntity token = this.findTokenBySecret(secret);
 		if (token == null) {
@@ -188,13 +199,15 @@ public class UserService {
 		}
 		return this.deleteToken(token.id());
 	}
-
+	
 	//region Token metadata
-	public @Nullable TokenMetaEntity getTokenMeta(@NonNull String id) throws SqlException {
+	@Nullable
+	public TokenMetaEntity getTokenMeta(@NonNull String id) throws SqlException {
 		return this.database.from(TOKEN_META).select().where(Sql.equalTo(TOKEN_META_ID, id)).fetchOneOrNull();
 	}
-
-	public @NonNull Map<String, TokenMetaEntity> tokenMeta(@NonNull Collection<String> ids) throws SqlException {
+	
+	@NonNull
+	public Map<String, TokenMetaEntity> tokenMeta(@NonNull Collection<String> ids) throws SqlException {
 		Map<String, TokenMetaEntity> result = new HashMap<>();
 		for (String id : ids) {
 			TokenMetaEntity meta = this.getTokenMeta(id);
@@ -204,7 +217,7 @@ public class UserService {
 		}
 		return result;
 	}
-
+	
 	/**
 	 * Records that a token was used, replacing the previous usage row for the token.<br>
 	 */
@@ -223,7 +236,8 @@ public class UserService {
 	/**
 	 * Creates a web ui session and returns the plain secret, only its hash is stored.<br>
 	 */
-	public @NonNull CreatedSession createSession(@NonNull String username, @NonNull Duration lifetime) throws SqlException {
+	@NonNull
+	public CreatedSession createSession(@NonNull String username, @NonNull Duration lifetime) throws SqlException {
 		String secret = SESSION_PREFIX + PasswordHasher.randomSecret(32);
 		Instant now = Instant.now();
 		SessionEntity session = new SessionEntity(UUID.randomUUID().toString(), username, hashToken(secret), now, now.plus(lifetime));
@@ -231,7 +245,8 @@ public class UserService {
 		return new CreatedSession(session, secret);
 	}
 	
-	public @Nullable SessionEntity findSessionBySecret(@NonNull String secret) throws SqlException {
+	@Nullable
+	public SessionEntity findSessionBySecret(@NonNull String secret) throws SqlException {
 		return this.database.from(SESSIONS).select().where(Sql.equalTo(SESSION_HASH, hashToken(secret))).fetchOneOrNull();
 	}
 	

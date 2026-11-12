@@ -16,15 +16,18 @@ public final class Conditions {
 	
 	private Conditions() {}
 	
-	public static @NonNull SqlCondition startsWith(@NonNull SqlExpression<String> column, @NonNull String prefix) {
+	@NonNull
+	public static SqlCondition startsWith(@NonNull SqlExpression<String> column, @NonNull String prefix) {
 		return Sql.startsWith(column, escapeLike(prefix));
 	}
 	
-	public static @NonNull SqlCondition containsIgnoreCase(@NonNull SqlExpression<String> column, @NonNull String text) {
+	@NonNull
+	public static SqlCondition containsIgnoreCase(@NonNull SqlExpression<String> column, @NonNull String text) {
 		return Sql.contains(Sql.lower(column), escapeLike(text.toLowerCase(Locale.ROOT)));
 	}
 	
-	public static @NonNull String escapeLike(@NonNull String value) {
+	@NonNull
+	public static String escapeLike(@NonNull String value) {
 		return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
 	}
 }

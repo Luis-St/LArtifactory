@@ -20,7 +20,17 @@ public record RepositoryResponse(
 	@Nullable RemoteInfo remote,
 	@NonNull List<String> members
 ) {
-
+	
+	@NonNull
+	public static RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String baseUrl) {
+		return of(entity, baseUrl, "LOCAL", null, List.of());
+	}
+	
+	@NonNull
+	public static RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String baseUrl, @NonNull String kind, @Nullable RemoteInfo remote, @NonNull List<String> members) {
+		return new RepositoryResponse(entity.name(), entity.type(), entity.description(), entity.publicRead(), entity.allowRedeploy(), entity.createdAt(), baseUrl + "/" + entity.type() + "/" + entity.name(), kind, remote, members);
+	}
+	
 	/**
 	 * Upstream info of a remote repository, the password is never exposed.<br>
 	 */
@@ -29,16 +39,10 @@ public record RepositoryResponse(
 		boolean cacheEnabled,
 		@Nullable String username
 	) {
-		public static @NonNull RemoteInfo of(@NonNull RemoteConfigEntity entity) {
+		
+		@NonNull
+		public static RemoteInfo of(@NonNull RemoteConfigEntity entity) {
 			return new RemoteInfo(entity.url(), entity.cacheEnabled(), entity.username());
 		}
-	}
-
-	public static @NonNull RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String baseUrl) {
-		return of(entity, baseUrl, "LOCAL", null, List.of());
-	}
-
-	public static @NonNull RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String baseUrl, @NonNull String kind, @Nullable RemoteInfo remote, @NonNull List<String> members) {
-		return new RepositoryResponse(entity.name(), entity.type(), entity.description(), entity.publicRead(), entity.allowRedeploy(), entity.createdAt(), baseUrl + "/" + entity.type() + "/" + entity.name(), kind, remote, members);
 	}
 }

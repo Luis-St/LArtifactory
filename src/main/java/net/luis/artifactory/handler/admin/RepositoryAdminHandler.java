@@ -12,11 +12,7 @@ import net.luis.artifactory.dto.request.UpdateRepositoryRequest;
 import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
-import net.luis.artifactory.repository.AuditService;
-import net.luis.artifactory.repository.RepositoryClass;
-import net.luis.artifactory.repository.RepositoryService;
-import net.luis.artifactory.repository.RepositoryType;
-import net.luis.artifactory.repository.WebhookService;
+import net.luis.artifactory.repository.*;
 import org.jspecify.annotations.NonNull;
 
 import java.util.*;
@@ -46,6 +42,43 @@ public class RepositoryAdminHandler {
 		}
 	}
 	
+	@NonNull
+	private static String validateRemoteUrl(CreateRepositoryRequest.@NonNull Remote remote) {
+		String url = remote.url();
+		if (url == null || url.isBlank()) {
+			throw HttpError.badRequest("remote.url is required for a remote repository");
+		}
+		String trimmed = url.strip();
+		String lower = trimmed.toLowerCase(Locale.ROOT);
+		if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+			throw HttpError.badRequest("remote.url must be an http or https url");
+		}
+		if (trimmed.length() > 1024) {
+			throw HttpError.badRequest("remote.url must have at most 1024 characters");
+		}
+		return trimmed;
+	}
+	
+	@NonNull
+	private static List<String> normalizeMembers(@NonNull List<String> members) {
+		List<String> result = new ArrayList<>();
+		for (String member : members) {
+			if (member == null || member.isBlank()) {
+				continue;
+			}
+			String trimmed = member.strip();
+			if (!result.contains(trimmed)) {
+				result.add(trimmed);
+			}
+		}
+		return result;
+	}
+	
+	@org.jspecify.annotations.Nullable
+	private static String blankToNull(@org.jspecify.annotations.Nullable String value) {
+		return value == null || value.isBlank() ? null : value.strip();
+	}
+	
 	@OpenApi(
 		summary = "List repositories readable by the caller",
 		operationId = "listRepositories",
@@ -65,11 +98,12 @@ public class RepositoryAdminHandler {
 		}
 		ctx.json(result);
 	}
-
+	
 	/**
 	 * Builds a repository response enriched with its class (local/remote/virtual) and the remote/virtual settings.<br>
 	 */
-	private @NonNull RepositoryResponse response(@NonNull RepositoryEntity repository, @NonNull String baseUrl) throws Exception {
+	@NonNull
+	private RepositoryResponse response(@NonNull RepositoryEntity repository, @NonNull String baseUrl) throws Exception {
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());
 		RepositoryResponse.RemoteInfo remote = null;
 		List<String> members = List.of();
@@ -142,7 +176,7 @@ public class RepositoryAdminHandler {
 		if (virtual) {
 			this.validateMembers(request.members(), type);
 		}
-
+		
 		RepositoryEntity repository = this.services.repositories().create(request.name(), type, request.description(), Boolean.TRUE.equals(request.publicRead()), Boolean.TRUE.equals(request.allowRedeploy()));
 		String kind = "local";
 		if (remote) {
@@ -173,7 +207,7 @@ public class RepositoryAdminHandler {
 		RepositoryEntity repository = this.require(ctx);
 		UpdateRepositoryRequest request = ctx.bodyAsClass(UpdateRepositoryRequest.class);
 		this.services.repositories().update(repository.name(), request.description(), request.publicRead(), request.allowRedeploy());
-
+		
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());
 		if (request.remote() != null) {
 			if (kind != RepositoryClass.REMOTE) {
@@ -321,22 +355,6 @@ public class RepositoryAdminHandler {
 		ctx.json(this.services.artifacts().list(repository.name(), prefix, offset, limit).stream().map(FileResponse::of).toList());
 	}
 	
-	private static @NonNull String validateRemoteUrl(CreateRepositoryRequest.@NonNull Remote remote) {
-		String url = remote.url();
-		if (url == null || url.isBlank()) {
-			throw HttpError.badRequest("remote.url is required for a remote repository");
-		}
-		String trimmed = url.strip();
-		String lower = trimmed.toLowerCase(Locale.ROOT);
-		if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
-			throw HttpError.badRequest("remote.url must be an http or https url");
-		}
-		if (trimmed.length() > 1024) {
-			throw HttpError.badRequest("remote.url must have at most 1024 characters");
-		}
-		return trimmed;
-	}
-
 	private void validateMembers(@NonNull List<String> members, @NonNull RepositoryType type) throws Exception {
 		List<String> normalized = normalizeMembers(members);
 		if (normalized.isEmpty()) {
@@ -355,26 +373,9 @@ public class RepositoryAdminHandler {
 			}
 		}
 	}
-
-	private static @NonNull List<String> normalizeMembers(@NonNull List<String> members) {
-		List<String> result = new ArrayList<>();
-		for (String member : members) {
-			if (member == null || member.isBlank()) {
-				continue;
-			}
-			String trimmed = member.strip();
-			if (!result.contains(trimmed)) {
-				result.add(trimmed);
-			}
-		}
-		return result;
-	}
-
-	private static @org.jspecify.annotations.Nullable String blankToNull(@org.jspecify.annotations.Nullable String value) {
-		return value == null || value.isBlank() ? null : value.strip();
-	}
-
-	private @NonNull RepositoryEntity require(@NonNull Context ctx) throws Exception {
+	
+	@NonNull
+	private RepositoryEntity require(@NonNull Context ctx) throws Exception {
 		RepositoryEntity repository = this.services.repositories().get(ctx.pathParam("name"));
 		if (repository == null) {
 			throw HttpError.notFound("No such repository: " + ctx.pathParam("name"));
@@ -382,7 +383,8 @@ public class RepositoryAdminHandler {
 		return repository;
 	}
 	
-	private @NonNull RepositoryEntity readable(@NonNull Context ctx) throws Exception {
+	@NonNull
+	private RepositoryEntity readable(@NonNull Context ctx) throws Exception {
 		RepositoryEntity repository = this.require(ctx);
 		this.services.auth().authorize(ctx, repository, AccessLevel.READ, "Basic realm=\"" + repository.name() + "\"");
 		return repository;

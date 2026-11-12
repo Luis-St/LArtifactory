@@ -16,8 +16,9 @@ public record AuditResponse(
 	@Nullable String ip,
 	@Nullable String detail
 ) {
-
-	public static @NonNull AuditResponse of(@NonNull AuditEntity entity) {
+	
+	@NonNull
+	public static AuditResponse of(@NonNull AuditEntity entity) {
 		return new AuditResponse(entity.id(), entity.timestamp(), entity.actor(), entity.action(), entity.repository(), entity.target(), entity.ip(), entity.detail());
 	}
 }

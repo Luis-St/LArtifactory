@@ -20,7 +20,8 @@ public enum RepositoryType {
 		this.id = id;
 	}
 	
-	public static @Nullable RepositoryType byId(@Nullable String id) {
+	@Nullable
+	public static RepositoryType byId(@Nullable String id) {
 		if (id == null) {
 			return null;
 		}
@@ -33,7 +34,8 @@ public enum RepositoryType {
 		return null;
 	}
 	
-	public @NonNull String id() {
+	@NonNull
+	public String id() {
 		return this.id;
 	}
 }

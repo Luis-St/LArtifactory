@@ -14,7 +14,8 @@ public class GenericHandler extends PathRepositoryHandler {
 	}
 	
 	@Override
-	public @NonNull RepositoryType type() {
+	@NonNull
+	public RepositoryType type() {
 		return RepositoryType.GENERIC;
 	}
 }

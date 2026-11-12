@@ -17,7 +17,8 @@ public enum AccessLevel {
 	
 	READ, WRITE, DELETE;
 	
-	public static @Nullable AccessLevel parse(@Nullable String value) {
+	@Nullable
+	public static AccessLevel parse(@Nullable String value) {
 		if (value == null || value.isBlank()) {
 			return null;
 		}
@@ -28,7 +29,8 @@ public enum AccessLevel {
 		}
 	}
 	
-	public static @NonNull AccessLevel min(@NonNull AccessLevel first, @NonNull AccessLevel second) {
+	@NonNull
+	public static AccessLevel min(@NonNull AccessLevel first, @NonNull AccessLevel second) {
 		return first.ordinal() <= second.ordinal() ? first : second;
 	}
 	

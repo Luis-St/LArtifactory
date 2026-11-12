@@ -49,7 +49,8 @@ public class NugetHandler extends FormatHandler {
 		resources.addObject().put("@id", id).put("@type", type);
 	}
 	
-	private static @NonNull Nuspec readNuspec(@NonNull File file) throws Exception {
+	@NonNull
+	private static Nuspec readNuspec(@NonNull File file) throws Exception {
 		try (ZipFile zip = new ZipFile(file)) {
 			ZipEntry nuspecEntry = null;
 			for (ZipEntry entry : Collections.list(zip.entries())) {
@@ -116,7 +117,8 @@ public class NugetHandler extends FormatHandler {
 		}
 	}
 	
-	private static @NonNull ArrayNode dependencyGroups(@Nullable Element dependencies) {
+	@NonNull
+	private static ArrayNode dependencyGroups(@Nullable Element dependencies) {
 		ArrayNode groups = Json.array();
 		if (dependencies == null) {
 			return groups;
@@ -150,7 +152,8 @@ public class NugetHandler extends FormatHandler {
 		}
 	}
 	
-	private static @NonNull List<Element> children(@NonNull Element parent, @NonNull String name) {
+	@NonNull
+	private static List<Element> children(@NonNull Element parent, @NonNull String name) {
 		List<Element> result = new ArrayList<>();
 		NodeList nodes = parent.getChildNodes();
 		for (int i = 0; i < nodes.getLength(); i++) {
@@ -161,12 +164,14 @@ public class NugetHandler extends FormatHandler {
 		return result;
 	}
 	
-	private static @Nullable Element child(@NonNull Element parent, @NonNull String name) {
+	@Nullable
+	private static Element child(@NonNull Element parent, @NonNull String name) {
 		List<Element> elements = children(parent, name);
 		return elements.isEmpty() ? null : elements.getFirst();
 	}
 	
-	private static @Nullable String childText(@NonNull Element parent, @NonNull String name) {
+	@Nullable
+	private static String childText(@NonNull Element parent, @NonNull String name) {
 		Element element = child(parent, name);
 		if (element == null) {
 			return null;
@@ -175,7 +180,8 @@ public class NugetHandler extends FormatHandler {
 		return text.isEmpty() ? null : text;
 	}
 	
-	private static @NonNull String normalize(@NonNull String version) {
+	@NonNull
+	private static String normalize(@NonNull String version) {
 		try {
 			return Versions.normalizeNuGet(version);
 		} catch (IllegalArgumentException e) {
@@ -192,7 +198,8 @@ public class NugetHandler extends FormatHandler {
 	}
 	
 	@Override
-	public @NonNull RepositoryType type() {
+	@NonNull
+	public RepositoryType type() {
 		return RepositoryType.NUGET;
 	}
 	
@@ -203,7 +210,7 @@ public class NugetHandler extends FormatHandler {
 		boolean read = "GET".equals(method) || "HEAD".equals(method);
 		
 		if (segments.size() >= 2 && (segments.subList(0, 2).equals(List.of("v3", "package")) || (segments.size() >= 3 && segments.subList(0, 3).equals(List.of("api", "v2", "package"))))) {
-			List<String> rest = segments.subList(segments.getFirst().equals("v3") ? 2 : 3, segments.size());
+			List<String> rest = segments.subList("v3".equals(segments.getFirst()) ? 2 : 3, segments.size());
 			if (rest.isEmpty() && "PUT".equals(method)) {
 				this.push(ctx, repository);
 			} else if (rest.size() == 2 && "DELETE".equals(method)) {
@@ -225,14 +232,14 @@ public class NugetHandler extends FormatHandler {
 		}
 		this.authorize(ctx, repository, AccessLevel.READ);
 		
-		if (segments.size() == 3 && segments.getFirst().equals("v3-flatcontainer") && segments.get(2).equals("index.json")) {
+		if (segments.size() == 3 && "v3-flatcontainer".equals(segments.getFirst()) && "index.json".equals(segments.get(2))) {
 			this.versionList(ctx, repository, segments.get(1).toLowerCase(Locale.ROOT));
-		} else if (segments.size() == 4 && segments.getFirst().equals("v3-flatcontainer")) {
+		} else if (segments.size() == 4 && "v3-flatcontainer".equals(segments.getFirst())) {
 			this.flatFile(ctx, repository, segments.get(1).toLowerCase(Locale.ROOT), segments.get(2).toLowerCase(Locale.ROOT), segments.get(3).toLowerCase(Locale.ROOT));
 		} else if (segments.size() == 4 && segments.subList(0, 2).equals(List.of("v3", "registration"))) {
 			String id = segments.get(2).toLowerCase(Locale.ROOT);
 			String file = segments.get(3).toLowerCase(Locale.ROOT);
-			if (file.equals("index.json")) {
+			if ("index.json".equals(file)) {
 				this.registrationIndex(ctx, repository, id);
 			} else if (file.endsWith(".json")) {
 				this.registrationLeaf(ctx, repository, id, file.substring(0, file.length() - 5));
@@ -267,7 +274,8 @@ public class NugetHandler extends FormatHandler {
 		json(ctx, 200, root);
 	}
 	
-	private @NonNull List<PackageVersionEntity> sortedVersions(@NonNull RepositoryEntity repository, @NonNull String lowerId) throws Exception {
+	@NonNull
+	private List<PackageVersionEntity> sortedVersions(@NonNull RepositoryEntity repository, @NonNull String lowerId) throws Exception {
 		List<PackageVersionEntity> versions = new ArrayList<>(this.services.packages().versions(repository.name(), lowerId));
 		versions.sort(Comparator.comparing(PackageVersionEntity::version, Versions.SEMVER));
 		return versions;
@@ -337,7 +345,8 @@ public class NugetHandler extends FormatHandler {
 		json(ctx, 200, leaf);
 	}
 	
-	private @NonNull ObjectNode registrationLeafNode(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
+	@NonNull
+	private ObjectNode registrationLeafNode(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
 		ObjectNode metadata = Json.parseObject(version.metadata());
 		String leafUrl = base + "/v3/registration/" + lowerId + "/" + version.version() + ".json";
 		String content = base + "/v3-flatcontainer/" + lowerId + "/" + version.version() + "/" + lowerId + "." + version.version() + ".nupkg";

@@ -170,7 +170,7 @@ public class CargoHandler extends FormatHandler {
 			}
 			this.authorize(ctx, repository, AccessLevel.READ);
 			this.config(ctx, repository);
-		} else if (!segments.isEmpty() && segments.getFirst().equals("index") && segments.size() >= 3) {
+		} else if (!segments.isEmpty() && "index".equals(segments.getFirst()) && segments.size() >= 3) {
 			if (!read) {
 				throw HttpError.methodNotAllowed();
 			}
@@ -194,13 +194,13 @@ public class CargoHandler extends FormatHandler {
 			this.search(ctx, repository);
 		} else if (rest.equals(List.of("new")) && "PUT".equals(method)) {
 			this.publish(ctx, repository);
-		} else if (rest.size() == 3 && rest.get(2).equals("download") && ("GET".equals(method) || "HEAD".equals(method))) {
+		} else if (rest.size() == 3 && "download".equals(rest.get(2)) && ("GET".equals(method) || "HEAD".equals(method))) {
 			this.download(ctx, repository, rest.get(0).toLowerCase(Locale.ROOT), rest.get(1));
-		} else if (rest.size() == 3 && rest.get(2).equals("yank") && "DELETE".equals(method)) {
+		} else if (rest.size() == 3 && "yank".equals(rest.get(2)) && "DELETE".equals(method)) {
 			this.yank(ctx, repository, rest.get(0).toLowerCase(Locale.ROOT), rest.get(1), true);
-		} else if (rest.size() == 3 && rest.get(2).equals("unyank") && "PUT".equals(method)) {
+		} else if (rest.size() == 3 && "unyank".equals(rest.get(2)) && "PUT".equals(method)) {
 			this.yank(ctx, repository, rest.get(0).toLowerCase(Locale.ROOT), rest.get(1), false);
-		} else if (rest.size() == 2 && rest.get(1).equals("owners")) {
+		} else if (rest.size() == 2 && "owners".equals(rest.get(1))) {
 			this.owners(ctx, repository, rest.getFirst().toLowerCase(Locale.ROOT), method);
 		} else {
 			throw cargoError(404, "Not found");

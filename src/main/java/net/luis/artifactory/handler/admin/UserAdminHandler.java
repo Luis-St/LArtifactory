@@ -4,9 +4,7 @@ import io.javalin.http.Context;
 import io.javalin.openapi.*;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.*;
-import net.luis.artifactory.database.entity.TokenEntity;
-import net.luis.artifactory.database.entity.TokenMetaEntity;
-import net.luis.artifactory.database.entity.UserEntity;
+import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.dto.request.*;
 import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
@@ -328,7 +326,7 @@ public class UserAdminHandler {
 		}
 		Instant expiresAt = request.expiresInDays() == null || request.expiresInDays() <= 0 ? null : Instant.now().plus(request.expiresInDays(), ChronoUnit.DAYS);
 		String name = request.name() == null || request.name().isBlank() ? "token" : request.name().strip();
-
+		
 		String allowedIps = request.allowedIps() == null || request.allowedIps().isBlank() ? null : request.allowedIps().strip();
 		if (allowedIps != null) {
 			if (allowedIps.length() > 2048) {
@@ -339,7 +337,7 @@ public class UserAdminHandler {
 			}
 		}
 		long rateLimit = request.rateLimitPerMinute() == null || request.rateLimitPerMinute() <= 0 ? 0 : request.rateLimitPerMinute();
-
+		
 		UserService.CreatedToken token = this.services.users().createToken(username, name.length() > 128 ? name.substring(0, 128) : name, level, expiresAt, allowedIps, rateLimit);
 		TokenMetaEntity meta = new TokenMetaEntity(token.token().id(), allowedIps, rateLimit, null, null);
 		this.services.audit().record(principal.username(), AuditService.TOKEN_CREATE, null, token.token().id(), Requests.clientIp(ctx, this.services.config()), "user=" + username + ", level=" + level.name());

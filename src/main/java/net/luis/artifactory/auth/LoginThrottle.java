@@ -36,11 +36,13 @@ public class LoginThrottle {
 		this.clock = Objects.requireNonNull(clock, "Clock must not be null");
 	}
 	
-	private static @NonNull String userKey(@NonNull String address, @NonNull String username) {
+	@NonNull
+	private static String userKey(@NonNull String address, @NonNull String username) {
 		return "user:" + address + "|" + username.toLowerCase(Locale.ROOT);
 	}
 	
-	private static @NonNull String addressKey(@NonNull String address) {
+	@NonNull
+	private static String addressKey(@NonNull String address) {
 		return "address:" + address;
 	}
 	

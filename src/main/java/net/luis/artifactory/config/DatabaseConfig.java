@@ -21,7 +21,8 @@ public record DatabaseConfig(
 		}
 	}
 	
-	public static @NonNull DatabaseConfig from(@NonNull Env env) {
+	@NonNull
+	public static DatabaseConfig from(@NonNull Env env) {
 		return new DatabaseConfig(
 			env.requireString(EnvKeys.DB_URL),
 			env.requireString(EnvKeys.DB_USER),
@@ -30,7 +31,8 @@ public record DatabaseConfig(
 		);
 	}
 	
-	public @NonNull String safeUrl() {
+	@NonNull
+	public String safeUrl() {
 		int at = this.url.indexOf('@');
 		return at < 0 ? this.url : "jdbc:postgresql://***" + this.url.substring(at);
 	}

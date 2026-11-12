@@ -13,7 +13,8 @@ public final class Requests {
 	
 	private Requests() {}
 	
-	public static @NonNull String baseUrl(@NonNull Context ctx, @NonNull ServerConfig config) {
+	@NonNull
+	public static String baseUrl(@NonNull Context ctx, @NonNull ServerConfig config) {
 		if (config.baseUrl() != null) {
 			return config.baseUrl();
 		}
@@ -36,14 +37,16 @@ public final class Requests {
 	 * Returns the address of the client, the last {@code X-Forwarded-For} entry is only honored behind a trusted proxy.<br>
 	 * The proxy appends the address it received the request from, all entries before it are sent by the client and can be forged.<br>
 	 */
-	public static @NonNull String clientIp(@NonNull Context ctx, @NonNull ServerConfig config) {
+	@NonNull
+	public static String clientIp(@NonNull Context ctx, @NonNull ServerConfig config) {
 		// A client sent header may arrive as its own header line before the one of the proxy
 		List<String> values = config.trustProxy() ? Collections.list(ctx.req().getHeaders("X-Forwarded-For")) : List.of();
 		String forwarded = values.isEmpty() ? null : lastHeaderValue(values.getLast());
 		return forwarded == null ? ctx.req().getRemoteAddr() : forwarded;
 	}
 	
-	private static @Nullable String firstHeaderValue(@Nullable String value) {
+	@Nullable
+	private static String firstHeaderValue(@Nullable String value) {
 		if (value == null || value.isBlank()) {
 			return null;
 		}
@@ -51,7 +54,8 @@ public final class Requests {
 		return (comma < 0 ? value : value.substring(0, comma)).strip();
 	}
 	
-	private static @Nullable String lastHeaderValue(@Nullable String value) {
+	@Nullable
+	private static String lastHeaderValue(@Nullable String value) {
 		if (value == null || value.isBlank()) {
 			return null;
 		}
@@ -62,7 +66,8 @@ public final class Requests {
 	/**
 	 * Returns the raw (still percent-encoded) path of the request without the context path.
 	 */
-	public static @NonNull String rawPath(@NonNull Context ctx) {
+	@NonNull
+	public static String rawPath(@NonNull Context ctx) {
 		String uri = ctx.req().getRequestURI();
 		String contextPath = ctx.contextPath();
 		if (!contextPath.isEmpty() && !"/".equals(contextPath) && uri.startsWith(contextPath)) {
@@ -71,11 +76,13 @@ public final class Requests {
 		return uri;
 	}
 	
-	public static @NonNull String decode(@NonNull String value) {
+	@NonNull
+	public static String decode(@NonNull String value) {
 		return URLDecoder.decode(value.replace("+", "%2B"), StandardCharsets.UTF_8);
 	}
 	
-	public static @NonNull List<String> decodedSegments(@NonNull String rawPath) {
+	@NonNull
+	public static List<String> decodedSegments(@NonNull String rawPath) {
 		List<String> segments = new ArrayList<>();
 		for (String segment : rawPath.split("/")) {
 			if (!segment.isEmpty()) {
@@ -89,7 +96,8 @@ public final class Requests {
 		return "HEAD".equalsIgnoreCase(ctx.req().getMethod());
 	}
 	
-	public static @NonNull String method(@NonNull Context ctx) {
+	@NonNull
+	public static String method(@NonNull Context ctx) {
 		return ctx.req().getMethod().toUpperCase(Locale.ROOT);
 	}
 	
@@ -105,7 +113,8 @@ public final class Requests {
 		ctx.status(status).header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'").html(html);
 	}
 	
-	public static @NonNull String escapeHtml(@NonNull String value) {
+	@NonNull
+	public static String escapeHtml(@NonNull String value) {
 		StringBuilder builder = new StringBuilder(value.length());
 		for (char c : value.toCharArray()) {
 			switch (c) {
@@ -120,14 +129,16 @@ public final class Requests {
 		return builder.toString();
 	}
 	
-	public static @NonNull String escapeXml(@NonNull String value) {
+	@NonNull
+	public static String escapeXml(@NonNull String value) {
 		return escapeHtml(value);
 	}
 	
 	/**
 	 * Redacts token secrets ({@code lat_...}) that appear in a request path (e.g. the npm logout url) so they are not written to logs.
 	 */
-	public static @NonNull String sanitizePath(@NonNull String path) {
+	@NonNull
+	public static String sanitizePath(@NonNull String path) {
 		if (!path.contains("lat_")) {
 			return path;
 		}

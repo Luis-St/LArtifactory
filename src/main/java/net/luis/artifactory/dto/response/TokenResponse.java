@@ -23,12 +23,14 @@ public record TokenResponse(
 	@Nullable String lastUsedIp,
 	@Nullable String token
 ) {
-
-	public static @NonNull TokenResponse of(@NonNull TokenEntity entity, @Nullable String secret) {
+	
+	@NonNull
+	public static TokenResponse of(@NonNull TokenEntity entity, @Nullable String secret) {
 		return of(entity, null, secret);
 	}
-
-	public static @NonNull TokenResponse of(@NonNull TokenEntity entity, @Nullable TokenMetaEntity meta, @Nullable String secret) {
+	
+	@NonNull
+	public static TokenResponse of(@NonNull TokenEntity entity, @Nullable TokenMetaEntity meta, @Nullable String secret) {
 		return new TokenResponse(
 			entity.id(),
 			entity.username(),

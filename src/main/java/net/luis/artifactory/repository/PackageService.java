@@ -27,11 +27,13 @@ public class PackageService {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 	}
 	
-	private static @Nullable PackageVersionEntity get(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
+	@Nullable
+	private static PackageVersionEntity get(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		return sql.from(PACKAGE_VERSIONS).select().where(versionCondition(repository, packageName, version)).fetchOneOrNull();
 	}
 	
-	private static @NonNull List<PackageVersionEntity> versions(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	private static List<PackageVersionEntity> versions(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName) throws SqlException {
 		return sql.from(PACKAGE_VERSIONS).select()
 			.where(SqlCondition.allOf(Sql.equalTo(VERSION_REPOSITORY, repository), Sql.equalTo(VERSION_PACKAGE, packageName)))
 			.orderBy(VERSION_CREATED_AT.ascending())
@@ -42,18 +44,21 @@ public class PackageService {
 		sql.from(PACKAGE_VERSIONS).update().set(VERSION_METADATA, metadata).where(versionCondition(repository, packageName, version)).execute();
 	}
 	
-	private static @NonNull SqlCondition versionCondition(@NonNull String repository, @NonNull String packageName, @NonNull String version) {
+	@NonNull
+	private static SqlCondition versionCondition(@NonNull String repository, @NonNull String packageName, @NonNull String version) {
 		return SqlCondition.allOf(Sql.equalTo(VERSION_REPOSITORY, repository), Sql.equalTo(VERSION_PACKAGE, packageName), Sql.equalTo(VERSION_VERSION, version));
 	}
 	
-	private static @NonNull SqlCondition nameCondition(@NonNull String repository, @NonNull String query) {
+	@NonNull
+	private static SqlCondition nameCondition(@NonNull String repository, @NonNull String query) {
 		if (query.isEmpty()) {
 			return Sql.equalTo(VERSION_REPOSITORY, repository);
 		}
 		return SqlCondition.allOf(Sql.equalTo(VERSION_REPOSITORY, repository), Conditions.containsIgnoreCase(VERSION_PACKAGE, query));
 	}
 	
-	private static @NonNull Map<String, String> tags(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	private static Map<String, String> tags(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName) throws SqlException {
 		Map<String, String> tags = new LinkedHashMap<>();
 		List<DistTagEntity> entities = sql.from(DIST_TAGS).select()
 			.where(SqlCondition.allOf(Sql.equalTo(TAG_REPOSITORY, repository), Sql.equalTo(TAG_PACKAGE, packageName)))
@@ -82,23 +87,28 @@ public class PackageService {
 		return sql.from(DIST_TAGS).delete().where(tagCondition(repository, packageName, tag)).execute() > 0;
 	}
 	
-	private static @NonNull SqlCondition tagCondition(@NonNull String repository, @NonNull String packageName, @NonNull String tag) {
+	@NonNull
+	private static SqlCondition tagCondition(@NonNull String repository, @NonNull String packageName, @NonNull String tag) {
 		return SqlCondition.allOf(Sql.equalTo(TAG_REPOSITORY, repository), Sql.equalTo(TAG_PACKAGE, packageName), Sql.equalTo(TAG_NAME, tag));
 	}
 	
-	public @Nullable PackageVersionEntity get(@NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
+	@Nullable
+	public PackageVersionEntity get(@NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		return get(this.database, repository, packageName, version);
 	}
 	
-	public @Nullable PackageVersionEntity get(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
+	@Nullable
+	public PackageVersionEntity get(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		return get(work.sql(), repository, packageName, version);
 	}
 	
-	public @NonNull List<PackageVersionEntity> versions(@NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	public List<PackageVersionEntity> versions(@NonNull String repository, @NonNull String packageName) throws SqlException {
 		return versions(this.database, repository, packageName);
 	}
 	
-	public @NonNull List<PackageVersionEntity> versions(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	public List<PackageVersionEntity> versions(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName) throws SqlException {
 		return versions(work.sql(), repository, packageName);
 	}
 	
@@ -106,7 +116,8 @@ public class PackageService {
 	 * Returns the versions of several packages with one query, keyed by package name and each ordered by creation time.<br>
 	 * Packages without versions are missing from the result.<br>
 	 */
-	public @NonNull Map<String, List<PackageVersionEntity>> versions(@NonNull String repository, @NonNull Collection<String> packageNames) throws SqlException {
+	@NonNull
+	public Map<String, List<PackageVersionEntity>> versions(@NonNull String repository, @NonNull Collection<String> packageNames) throws SqlException {
 		Map<String, List<PackageVersionEntity>> result = new HashMap<>();
 		if (packageNames.isEmpty()) {
 			return result;
@@ -125,7 +136,8 @@ public class PackageService {
 	 * Returns the dist tags of several packages with one query, keyed by package name.<br>
 	 * Packages without tags are missing from the result.<br>
 	 */
-	public @NonNull Map<String, Map<String, String>> tags(@NonNull String repository, @NonNull Collection<String> packageNames) throws SqlException {
+	@NonNull
+	public Map<String, Map<String, String>> tags(@NonNull String repository, @NonNull Collection<String> packageNames) throws SqlException {
 		Map<String, Map<String, String>> result = new HashMap<>();
 		if (packageNames.isEmpty()) {
 			return result;
@@ -140,14 +152,16 @@ public class PackageService {
 		return result;
 	}
 	
-	public @NonNull List<String> packageNames(@NonNull String repository) throws SqlException {
+	@NonNull
+	public List<String> packageNames(@NonNull String repository) throws SqlException {
 		return this.packageNames(repository, "", 0, Long.MAX_VALUE);
 	}
 	
 	/**
 	 * Returns one page of the package names containing the query (case-insensitive), sorted by name.<br>
 	 */
-	public @NonNull List<String> packageNames(@NonNull String repository, @NonNull String query, long offset, long limit) throws SqlException {
+	@NonNull
+	public List<String> packageNames(@NonNull String repository, @NonNull String query, long offset, long limit) throws SqlException {
 		var select = this.database.from(PACKAGE_VERSIONS).select(VERSION_PACKAGE).where(nameCondition(repository, query)).distinct().orderBy(VERSION_PACKAGE.ascending());
 		if (offset > 0) {
 			select = select.offset(offset);
@@ -162,7 +176,8 @@ public class PackageService {
 		return this.database.from(PACKAGE_VERSIONS).select(Sql.count(VERSION_PACKAGE, true)).where(nameCondition(repository, query)).fetchOne();
 	}
 	
-	public @NonNull PackageVersionEntity create(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName, @NonNull String version, @NonNull String metadata, @Nullable String createdBy) throws SqlException {
+	@NonNull
+	public PackageVersionEntity create(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName, @NonNull String version, @NonNull String metadata, @Nullable String createdBy) throws SqlException {
 		PackageVersionEntity entity = new PackageVersionEntity(repository, packageName, version, metadata, false, Instant.now(), createdBy);
 		work.sql().from(PACKAGE_VERSIONS).insert(entity).execute();
 		return entity;
@@ -214,11 +229,13 @@ public class PackageService {
 		return work.sql().from(PACKAGE_VERSIONS).delete().where(versionCondition(repository, packageName, version)).execute() > 0;
 	}
 	
-	public @NonNull Map<String, String> tags(@NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	public Map<String, String> tags(@NonNull String repository, @NonNull String packageName) throws SqlException {
 		return tags(this.database, repository, packageName);
 	}
 	
-	public @NonNull Map<String, String> tags(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	public Map<String, String> tags(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName) throws SqlException {
 		return tags(work.sql(), repository, packageName);
 	}
 	

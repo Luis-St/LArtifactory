@@ -6,12 +6,8 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.net.ProxySelector;
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.*;
+import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
@@ -20,13 +16,13 @@ import java.util.Base64;
  * Fetches artifacts from the upstream of a remote (proxy) repository.<br>
  */
 public class ProxyService {
-
+	
 	private static final Logger LOGGER = LoggerFactory.getLogger(ProxyService.class);
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
-
+	
 	private final HttpClient httpClient;
 	private final long maxBytes;
-
+	
 	public ProxyService(long maxBytes) {
 		this.maxBytes = maxBytes;
 		this.httpClient = HttpClient.newBuilder()
@@ -35,11 +31,27 @@ public class ProxyService {
 			.followRedirects(HttpClient.Redirect.NORMAL)
 			.build();
 	}
-
+	
+	@NonNull
+	private static String encodePath(@NonNull String path) {
+		StringBuilder encoded = new StringBuilder();
+		for (String segment : path.split("/")) {
+			if (segment.isEmpty()) {
+				continue;
+			}
+			if (encoded.length() > 0) {
+				encoded.append('/');
+			}
+			encoded.append(URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20"));
+		}
+		return encoded.toString();
+	}
+	
 	/**
 	 * Fetches a path from the upstream, returns null if it is not found upstream or the request fails.<br>
 	 */
-	public @Nullable Result fetch(@NonNull RemoteConfigEntity remote, @NonNull String path) {
+	@Nullable
+	public Result fetch(@NonNull RemoteConfigEntity remote, @NonNull String path) {
 		URI uri;
 		try {
 			uri = URI.create(remote.url() + "/" + encodePath(path));
@@ -73,20 +85,6 @@ public class ProxyService {
 			return null;
 		}
 	}
-
-	private static @NonNull String encodePath(@NonNull String path) {
-		StringBuilder encoded = new StringBuilder();
-		for (String segment : path.split("/")) {
-			if (segment.isEmpty()) {
-				continue;
-			}
-			if (encoded.length() > 0) {
-				encoded.append('/');
-			}
-			encoded.append(URLEncoder.encode(segment, StandardCharsets.UTF_8).replace("+", "%20"));
-		}
-		return encoded.toString();
-	}
-
+	
 	public record Result(byte @NonNull [] body, @Nullable String contentType) {}
 }

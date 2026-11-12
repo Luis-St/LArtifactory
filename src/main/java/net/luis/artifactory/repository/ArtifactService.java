@@ -37,18 +37,20 @@ public class ArtifactService {
 	private final SqlDatabase database;
 	private final BlobStore blobStore;
 	private final WebhookService webhooks;
-
+	
 	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore, @NonNull WebhookService webhooks) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 		this.blobStore = Objects.requireNonNull(blobStore, "Blob store must not be null");
 		this.webhooks = Objects.requireNonNull(webhooks, "Webhook service must not be null");
 	}
 	
-	private static @Nullable FileEntity get(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String path) throws SqlException {
+	@Nullable
+	private static FileEntity get(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String path) throws SqlException {
 		return sql.from(FILES).select().where(fileCondition(repository, path)).fetchOneOrNull();
 	}
 	
-	private static @NonNull List<FileEntity> list(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String prefix, long offset, long limit) throws SqlException {
+	@NonNull
+	private static List<FileEntity> list(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String prefix, long offset, long limit) throws SqlException {
 		var query = sql.from(FILES).select().where(prefixCondition(repository, prefix)).orderBy(FILE_PATH.ascending());
 		if (offset > 0) {
 			query = query.offset(offset);
@@ -59,22 +61,26 @@ public class ArtifactService {
 		return query.fetch().stream().filter(file -> file.path().startsWith(prefix)).toList();
 	}
 	
-	private static @NonNull List<FileEntity> listByVersion(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
+	@NonNull
+	private static List<FileEntity> listByVersion(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		return sql.from(FILES).select().where(versionCondition(repository, packageName, version)).fetch();
 	}
 	
-	private static @NonNull SqlCondition fileCondition(@NonNull String repository, @NonNull String path) {
+	@NonNull
+	private static SqlCondition fileCondition(@NonNull String repository, @NonNull String path) {
 		return SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PATH, path));
 	}
 	
-	private static @NonNull SqlCondition prefixCondition(@NonNull String repository, @NonNull String prefix) {
+	@NonNull
+	private static SqlCondition prefixCondition(@NonNull String repository, @NonNull String prefix) {
 		if (prefix.isEmpty()) {
 			return Sql.equalTo(FILE_REPOSITORY, repository);
 		}
 		return SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Conditions.startsWith(FILE_PATH, prefix));
 	}
 	
-	private static @NonNull SqlCondition versionCondition(@NonNull String repository, @NonNull String packageName, @NonNull String version) {
+	@NonNull
+	private static SqlCondition versionCondition(@NonNull String repository, @NonNull String packageName, @NonNull String version) {
 		return SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PACKAGE, packageName), Sql.equalTo(FILE_VERSION, version));
 	}
 	
@@ -112,7 +118,8 @@ public class ArtifactService {
 	/**
 	 * Builds the {@code filename} part of a {@code Content-Disposition} header, escaping it against header injection.<br>
 	 */
-	private static @NonNull String contentDispositionFilename(@NonNull String path) {
+	@NonNull
+	private static String contentDispositionFilename(@NonNull String path) {
 		String name = path.substring(path.lastIndexOf('/') + 1);
 		StringBuilder ascii = new StringBuilder();
 		for (int i = 0; i < name.length(); i++) {
@@ -126,7 +133,8 @@ public class ArtifactService {
 		return "; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
 	}
 	
-	public @NonNull BlobStore blobStore() {
+	@NonNull
+	public BlobStore blobStore() {
 		return this.blobStore;
 	}
 	
@@ -149,22 +157,26 @@ public class ArtifactService {
 		return result;
 	}
 	
-	public @Nullable FileEntity get(@NonNull String repository, @NonNull String path) throws SqlException {
+	@Nullable
+	public FileEntity get(@NonNull String repository, @NonNull String path) throws SqlException {
 		return get(this.database, repository, path);
 	}
 	
-	public @Nullable FileEntity get(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path) throws SqlException {
+	@Nullable
+	public FileEntity get(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path) throws SqlException {
 		return get(work.sql(), repository, path);
 	}
 	
-	public @NonNull List<FileEntity> list(@NonNull String repository, @NonNull String prefix) throws SqlException {
+	@NonNull
+	public List<FileEntity> list(@NonNull String repository, @NonNull String prefix) throws SqlException {
 		return list(this.database, repository, prefix, 0, Long.MAX_VALUE);
 	}
 	
 	/**
 	 * Lists one page of the files below the prefix, ordered by path.<br>
 	 */
-	public @NonNull List<FileEntity> list(@NonNull String repository, @NonNull String prefix, long offset, long limit) throws SqlException {
+	@NonNull
+	public List<FileEntity> list(@NonNull String repository, @NonNull String prefix, long offset, long limit) throws SqlException {
 		return list(this.database, repository, prefix, offset, limit);
 	}
 	
@@ -177,7 +189,8 @@ public class ArtifactService {
 	 *
 	 * @param prefix The path of the directory with a trailing slash, empty for the root
 	 */
-	public @NonNull DirectoryListing listDirectory(@NonNull String repository, @NonNull String prefix) throws SqlException {
+	@NonNull
+	public DirectoryListing listDirectory(@NonNull String repository, @NonNull String prefix) throws SqlException {
 		// The part of the path below the directory and the position of its first slash (0 for files directly in the directory)
 		SqlExpression<String> rest = Sql.substring(FILE_PATH, prefix.codePointCount(0, prefix.length()) + 1, MAX_PATH_LENGTH);
 		SqlExpression<Integer> slash = Sql.position(rest, Sql.of("/", SqlTypes.TEXT), SqlTypes.INTEGER);
@@ -193,48 +206,57 @@ public class ArtifactService {
 		return new DirectoryListing(new TreeSet<>(directories), files.stream().filter(file -> file.path().startsWith(prefix)).toList());
 	}
 	
-	public @NonNull List<FileEntity> listByPackage(@NonNull String repository, @NonNull String packageName) throws SqlException {
+	@NonNull
+	public List<FileEntity> listByPackage(@NonNull String repository, @NonNull String packageName) throws SqlException {
 		return this.database.from(FILES).select()
 			.where(SqlCondition.allOf(Sql.equalTo(FILE_REPOSITORY, repository), Sql.equalTo(FILE_PACKAGE, packageName)))
 			.orderBy(FILE_CREATED_AT.ascending())
 			.fetch();
 	}
 	
-	public @NonNull List<FileEntity> listByVersion(@NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
+	@NonNull
+	public List<FileEntity> listByVersion(@NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		return listByVersion(this.database, repository, packageName, version);
 	}
 	
-	public @NonNull List<FileEntity> listByVersion(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
+	@NonNull
+	public List<FileEntity> listByVersion(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String packageName, @NonNull String version) throws SqlException {
 		return listByVersion(work.sql(), repository, packageName, version);
 	}
 	
-	public @NonNull StoredBlob upload(@NonNull InputStream input) throws IOException {
+	@NonNull
+	public StoredBlob upload(@NonNull InputStream input) throws IOException {
 		return this.blobStore.store(input);
 	}
 	
-	public @NonNull StoredBlob upload(byte @NonNull [] data) throws IOException {
+	@NonNull
+	public StoredBlob upload(byte @NonNull [] data) throws IOException {
 		return this.blobStore.store(data);
 	}
 	
 	/**
 	 * Records a file in the repository, replacing an existing file at the same path.<br>
 	 */
-	public @NonNull FileEntity put(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
+	@NonNull
+	public FileEntity put(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
 		return this.transaction(work -> this.put(work, repository, path, blob, contentType, packageName, version, metadata, createdBy));
 	}
 	
-	public @NonNull FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
+	@NonNull
+	public FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
 		return this.put(work, repository, path, blob, contentType, packageName, version, metadata, createdBy, true);
 	}
 	
 	/**
 	 * Records a cached copy of an artifact fetched from a remote repository, without firing a publish webhook.<br>
 	 */
-	public @NonNull FileEntity putCached(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType) throws SqlException {
+	@NonNull
+	public FileEntity putCached(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType) throws SqlException {
 		return this.transaction(work -> this.put(work, repository, path, blob, contentType, null, null, null, "remote-cache", false));
 	}
 	
-	private @NonNull FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify) throws SqlException {
+	@NonNull
+	private FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify) throws SqlException {
 		FileEntity file = new FileEntity(repository, path, packageName, version, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), contentType, metadata, Instant.now(), createdBy);
 		FileEntity previous = get(work.sql(), repository, path);
 		work.sql().from(FILES).delete().where(fileCondition(repository, path)).execute();
@@ -263,7 +285,8 @@ public class ArtifactService {
 		return true;
 	}
 	
-	public @NonNull List<FileEntity> deletePrefix(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String prefix) throws SqlException {
+	@NonNull
+	public List<FileEntity> deletePrefix(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String prefix) throws SqlException {
 		List<FileEntity> files = list(work.sql(), repository, prefix, 0, Long.MAX_VALUE);
 		for (FileEntity file : files) {
 			work.sql().from(FILES).delete().where(fileCondition(repository, file.path())).execute();

@@ -44,7 +44,8 @@ public class PypiHandler extends FormatHandler {
 		super(services);
 	}
 	
-	public static @NonNull String normalize(@NonNull String name) {
+	@NonNull
+	public static String normalize(@NonNull String name) {
 		return NORMALIZE.matcher(name).replaceAll("-").toLowerCase(Locale.ROOT);
 	}
 	
@@ -91,11 +92,13 @@ public class PypiHandler extends FormatHandler {
 		return Requests.accepts(ctx, JSON_TYPE);
 	}
 	
-	private static @NonNull String fileName(@NonNull FileEntity file) {
+	@NonNull
+	private static String fileName(@NonNull FileEntity file) {
 		return file.path().substring(file.path().lastIndexOf('/') + 1);
 	}
 	
-	private static @NonNull String required(@NonNull Context ctx, @NonNull String field) {
+	@NonNull
+	private static String required(@NonNull Context ctx, @NonNull String field) {
 		String value = ctx.formParam(field);
 		if (value == null || value.isBlank()) {
 			throw HttpError.badRequest("Missing field: " + field);
@@ -111,7 +114,8 @@ public class PypiHandler extends FormatHandler {
 	}
 	
 	@Override
-	public @NonNull RepositoryType type() {
+	@NonNull
+	public RepositoryType type() {
 		return RepositoryType.PYPI;
 	}
 	
@@ -132,13 +136,13 @@ public class PypiHandler extends FormatHandler {
 		
 		if (segments.isEmpty()) {
 			ctx.redirect(this.repositoryUrl(ctx, repository) + "/simple/");
-		} else if (segments.getFirst().equals("simple") && segments.size() == 1) {
+		} else if ("simple".equals(segments.getFirst()) && segments.size() == 1) {
 			if (!trailingSlash) {
 				ctx.redirect(this.repositoryUrl(ctx, repository) + "/simple/");
 				return;
 			}
 			this.projectList(ctx, repository);
-		} else if (segments.getFirst().equals("simple") && segments.size() == 2) {
+		} else if ("simple".equals(segments.getFirst()) && segments.size() == 2) {
 			String name = segments.get(1);
 			String normalized = normalize(name);
 			if (!trailingSlash || !normalized.equals(name)) {
@@ -146,13 +150,13 @@ public class PypiHandler extends FormatHandler {
 				return;
 			}
 			this.projectPage(ctx, repository, normalized);
-		} else if (segments.getFirst().equals("packages") && segments.size() == 2) {
+		} else if ("packages".equals(segments.getFirst()) && segments.size() == 2) {
 			FileEntity file = this.services.artifacts().get(repository.name(), "packages/" + segments.get(1));
 			if (file == null) {
 				throw HttpError.notFound();
 			}
 			this.services.artifacts().serve(ctx, file, "application/octet-stream");
-		} else if (segments.getFirst().equals("pypi") && segments.size() == 3 && segments.get(2).equals("json")) {
+		} else if ("pypi".equals(segments.getFirst()) && segments.size() == 3 && "json".equals(segments.get(2))) {
 			this.projectJson(ctx, repository, normalize(segments.get(1)));
 		} else {
 			throw HttpError.notFound();

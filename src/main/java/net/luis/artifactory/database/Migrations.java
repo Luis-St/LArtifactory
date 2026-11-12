@@ -111,15 +111,18 @@ public final class Migrations {
 	
 	private Migrations() {}
 	
-	private static @NonNull SqlMigration migration(@NonNull Version version, @NonNull String description, @NonNull Step up, @NonNull Step down) {
+	@NonNull
+	private static SqlMigration migration(@NonNull Version version, @NonNull String description, @NonNull Step up, @NonNull Step down) {
 		return new SqlMigration() {
 			@Override
-			public @NonNull Version version() {
+			@NonNull
+			public Version version() {
 				return version;
 			}
 			
 			@Override
-			public @NonNull String description() {
+			@NonNull
+			public String description() {
 				return description;
 			}
 			

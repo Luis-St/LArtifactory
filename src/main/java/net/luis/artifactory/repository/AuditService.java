@@ -20,11 +20,11 @@ import static net.luis.artifactory.database.Tables.*;
  * changes). Recording never fails the triggering request: a failed audit insert is logged and swallowed.<br>
  */
 public class AuditService {
-
+	
 	private static final Logger LOGGER = LoggerFactory.getLogger(AuditService.class);
 	public static final int DEFAULT_LIMIT = 100;
 	public static final int MAX_LIMIT = 500;
-
+	
 	//region Action identifiers
 	public static final String REPOSITORY_CREATE = "repository.create";
 	public static final String REPOSITORY_UPDATE = "repository.update";
@@ -38,13 +38,21 @@ public class AuditService {
 	public static final String TOKEN_CREATE = "token.create";
 	public static final String TOKEN_DELETE = "token.delete";
 	//endregion
-
+	
 	private final SqlDatabase database;
-
+	
 	public AuditService(@NonNull SqlDatabase database) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 	}
-
+	
+	@Nullable
+	private static String truncate(@Nullable String value, int max) {
+		if (value == null) {
+			return null;
+		}
+		return value.length() > max ? value.substring(0, max) : value;
+	}
+	
 	/**
 	 * Records an audit entry. Any failure is logged and swallowed so auditing never breaks the audited action.<br>
 	 */
@@ -56,11 +64,12 @@ public class AuditService {
 			LOGGER.warn("Failed to record audit event {} (actor={}, repository={}, target={})", action, actor, repository, target, e);
 		}
 	}
-
+	
 	/**
 	 * Lists audit entries newest first, optionally filtered by repository, actor or action, with offset based paging.<br>
 	 */
-	public @NonNull List<AuditEntity> list(@Nullable String repository, @Nullable String actor, @Nullable String action, int limit, int offset) throws SqlException {
+	@NonNull
+	public List<AuditEntity> list(@Nullable String repository, @Nullable String actor, @Nullable String action, int limit, int offset) throws SqlException {
 		List<SqlCondition> conditions = new ArrayList<>();
 		if (repository != null && !repository.isBlank()) {
 			conditions.add(Sql.equalTo(AUDIT_REPOSITORY, repository));
@@ -81,19 +90,12 @@ public class AuditService {
 		int boundedLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
 		return ordered.stream().skip(Math.max(0, offset)).limit(boundedLimit).toList();
 	}
-
+	
 	/**
 	 * Deletes all audit entries of a repository (used when the repository itself is deleted is intentionally avoided so
 	 * the deletion record survives; this is exposed for completeness and is currently unused).<br>
 	 */
 	public int deleteForRepository(@NonNull String repository) throws SqlException {
 		return this.database.from(AUDIT_LOG).delete().where(Sql.equalTo(AUDIT_REPOSITORY, repository)).execute();
-	}
-
-	private static @Nullable String truncate(@Nullable String value, int max) {
-		if (value == null) {
-			return null;
-		}
-		return value.length() > max ? value.substring(0, max) : value;
 	}
 }

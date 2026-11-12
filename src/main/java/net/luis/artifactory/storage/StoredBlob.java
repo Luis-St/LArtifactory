@@ -19,7 +19,8 @@ public record StoredBlob(
 		Objects.requireNonNull(sha512, "Sha512 must not be null");
 	}
 	
-	public @NonNull String digest(@NonNull String algorithm) {
+	@NonNull
+	public String digest(@NonNull String algorithm) {
 		return switch (algorithm) {
 			case "sha256" -> this.sha256;
 			case "sha1" -> this.sha1;

@@ -15,8 +15,9 @@ public record WebhookDeliveryResponse(
 	@Nullable String error,
 	@NonNull Instant createdAt
 ) {
-
-	public static @NonNull WebhookDeliveryResponse of(@NonNull WebhookDeliveryEntity entity) {
+	
+	@NonNull
+	public static WebhookDeliveryResponse of(@NonNull WebhookDeliveryEntity entity) {
 		return new WebhookDeliveryResponse(entity.id(), entity.event(), entity.repository(), entity.success(), entity.statusCode(), entity.error(), entity.createdAt());
 	}
 }

@@ -10,7 +10,7 @@ import java.util.Objects;
 public record LivenessResponse(
 	@NonNull String status
 ) {
-
+	
 	public LivenessResponse {
 		Objects.requireNonNull(status, "Status must not be null");
 	}

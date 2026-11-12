@@ -8,18 +8,13 @@ import io.javalin.http.staticfiles.Location;
 import io.javalin.json.JavalinJackson3;
 import io.javalin.openapi.plugin.OpenApiPlugin;
 import io.javalin.openapi.plugin.swagger.SwaggerPlugin;
-import net.luis.artifactory.auth.AuthService;
-import net.luis.artifactory.auth.TokenUsageService;
-import net.luis.artifactory.auth.UserService;
+import net.luis.artifactory.auth.*;
 import net.luis.artifactory.config.*;
 import net.luis.artifactory.database.DatabaseProvider;
 import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.dto.response.ErrorResponse;
 import net.luis.artifactory.handler.HealthHandler;
-import net.luis.artifactory.handler.admin.AuditAdminHandler;
-import net.luis.artifactory.handler.admin.RepositoryAdminHandler;
-import net.luis.artifactory.handler.admin.UserAdminHandler;
-import net.luis.artifactory.handler.admin.WebhookAdminHandler;
+import net.luis.artifactory.handler.admin.*;
 import net.luis.artifactory.handler.format.RepositoryDispatcher;
 import net.luis.artifactory.http.*;
 import net.luis.artifactory.repository.*;
@@ -68,7 +63,8 @@ public class Application {
 	/**
 	 * Initializes the database and storage and starts the http server.<br>
 	 */
-	public static @NonNull Server start(@NonNull ServerConfig serverConfig, @NonNull DatabaseConfig databaseConfig) throws SqlException {
+	@NonNull
+	public static Server start(@NonNull ServerConfig serverConfig, @NonNull DatabaseConfig databaseConfig) throws SqlException {
 		DatabaseProvider databaseProvider = new DatabaseProvider(databaseConfig, SqlAuditUserProvider.empty());
 		databaseProvider.initialize();
 		SqlDatabase database = databaseProvider.getDatabase();
@@ -118,7 +114,8 @@ public class Application {
 		}
 	}
 	
-	private static @NonNull Javalin createApp(@NonNull Services services, @NonNull DatabaseProvider databaseProvider) {
+	@NonNull
+	private static Javalin createApp(@NonNull Services services, @NonNull DatabaseProvider databaseProvider) {
 		ServerConfig serverConfig = services.config();
 		var healthHandler = new HealthHandler(databaseProvider);
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);

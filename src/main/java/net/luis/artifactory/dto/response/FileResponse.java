@@ -19,7 +19,8 @@ public record FileResponse(
 	@Nullable String createdBy
 ) {
 	
-	public static @NonNull FileResponse of(@NonNull FileEntity entity) {
+	@NonNull
+	public static FileResponse of(@NonNull FileEntity entity) {
 		return new FileResponse(entity.path(), entity.packageName(), entity.version(), entity.size(), entity.sha256(), entity.sha1(), entity.md5(), entity.contentType(), entity.createdAt(), entity.createdBy());
 	}
 }

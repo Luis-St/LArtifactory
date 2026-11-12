@@ -20,7 +20,8 @@ public final class UnitOfWork {
 		this.sql = Objects.requireNonNull(sql, "Sql provider must not be null");
 	}
 	
-	public @NonNull SqlProvider sql() {
+	@NonNull
+	public SqlProvider sql() {
 		return this.sql;
 	}
 	
@@ -31,7 +32,8 @@ public final class UnitOfWork {
 		this.removedFiles.addAll(files);
 	}
 	
-	public @NonNull List<FileEntity> removedFiles() {
+	@NonNull
+	public List<FileEntity> removedFiles() {
 		return Collections.unmodifiableList(this.removedFiles);
 	}
 	
@@ -42,7 +44,8 @@ public final class UnitOfWork {
 		this.afterCommitActions.add(Objects.requireNonNull(action, "Action must not be null"));
 	}
 	
-	public @NonNull List<Runnable> afterCommitActions() {
+	@NonNull
+	public List<Runnable> afterCommitActions() {
 		return Collections.unmodifiableList(this.afterCommitActions);
 	}
 }

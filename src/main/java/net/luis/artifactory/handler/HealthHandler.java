@@ -20,13 +20,13 @@ import java.util.Objects;
  * and readiness to decide whether to route traffic to it.<br>
  */
 public class HealthHandler {
-
+	
 	private final DatabaseProvider databaseProvider;
-
+	
 	public HealthHandler(@NonNull DatabaseProvider databaseProvider) {
 		this.databaseProvider = Objects.requireNonNull(databaseProvider, "Database provider must not be null");
 	}
-
+	
 	@OpenApi(
 		summary = "Health check, responds with 503 if the database is unreachable",
 		operationId = "healthCheck",
@@ -45,7 +45,7 @@ public class HealthHandler {
 		boolean dbHealthy = this.databaseProvider.isHealthy();
 		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN"));
 	}
-
+	
 	@OpenApi(
 		summary = "Liveness probe, succeeds while the process is running",
 		operationId = "healthLive",
@@ -62,7 +62,7 @@ public class HealthHandler {
 		// Deliberately does not touch the database: a failing database must not cause the container to be restarted.
 		ctx.json(new LivenessResponse("UP"));
 	}
-
+	
 	@OpenApi(
 		summary = "Readiness probe, succeeds when the server can serve requests",
 		operationId = "healthReady",
@@ -76,7 +76,7 @@ public class HealthHandler {
 	)
 	public void ready(@NonNull Context ctx) {
 		Objects.requireNonNull(ctx, "Context must not be null");
-
+		
 		boolean dbHealthy = this.databaseProvider.isHealthy();
 		// Return 503 when not ready so load balancers and orchestrators stop routing traffic until the database recovers.
 		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN"));

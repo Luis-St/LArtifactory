@@ -14,13 +14,24 @@ import java.util.Objects;
  * Read only access to the audit log (administrators only).<br>
  */
 public class AuditAdminHandler {
-
+	
 	private final Services services;
-
+	
 	public AuditAdminHandler(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
 	}
-
+	
+	private static int parseInt(String value, int defaultValue) {
+		if (value == null || value.isBlank()) {
+			return defaultValue;
+		}
+		try {
+			return Integer.parseInt(value.strip());
+		} catch (NumberFormatException e) {
+			return defaultValue;
+		}
+	}
+	
 	@OpenApi(
 		summary = "List audit log entries (newest first), administrators only",
 		operationId = "listAudit",
@@ -46,16 +57,5 @@ public class AuditAdminHandler {
 		int offset = parseInt(ctx.queryParam("offset"), 0);
 		ctx.json(this.services.audit().list(ctx.queryParam("repository"), ctx.queryParam("actor"), ctx.queryParam("action"), limit, offset)
 			.stream().map(AuditResponse::of).toList());
-	}
-
-	private static int parseInt(String value, int defaultValue) {
-		if (value == null || value.isBlank()) {
-			return defaultValue;
-		}
-		try {
-			return Integer.parseInt(value.strip());
-		} catch (NumberFormatException e) {
-			return defaultValue;
-		}
 	}
 }

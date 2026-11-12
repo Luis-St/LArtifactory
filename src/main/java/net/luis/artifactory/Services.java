@@ -1,8 +1,6 @@
 package net.luis.artifactory;
 
-import net.luis.artifactory.auth.AuthService;
-import net.luis.artifactory.auth.TokenUsageService;
-import net.luis.artifactory.auth.UserService;
+import net.luis.artifactory.auth.*;
 import net.luis.artifactory.config.ServerConfig;
 import net.luis.artifactory.http.BodyReader;
 import net.luis.artifactory.repository.*;
@@ -23,7 +21,7 @@ public record Services(
 	@NonNull WebhookService webhooks,
 	@NonNull ProxyService proxy
 ) {
-
+	
 	public Services {
 		Objects.requireNonNull(config, "Config must not be null");
 		Objects.requireNonNull(users, "User service must not be null");

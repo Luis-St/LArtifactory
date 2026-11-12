@@ -46,7 +46,8 @@ public class NpmHandler extends FormatHandler {
 	/**
 	 * Joins {@code @scope} and {@code name} segments of unencoded scoped package names.<br>
 	 */
-	private static @NonNull List<String> joinScopes(@NonNull List<String> segments) {
+	@NonNull
+	private static List<String> joinScopes(@NonNull List<String> segments) {
 		List<String> result = new ArrayList<>();
 		for (int i = 0; i < segments.size(); i++) {
 			String segment = segments.get(i);
@@ -59,12 +60,14 @@ public class NpmHandler extends FormatHandler {
 		return result;
 	}
 	
-	private static @NonNull String tarballName(@NonNull String name, @NonNull String version) {
+	@NonNull
+	private static String tarballName(@NonNull String name, @NonNull String version) {
 		String bare = name.contains("/") ? name.substring(name.indexOf('/') + 1) : name;
 		return bare + "-" + version + ".tgz";
 	}
 	
-	private static @NonNull String revision(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
+	@NonNull
+	private static String revision(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
 		StringBuilder builder = new StringBuilder();
 		for (PackageVersionEntity version : versions) {
 			builder.append(version.version()).append(version.metadata().hashCode()).append(';');
@@ -101,7 +104,8 @@ public class NpmHandler extends FormatHandler {
 		return tarball;
 	}
 	
-	private static @NonNull JsonNode parseBody(byte @NonNull [] body) {
+	@NonNull
+	private static JsonNode parseBody(byte @NonNull [] body) {
 		try {
 			return Json.parse(body);
 		} catch (JacksonException e) {
@@ -109,13 +113,15 @@ public class NpmHandler extends FormatHandler {
 		}
 	}
 	
-	private static @NonNull ObjectNode ok() {
+	@NonNull
+	private static ObjectNode ok() {
 		ObjectNode node = Json.object();
 		node.put("ok", true);
 		return node;
 	}
 	
-	private static @NonNull HttpError npmError(int status, @NonNull String message) {
+	@NonNull
+	private static HttpError npmError(int status, @NonNull String message) {
 		ObjectNode node = Json.object();
 		node.put("error", message);
 		return HttpError.json(status, message, Json.write(node));
@@ -137,11 +143,13 @@ public class NpmHandler extends FormatHandler {
 		}
 	}
 	
-	private static @NonNull String hex(@NonNull String algorithm, byte @NonNull [] data) {
+	@NonNull
+	private static String hex(@NonNull String algorithm, byte @NonNull [] data) {
 		return HexFormat.of().formatHex(digest(algorithm, data));
 	}
 	
-	private static @NonNull JsonNode latestManifest(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
+	@NonNull
+	private static JsonNode latestManifest(@NonNull List<PackageVersionEntity> versions, @NonNull Map<String, String> tags) {
 		String latest = tags.get("latest");
 		for (PackageVersionEntity version : versions) {
 			if (version.version().equals(latest)) {
@@ -152,12 +160,14 @@ public class NpmHandler extends FormatHandler {
 	}
 	
 	@Override
-	public @NonNull RepositoryType type() {
+	@NonNull
+	public RepositoryType type() {
 		return RepositoryType.NPM;
 	}
 	
 	@Override
-	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+	@NonNull
+	protected String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		return "Bearer realm=\"" + repository.name() + "\"";
 	}
 	
@@ -173,7 +183,7 @@ public class NpmHandler extends FormatHandler {
 			json(ctx, 200, root);
 			return;
 		}
-		if (segments.getFirst().equals("-")) {
+		if ("-".equals(segments.getFirst())) {
 			this.special(ctx, repository, segments.subList(1, segments.size()), method);
 			return;
 		}
@@ -190,13 +200,13 @@ public class NpmHandler extends FormatHandler {
 				case "PUT" -> this.publishOrUpdate(ctx, repository, name, false);
 				default -> throw HttpError.methodNotAllowed();
 			}
-		} else if (rest.size() == 2 && rest.getFirst().equals("-rev")) {
+		} else if (rest.size() == 2 && "-rev".equals(rest.getFirst())) {
 			switch (method) {
 				case "PUT" -> this.publishOrUpdate(ctx, repository, name, true);
 				case "DELETE" -> this.unpublishAll(ctx, repository, name);
 				default -> throw HttpError.methodNotAllowed();
 			}
-		} else if (rest.size() == 2 && rest.getFirst().equals("-")) {
+		} else if (rest.size() == 2 && "-".equals(rest.getFirst())) {
 			if (!"GET".equals(method) && !"HEAD".equals(method)) {
 				throw HttpError.methodNotAllowed();
 			}
@@ -206,7 +216,7 @@ public class NpmHandler extends FormatHandler {
 				throw npmError(404, "Not found");
 			}
 			this.services.artifacts().serve(ctx, file, "application/octet-stream");
-		} else if (rest.size() == 4 && rest.getFirst().equals("-") && rest.get(2).equals("-rev") && "DELETE".equals(method)) {
+		} else if (rest.size() == 4 && "-".equals(rest.getFirst()) && "-rev".equals(rest.get(2)) && "DELETE".equals(method)) {
 			this.authorize(ctx, repository, AccessLevel.DELETE);
 			this.services.artifacts().delete(repository.name(), name + "/-/" + rest.get(1));
 			json(ctx, 200, ok());
@@ -229,7 +239,7 @@ public class NpmHandler extends FormatHandler {
 			}
 			case "user" -> this.user(ctx, repository, segments.subList(1, segments.size()), method);
 			case "v1" -> {
-				if (segments.size() == 2 && segments.get(1).equals("search")) {
+				if (segments.size() == 2 && "search".equals(segments.get(1))) {
 					this.search(ctx, repository);
 				} else {
 					throw npmError(404, "Not found"); // e.g. /-/v1/login, npm falls back to the legacy login
@@ -242,7 +252,7 @@ public class NpmHandler extends FormatHandler {
 	}
 	
 	private void user(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments, @NonNull String method) throws Exception {
-		if (segments.size() == 2 && segments.get(0).equals("token") && "DELETE".equals(method)) {
+		if (segments.size() == 2 && "token".equals(segments.get(0)) && "DELETE".equals(method)) {
 			this.services.users().deleteTokenBySecret(segments.get(1));
 			this.services.auth().invalidateCache();
 			json(ctx, 200, ok());
@@ -340,7 +350,7 @@ public class NpmHandler extends FormatHandler {
 	}
 	
 	private void distTags(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments, @NonNull String method) throws Exception {
-		if (segments.size() < 2 || !segments.get(1).equals("dist-tags") || segments.size() > 3) {
+		if (segments.size() < 2 || !"dist-tags".equals(segments.get(1)) || segments.size() > 3) {
 			throw npmError(404, "Not found");
 		}
 		String name = segments.getFirst();
@@ -380,7 +390,8 @@ public class NpmHandler extends FormatHandler {
 		json(ctx, 200, this.services.packages().tags(repository.name(), name));
 	}
 	
-	private @NonNull List<PackageVersionEntity> requireVersions(@NonNull RepositoryEntity repository, @NonNull String name) throws Exception {
+	@NonNull
+	private List<PackageVersionEntity> requireVersions(@NonNull RepositoryEntity repository, @NonNull String name) throws Exception {
 		List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), name);
 		if (versions.isEmpty()) {
 			throw npmError(404, "Not found");
@@ -436,7 +447,8 @@ public class NpmHandler extends FormatHandler {
 		json(ctx, 200, this.manifest(entity, this.repositoryUrl(ctx, repository) + "/" + name + "/-/"));
 	}
 	
-	private @NonNull ObjectNode manifest(@NonNull PackageVersionEntity version, @NonNull String tarballBase) {
+	@NonNull
+	private ObjectNode manifest(@NonNull PackageVersionEntity version, @NonNull String tarballBase) {
 		ObjectNode manifest = Json.parseObject(version.metadata());
 		ObjectNode dist = manifest.has("dist") && manifest.get("dist").isObject() ? (ObjectNode) manifest.get("dist") : manifest.putObject("dist");
 		dist.put("tarball", tarballBase + tarballName(version.packageName(), version.version()));

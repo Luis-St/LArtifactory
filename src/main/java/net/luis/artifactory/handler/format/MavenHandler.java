@@ -42,7 +42,8 @@ public class MavenHandler extends PathRepositoryHandler {
 		super(services);
 	}
 	
-	public static @Nullable Coordinates parseCoordinates(@NonNull String path) {
+	@Nullable
+	public static Coordinates parseCoordinates(@NonNull String path) {
 		String[] segments = path.split("/");
 		if (segments.length < 4) {
 			return null;
@@ -61,7 +62,8 @@ public class MavenHandler extends PathRepositoryHandler {
 	}
 	
 	@Override
-	public @NonNull RepositoryType type() {
+	@NonNull
+	public RepositoryType type() {
 		return RepositoryType.MAVEN;
 	}
 	
@@ -103,7 +105,8 @@ public class MavenHandler extends PathRepositoryHandler {
 		return true;
 	}
 	
-	private @Nullable String generateMetadata(@NonNull RepositoryEntity repository, @NonNull String metadataPath) throws Exception {
+	@Nullable
+	private String generateMetadata(@NonNull RepositoryEntity repository, @NonNull String metadataPath) throws Exception {
 		int slash = metadataPath.lastIndexOf('/');
 		if (slash < 0) {
 			return null;
@@ -123,7 +126,8 @@ public class MavenHandler extends PathRepositoryHandler {
 		return null;
 	}
 	
-	private @Nullable String generateVersionsMetadata(@NonNull RepositoryEntity repository, String @NonNull [] segments) throws Exception {
+	@Nullable
+	private String generateVersionsMetadata(@NonNull RepositoryEntity repository, String @NonNull [] segments) throws Exception {
 		String artifactId = segments[segments.length - 1];
 		String groupId = String.join(".", Arrays.copyOf(segments, segments.length - 1));
 		List<FileEntity> files = this.services.artifacts().listByPackage(repository.name(), groupId + ":" + artifactId);
@@ -163,7 +167,8 @@ public class MavenHandler extends PathRepositoryHandler {
 		return xml.toString();
 	}
 	
-	private @NonNull List<SnapshotFile> snapshotFiles(@NonNull RepositoryEntity repository, @NonNull String directory, @NonNull String artifactId, @NonNull String baseVersion) throws Exception {
+	@NonNull
+	private List<SnapshotFile> snapshotFiles(@NonNull RepositoryEntity repository, @NonNull String directory, @NonNull String artifactId, @NonNull String baseVersion) throws Exception {
 		List<SnapshotFile> result = new ArrayList<>();
 		String prefix = artifactId + "-" + baseVersion + "-";
 		for (FileEntity file : this.services.artifacts().list(repository.name(), directory + "/")) {
@@ -179,7 +184,8 @@ public class MavenHandler extends PathRepositoryHandler {
 		return result;
 	}
 	
-	private @Nullable String generateSnapshotMetadata(@NonNull RepositoryEntity repository, @NonNull String directory, String @NonNull [] segments) throws Exception {
+	@Nullable
+	private String generateSnapshotMetadata(@NonNull RepositoryEntity repository, @NonNull String directory, String @NonNull [] segments) throws Exception {
 		String version = segments[segments.length - 1];
 		String artifactId = segments[segments.length - 2];
 		String groupId = String.join(".", Arrays.copyOf(segments, segments.length - 2));
@@ -238,7 +244,8 @@ public class MavenHandler extends PathRepositoryHandler {
 	/**
 	 * Resolves a non-unique snapshot file name (e.g. {@code toolkit-1.1.0-SNAPSHOT.jar}) to the latest timestamped snapshot.<br>
 	 */
-	private @Nullable FileEntity resolveNonUniqueSnapshot(@NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
+	@Nullable
+	private FileEntity resolveNonUniqueSnapshot(@NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		Coordinates coordinates = parseCoordinates(path);
 		if (coordinates == null || !coordinates.isSnapshot() || !coordinates.fileName().startsWith(coordinates.artifactId() + "-" + coordinates.version())) {
 			return null;
@@ -276,7 +283,8 @@ public class MavenHandler extends PathRepositoryHandler {
 	}
 	
 	@Override
-	protected @NonNull String conflictMessage(@NonNull String path) {
+	@NonNull
+	protected String conflictMessage(@NonNull String path) {
 		Coordinates coordinates = parseCoordinates(path);
 		if (coordinates == null) {
 			return super.conflictMessage(path);
@@ -325,7 +333,8 @@ public class MavenHandler extends PathRepositoryHandler {
 	 */
 	public record Coordinates(@NonNull String groupId, @NonNull String artifactId, @NonNull String version, @NonNull String fileName) {
 		
-		public @NonNull String packageName() {
+		@NonNull
+		public String packageName() {
 			return this.groupId + ":" + this.artifactId;
 		}
 		

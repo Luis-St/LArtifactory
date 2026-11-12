@@ -25,7 +25,8 @@ public abstract class FormatHandler {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
 	}
 	
-	protected static @Nullable String username(@Nullable Principal principal) {
+	@Nullable
+	protected static String username(@Nullable Principal principal) {
 		return principal == null ? null : principal.username();
 	}
 	
@@ -37,7 +38,8 @@ public abstract class FormatHandler {
 		ctx.status(status).contentType("application/json").result(net.luis.artifactory.util.Json.write(body));
 	}
 	
-	public abstract @NonNull RepositoryType type();
+	@NonNull
+	public abstract RepositoryType type();
 	
 	/**
 	 * Handles a request to the repository.<br>
@@ -48,15 +50,18 @@ public abstract class FormatHandler {
 	 */
 	public abstract void handle(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception;
 	
-	protected @NonNull String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+	@NonNull
+	protected String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		return "Basic realm=\"" + repository.name() + "\"";
 	}
 	
-	protected @Nullable Principal authorize(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull AccessLevel level) throws SqlException {
+	@Nullable
+	protected Principal authorize(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull AccessLevel level) throws SqlException {
 		return this.services.auth().authorize(ctx, repository, level, this.challenge(ctx, repository));
 	}
 	
-	protected @NonNull String repositoryUrl(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+	@NonNull
+	protected String repositoryUrl(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
 		if (Boolean.TRUE.equals(ctx.attribute(RepositoryDispatcher.HOST_MAPPED_ATTRIBUTE))) {
 			return Requests.baseUrl(ctx, this.services.config());
 		}

@@ -16,9 +16,7 @@ import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.net.ProxySelector;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
@@ -36,13 +34,13 @@ import static net.luis.artifactory.database.Tables.*;
  * </p>
  */
 public class WebhookService {
-
+	
 	private static final Logger LOGGER = LoggerFactory.getLogger(WebhookService.class);
 	private static final long CACHE_TTL_MILLIS = 30_000;
 	private static final int MAX_ATTEMPTS = 3;
 	private static final int MAX_DELIVERIES_PER_WEBHOOK = 100;
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
-
+	
 	//region Event types
 	public static final String ARTIFACT_PUBLISHED = "artifact.published";
 	public static final String ARTIFACT_DELETED = "artifact.deleted";
@@ -52,14 +50,14 @@ public class WebhookService {
 	public static final String PING = "ping";
 	public static final List<String> EVENTS = List.of(ARTIFACT_PUBLISHED, ARTIFACT_DELETED, PACKAGE_DELETED, REPOSITORY_CREATED, REPOSITORY_DELETED);
 	//endregion
-
+	
 	private final SqlDatabase database;
 	private final HttpClient httpClient;
 	private final ExecutorService executor;
-
+	
 	private volatile List<WebhookEntity> activeCache = List.of();
-	private volatile long cacheExpiry = 0;
-
+	private volatile long cacheExpiry;
+	
 	public WebhookService(@NonNull SqlDatabase database) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 		this.httpClient = HttpClient.newBuilder()
@@ -73,27 +71,72 @@ public class WebhookService {
 			return thread;
 		}, new ThreadPoolExecutor.DiscardPolicy());
 	}
-
+	
+	private static boolean subscribed(@Nullable String events, @NonNull String event) {
+		if (events == null || events.isBlank()) {
+			return true;
+		}
+		for (String entry : events.split("[,\\s]+")) {
+			if (entry.strip().equalsIgnoreCase(event)) {
+				return true;
+			}
+		}
+		return false;
+	}
+	
+	@NonNull
+	private static String payload(@NonNull String event, @Nullable String repository, @Nullable String target) {
+		ObjectNode node = Json.object();
+		node.put("event", event);
+		node.put("repository", repository);
+		node.put("target", target);
+		node.put("timestamp", Instant.now().toString());
+		return Json.write(node);
+	}
+	
+	@NonNull
+	private static String sign(@NonNull String secret, byte @NonNull [] payload) {
+		try {
+			Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+			return HexFormat.of().formatHex(mac.doFinal(payload));
+		} catch (Exception e) {
+			throw new IllegalStateException("Failed to sign webhook payload", e);
+		}
+	}
+	
+	@Nullable
+	private static String truncate(@Nullable String value) {
+		if (value == null) {
+			return null;
+		}
+		return value.length() > 1024 ? value.substring(0, 1024) : value;
+	}
+	
 	//region CRUD
-	public @NonNull List<WebhookEntity> list(@Nullable String repository) throws SqlException {
+	@NonNull
+	public List<WebhookEntity> list(@Nullable String repository) throws SqlException {
 		var query = this.database.from(WEBHOOKS).select();
 		if (repository != null && !repository.isBlank()) {
 			query = query.where(Sql.equalTo(WEBHOOK_REPOSITORY, repository));
 		}
 		return query.orderBy(WEBHOOK_CREATED_AT.ascending()).fetch();
 	}
-
-	public @Nullable WebhookEntity get(@NonNull String id) throws SqlException {
+	
+	@Nullable
+	public WebhookEntity get(@NonNull String id) throws SqlException {
 		return this.database.from(WEBHOOKS).select().where(Sql.equalTo(WEBHOOK_ID, id)).fetchOneOrNull();
 	}
-
-	public @NonNull WebhookEntity create(@Nullable String repository, @NonNull String url, @Nullable String secret, @Nullable String events, boolean active, @Nullable String createdBy) throws SqlException {
+	//endregion
+	
+	@NonNull
+	public WebhookEntity create(@Nullable String repository, @NonNull String url, @Nullable String secret, @Nullable String events, boolean active, @Nullable String createdBy) throws SqlException {
 		WebhookEntity webhook = new WebhookEntity(UUID.randomUUID().toString(), repository, url, secret, events, active, Instant.now(), createdBy);
 		this.database.from(WEBHOOKS).insert(webhook).execute();
 		this.invalidate();
 		return webhook;
 	}
-
+	
 	public void update(@NonNull String id, @Nullable String url, @Nullable String events, @Nullable Boolean active) throws SqlException {
 		if (url != null) {
 			this.database.from(WEBHOOKS).update().set(WEBHOOK_URL, url).where(Sql.equalTo(WEBHOOK_ID, id)).execute();
@@ -106,15 +149,16 @@ public class WebhookService {
 		}
 		this.invalidate();
 	}
-
+	
 	public int delete(@NonNull String id) throws SqlException {
 		this.database.from(WEBHOOK_DELIVERIES).delete().where(Sql.equalTo(DELIVERY_WEBHOOK, id)).execute();
 		int removed = this.database.from(WEBHOOKS).delete().where(Sql.equalTo(WEBHOOK_ID, id)).execute();
 		this.invalidate();
 		return removed;
 	}
-
-	public @NonNull List<WebhookDeliveryEntity> deliveries(@NonNull String webhookId, int limit) throws SqlException {
+	
+	@NonNull
+	public List<WebhookDeliveryEntity> deliveries(@NonNull String webhookId, int limit) throws SqlException {
 		List<WebhookDeliveryEntity> ordered = new ArrayList<>(this.database.from(WEBHOOK_DELIVERIES).select()
 			.where(Sql.equalTo(DELIVERY_WEBHOOK, webhookId))
 			.orderBy(DELIVERY_CREATED_AT.ascending())
@@ -122,14 +166,14 @@ public class WebhookService {
 		Collections.reverse(ordered);
 		return ordered.stream().limit(Math.max(1, limit)).toList();
 	}
-	//endregion
-
+	
 	//region Dispatch
 	private void invalidate() {
 		this.cacheExpiry = 0;
 	}
-
-	private @NonNull List<WebhookEntity> activeWebhooks() throws SqlException {
+	
+	@NonNull
+	private List<WebhookEntity> activeWebhooks() throws SqlException {
 		if (System.currentTimeMillis() < this.cacheExpiry) {
 			return this.activeCache;
 		}
@@ -138,19 +182,7 @@ public class WebhookService {
 		this.cacheExpiry = System.currentTimeMillis() + CACHE_TTL_MILLIS;
 		return active;
 	}
-
-	private static boolean subscribed(@Nullable String events, @NonNull String event) {
-		if (events == null || events.isBlank()) {
-			return true;
-		}
-		for (String entry : events.split("[,\\s]+")) {
-			if (entry.strip().equalsIgnoreCase(event)) {
-				return true;
-			}
-		}
-		return false;
-	}
-
+	
 	/**
 	 * Dispatches an event to every matching active webhook. Never throws: any failure is logged and swallowed so the
 	 * triggering request is unaffected.<br>
@@ -175,16 +207,7 @@ public class WebhookService {
 			LOGGER.warn("Failed to dispatch webhook event {} for repository {}", event, repository, e);
 		}
 	}
-
-	private static @NonNull String payload(@NonNull String event, @Nullable String repository, @Nullable String target) {
-		ObjectNode node = Json.object();
-		node.put("event", event);
-		node.put("repository", repository);
-		node.put("target", target);
-		node.put("timestamp", Instant.now().toString());
-		return Json.write(node);
-	}
-
+	
 	private void deliverWithRetries(@NonNull WebhookEntity webhook, @NonNull String event, @Nullable String repository, byte @NonNull [] payload) {
 		int statusCode = 0;
 		String error = null;
@@ -211,8 +234,9 @@ public class WebhookService {
 		}
 		this.recordDelivery(webhook.id(), event, repository, false, statusCode, error);
 	}
-
-	private @NonNull HttpResponse<Void> send(@NonNull WebhookEntity webhook, @NonNull String event, byte @NonNull [] payload) throws Exception {
+	
+	@NonNull
+	private HttpResponse<Void> send(@NonNull WebhookEntity webhook, @NonNull String event, byte @NonNull [] payload) throws Exception {
 		HttpRequest.Builder builder = HttpRequest.newBuilder()
 			.uri(URI.create(webhook.url()))
 			.timeout(REQUEST_TIMEOUT)
@@ -226,17 +250,7 @@ public class WebhookService {
 		}
 		return this.httpClient.send(builder.build(), HttpResponse.BodyHandlers.discarding());
 	}
-
-	private static @NonNull String sign(@NonNull String secret, byte @NonNull [] payload) {
-		try {
-			Mac mac = Mac.getInstance("HmacSHA256");
-			mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
-			return HexFormat.of().formatHex(mac.doFinal(payload));
-		} catch (Exception e) {
-			throw new IllegalStateException("Failed to sign webhook payload", e);
-		}
-	}
-
+	
 	private void recordDelivery(@NonNull String webhookId, @NonNull String event, @Nullable String repository, boolean success, long statusCode, @Nullable String error) {
 		try {
 			WebhookDeliveryEntity delivery = new WebhookDeliveryEntity(UUID.randomUUID().toString(), webhookId, event, repository, success, statusCode, truncate(error), Instant.now());
@@ -246,7 +260,7 @@ public class WebhookService {
 			LOGGER.warn("Failed to record webhook delivery for {}", webhookId, e);
 		}
 	}
-
+	
 	private void prune(@NonNull String webhookId) throws SqlException {
 		List<WebhookDeliveryEntity> all = this.database.from(WEBHOOK_DELIVERIES).select()
 			.where(Sql.equalTo(DELIVERY_WEBHOOK, webhookId))
@@ -257,11 +271,12 @@ public class WebhookService {
 			this.database.from(WEBHOOK_DELIVERIES).delete().where(Sql.equalTo(DELIVERY_ID, all.get(i).id())).execute();
 		}
 	}
-
+	
 	/**
 	 * Sends a synchronous {@code ping} delivery (one attempt) to a webhook and records and returns the result.<br>
 	 */
-	public @NonNull WebhookDeliveryEntity test(@NonNull WebhookEntity webhook) {
+	@NonNull
+	public WebhookDeliveryEntity test(@NonNull WebhookEntity webhook) {
 		byte[] payload = payload(PING, webhook.repository(), null).getBytes(StandardCharsets.UTF_8);
 		boolean success = false;
 		long statusCode = 0;
@@ -285,15 +300,8 @@ public class WebhookService {
 		}
 		return delivery;
 	}
-
-	private static @Nullable String truncate(@Nullable String value) {
-		if (value == null) {
-			return null;
-		}
-		return value.length() > 1024 ? value.substring(0, 1024) : value;
-	}
 	//endregion
-
+	
 	public void close() {
 		this.executor.shutdown();
 		try {

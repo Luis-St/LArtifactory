@@ -83,7 +83,8 @@ public final class Versions {
 		return qualifierKey(first).compareTo(qualifierKey(second));
 	}
 	
-	private static @NonNull String qualifierKey(@NonNull String qualifier) {
+	@NonNull
+	private static String qualifierKey(@NonNull String qualifier) {
 		String normalized = switch (qualifier) {
 			case "a" -> "alpha";
 			case "b" -> "beta";
@@ -96,7 +97,8 @@ public final class Versions {
 		return index >= 0 ? String.valueOf(index) : MAVEN_QUALIFIERS.size() + "-" + normalized;
 	}
 	
-	private static @NonNull List<Object> tokenizeMaven(@NonNull String version) {
+	@NonNull
+	private static List<Object> tokenizeMaven(@NonNull String version) {
 		List<Object> tokens = new ArrayList<>();
 		StringBuilder current = new StringBuilder();
 		Boolean digit = null;
@@ -231,7 +233,8 @@ public final class Versions {
 		return stripBuild(version).contains("-");
 	}
 	
-	private static @NonNull String stripBuild(@NonNull String version) {
+	@NonNull
+	private static String stripBuild(@NonNull String version) {
 		int plus = version.indexOf('+');
 		return plus < 0 ? version : version.substring(0, plus);
 	}
@@ -240,7 +243,8 @@ public final class Versions {
 		return !value.isEmpty() && value.chars().allMatch(Character::isDigit);
 	}
 	
-	private static @NonNull BigInteger parseNumber(@NonNull String value) {
+	@NonNull
+	private static BigInteger parseNumber(@NonNull String value) {
 		return isNumber(value) ? new BigInteger(value) : BigInteger.ZERO;
 	}
 	
@@ -250,7 +254,8 @@ public final class Versions {
 	 *
 	 * @throws IllegalArgumentException If the version is not a valid NuGet version
 	 */
-	public static @NonNull String normalizeNuGet(@NonNull String version) {
+	@NonNull
+	public static String normalizeNuGet(@NonNull String version) {
 		String value = stripBuild(version.strip());
 		int dash = value.indexOf('-');
 		String core = dash < 0 ? value : value.substring(0, dash);
@@ -289,7 +294,8 @@ public final class Versions {
 	 */
 	private record Pep440Version(@NonNull BigInteger epoch, @NonNull List<BigInteger> release, int preRank, @NonNull BigInteger preNumber, @Nullable BigInteger post, @Nullable BigInteger dev) {
 		
-		private static @Nullable Pep440Version parse(@NonNull String version) {
+		@Nullable
+		private static Pep440Version parse(@NonNull String version) {
 			Matcher matcher = PEP440_VERSION.matcher(version.strip());
 			if (!matcher.matches()) {
 				return null;
@@ -318,7 +324,8 @@ public final class Versions {
 		/**
 		 * Returns the number of an optional segment, an implicit number is 0 and null if the segment is missing.<br>
 		 */
-		private static @Nullable BigInteger optionalNumber(@NonNull Matcher matcher, int group) {
+		@Nullable
+		private static BigInteger optionalNumber(@NonNull Matcher matcher, int group) {
 			if (matcher.start(group) < 0) {
 				return null;
 			}

@@ -11,7 +11,8 @@ public record UserResponse(
 	@NonNull Instant createdAt
 ) {
 	
-	public static @NonNull UserResponse of(@NonNull UserEntity entity) {
+	@NonNull
+	public static UserResponse of(@NonNull UserEntity entity) {
 		return new UserResponse(entity.username(), entity.admin(), entity.createdAt());
 	}
 }

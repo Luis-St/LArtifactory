@@ -32,7 +32,7 @@ public class BodyReader {
 	 */
 	public BodyReader(long maxPackageBody, long maxMemory) {
 		this.maxPackageBody = maxPackageBody;
-		this.packageSlots = new Semaphore((int) Math.clamp(maxMemory / (4 * maxPackageBody), 1, 64));
+		this.packageSlots = new Semaphore(Math.clamp(maxMemory / (4 * maxPackageBody), 1, 64));
 	}
 	
 	private static byte @NonNull [] read(@NonNull Context ctx, long max) throws IOException {

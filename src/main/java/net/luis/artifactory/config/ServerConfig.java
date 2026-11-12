@@ -50,7 +50,8 @@ public record ServerConfig(
 		}
 	}
 	
-	public static @NonNull ServerConfig from(@NonNull Env env) {
+	@NonNull
+	public static ServerConfig from(@NonNull Env env) {
 		return new ServerConfig(
 			env.integer(EnvKeys.PORT, 8080),
 			env.optional(EnvKeys.BASE_URL),
@@ -81,7 +82,8 @@ public record ServerConfig(
 	 * Parses a comma separated list of {@code host=repository} pairs.<br>
 	 * Requests to a mapped host are served by the repository at the root path, e.g. {@code npm.example.com=npm-local}.<br>
 	 */
-	private static @NonNull Map<String, String> parseHostRepositories(@Nullable String value) {
+	@NonNull
+	private static Map<String, String> parseHostRepositories(@Nullable String value) {
 		Map<String, String> mapping = new HashMap<>();
 		if (value == null) {
 			return mapping;

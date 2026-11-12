@@ -1,8 +1,6 @@
 package net.luis.artifactory.repository;
 
-import net.luis.artifactory.database.entity.RemoteConfigEntity;
-import net.luis.artifactory.database.entity.RepositoryEntity;
-import net.luis.artifactory.database.entity.VirtualMemberEntity;
+import net.luis.artifactory.database.entity.*;
 import net.luis.utils.io.database.Sql;
 import net.luis.utils.io.database.SqlDatabase;
 import net.luis.utils.io.database.condition.SqlCondition;
@@ -36,11 +34,13 @@ public class RepositoryService {
 		this.artifactService = Objects.requireNonNull(artifactService, "Artifact service must not be null");
 	}
 	
-	public @NonNull List<RepositoryEntity> list() throws SqlException {
+	@NonNull
+	public List<RepositoryEntity> list() throws SqlException {
 		return this.database.from(REPOSITORIES).select().orderBy(REPOSITORY_NAME.ascending()).fetch();
 	}
 	
-	public @Nullable RepositoryEntity get(@NonNull String name) throws SqlException {
+	@Nullable
+	public RepositoryEntity get(@NonNull String name) throws SqlException {
 		Optional<RepositoryEntity> cached = this.cache.get(name);
 		if (cached != null) {
 			return cached.orElse(null);
@@ -50,7 +50,8 @@ public class RepositoryService {
 		return repository;
 	}
 	
-	public @NonNull RepositoryEntity create(@NonNull String name, @NonNull RepositoryType type, @Nullable String description, boolean publicRead, boolean allowRedeploy) throws SqlException {
+	@NonNull
+	public RepositoryEntity create(@NonNull String name, @NonNull RepositoryType type, @Nullable String description, boolean publicRead, boolean allowRedeploy) throws SqlException {
 		RepositoryEntity repository = new RepositoryEntity(name, type.id(), description, publicRead, allowRedeploy, Instant.now());
 		this.database.from(REPOSITORIES).insert(repository).execute();
 		this.cache.remove(name);
@@ -89,12 +90,13 @@ public class RepositoryService {
 		});
 		this.cache.remove(name);
 	}
-
+	
 	//region Remote (proxy) repositories
-	public @Nullable RemoteConfigEntity remoteConfig(@NonNull String name) throws SqlException {
+	@Nullable
+	public RemoteConfigEntity remoteConfig(@NonNull String name) throws SqlException {
 		return this.database.from(REMOTE_REPOSITORIES).select().where(Sql.equalTo(REMOTE_REPOSITORY, name)).fetchOneOrNull();
 	}
-
+	
 	public void setRemoteConfig(@NonNull String name, @NonNull String url, boolean cacheEnabled, @Nullable String username, @Nullable String password) throws SqlException {
 		String normalizedUrl = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
 		this.database.inTransaction(transaction -> {
@@ -103,12 +105,13 @@ public class RepositoryService {
 		});
 	}
 	//endregion
-
+	
 	//region Virtual (group) repositories
-	public @NonNull List<VirtualMemberEntity> virtualMembers(@NonNull String name) throws SqlException {
+	@NonNull
+	public List<VirtualMemberEntity> virtualMembers(@NonNull String name) throws SqlException {
 		return this.database.from(VIRTUAL_MEMBERS).select().where(Sql.equalTo(VIRTUAL_REPOSITORY, name)).orderBy(VIRTUAL_POSITION.ascending()).fetch();
 	}
-
+	
 	public void setVirtualMembers(@NonNull String name, @NonNull List<String> members) throws SqlException {
 		this.database.inTransaction(transaction -> {
 			transaction.from(VIRTUAL_MEMBERS).delete().where(Sql.equalTo(VIRTUAL_REPOSITORY, name)).execute();
@@ -121,11 +124,12 @@ public class RepositoryService {
 		});
 	}
 	//endregion
-
+	
 	/**
 	 * Returns whether a repository stores its own artifacts, proxies an upstream or aggregates other repositories.<br>
 	 */
-	public @NonNull RepositoryClass classOf(@NonNull String name) throws SqlException {
+	@NonNull
+	public RepositoryClass classOf(@NonNull String name) throws SqlException {
 		if (this.database.from(REMOTE_REPOSITORIES).select().where(Sql.equalTo(REMOTE_REPOSITORY, name)).exists()) {
 			return RepositoryClass.REMOTE;
 		}

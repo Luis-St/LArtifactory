@@ -59,7 +59,8 @@ public class BlobStore {
 		return value.length() == 64 && value.chars().allMatch(c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
 	}
 	
-	private static @NonNull MessageDigest digest(@NonNull String algorithm) {
+	@NonNull
+	private static MessageDigest digest(@NonNull String algorithm) {
 		try {
 			return MessageDigest.getInstance(algorithm);
 		} catch (NoSuchAlgorithmException e) {
@@ -67,7 +68,8 @@ public class BlobStore {
 		}
 	}
 	
-	public static @NonNull String sha256Hex(@NonNull String value) {
+	@NonNull
+	public static String sha256Hex(@NonNull String value) {
 		return HEX.formatHex(digest("SHA-256").digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
 	}
 	
@@ -75,7 +77,8 @@ public class BlobStore {
 		return this.maxSize;
 	}
 	
-	public @NonNull StoredBlob store(@NonNull InputStream input) throws IOException {
+	@NonNull
+	public StoredBlob store(@NonNull InputStream input) throws IOException {
 		Objects.requireNonNull(input, "Input must not be null");
 		
 		MessageDigest sha256 = digest("SHA-256");
@@ -123,7 +126,8 @@ public class BlobStore {
 		}
 	}
 	
-	public @NonNull StoredBlob store(byte @NonNull [] data) throws IOException {
+	@NonNull
+	public StoredBlob store(byte @NonNull [] data) throws IOException {
 		return this.store(new ByteArrayInputStream(data));
 	}
 	
@@ -131,7 +135,8 @@ public class BlobStore {
 		return Files.exists(this.path(sha256));
 	}
 	
-	public @NonNull InputStream open(@NonNull String sha256) throws IOException {
+	@NonNull
+	public InputStream open(@NonNull String sha256) throws IOException {
 		return Files.newInputStream(this.path(sha256));
 	}
 	
@@ -139,7 +144,8 @@ public class BlobStore {
 		return Files.readAllBytes(this.path(sha256));
 	}
 	
-	public @NonNull Path path(@NonNull String sha256) {
+	@NonNull
+	public Path path(@NonNull String sha256) {
 		if (!isDigest(sha256)) {
 			throw new IllegalArgumentException("Invalid sha256: " + sha256);
 		}

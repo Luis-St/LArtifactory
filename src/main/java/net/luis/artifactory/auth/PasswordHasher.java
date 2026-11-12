@@ -18,7 +18,8 @@ public final class PasswordHasher {
 	
 	private PasswordHasher() {}
 	
-	public static @NonNull String hash(@NonNull String password) {
+	@NonNull
+	public static String hash(@NonNull String password) {
 		Objects.requireNonNull(password, "Password must not be null");
 		
 		byte[] salt = new byte[16];
@@ -54,7 +55,8 @@ public final class PasswordHasher {
 		}
 	}
 	
-	public static @NonNull String randomSecret(int bytes) {
+	@NonNull
+	public static String randomSecret(int bytes) {
 		byte[] data = new byte[bytes];
 		RANDOM.nextBytes(data);
 		return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
