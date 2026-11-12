@@ -179,7 +179,7 @@ public class Application {
 				// Prevent browsers from MIME sniffing uploaded artifacts (e.g. a stored .html/.svg) into active content
 				ctx.header("X-Content-Type-Options", "nosniff");
 				ctx.header("Referrer-Policy", "no-referrer");
-				if (ctx.path().equals("/ui") || ctx.path().startsWith("/ui/")) {
+				if ("/ui".equals(ctx.path()) || ctx.path().startsWith("/ui/")) {
 					ctx.header("Content-Security-Policy", UI_CONTENT_SECURITY_POLICY);
 					ctx.header("X-Frame-Options", "DENY");
 				} else if (!serverConfig.apiDocsEnabled() || API_DOCS_PREFIXES.stream().noneMatch(ctx.path()::startsWith)) {

@@ -56,6 +56,10 @@ class ApplicationIntegrationTest {
 		return "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes(StandardCharsets.UTF_8));
 	}
 	
+	private static String sha256(byte[] data) throws Exception {
+		return "sha256:" + HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data));
+	}
+	
 	@BeforeAll
 	void start() throws Exception {
 		int port;
@@ -392,10 +396,6 @@ class ApplicationIntegrationTest {
 		
 		assertEquals(202, this.send("DELETE", "/v2/oci/team/app/manifests/" + sha256(manifestBytes), admin, null).statusCode());
 		assertEquals(404, this.send("GET", "/v2/oci/team/app/manifests/1.0", admin, null).statusCode(), "deleting a manifest removes its tags");
-	}
-	
-	private static String sha256(byte[] data) throws Exception {
-		return "sha256:" + HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256").digest(data));
 	}
 	
 	private HttpResponse<String> sendBytes(String method, URI uri, String authorization, String contentType, byte[] body) throws IOException, InterruptedException {

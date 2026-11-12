@@ -46,19 +46,7 @@ import java.util.regex.Pattern;
  * </ul>
  */
 public class OciHandler extends FormatHandler {
-
-	/**
-	 * Set by the dispatcher for requests to the root {@code /v2/{repository}/...} api, the client side name then starts with the repository.<br>
-	 */
-	public static final String ROOT_ATTRIBUTE = "artifactory.ociRoot";
-	public static final String API_VERSION_HEADER = "Docker-Distribution-API-Version";
-	public static final String API_VERSION = "registry/2.0";
-	public static final String OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
-	public static final String OCI_INDEX = "application/vnd.oci.image.index.v1+json";
-	public static final String DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json";
-	public static final String DOCKER_MANIFEST_LIST = "application/vnd.docker.distribution.manifest.list.v2+json";
-	private static final Set<String> INDEX_TYPES = Set.of(OCI_INDEX, DOCKER_MANIFEST_LIST);
-	private static final Set<String> MANIFEST_TYPES = Set.of(OCI_MANIFEST, OCI_INDEX, DOCKER_MANIFEST, DOCKER_MANIFEST_LIST);
+	
 	private static final Pattern NAME = Pattern.compile("[a-z0-9]+(?:(?:\\.|_|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+(?:(?:\\.|_|__|-+)[a-z0-9]+)*)*");
 	private static final Pattern TAG = Pattern.compile("[a-zA-Z0-9_][a-zA-Z0-9._-]{0,127}");
 	private static final Pattern DIGEST = Pattern.compile("sha256:[a-f0-9]{64}");
@@ -74,26 +62,38 @@ public class OciHandler extends FormatHandler {
 	 */
 	private static final Duration UPLOAD_MAX_AGE = Duration.ofHours(24);
 	private static final String BLOB_CONTENT_TYPE = "application/octet-stream";
+	/**
+	 * Set by the dispatcher for requests to the root {@code /v2/{repository}/...} api, the client side name then starts with the repository.<br>
+	 */
+	public static final String ROOT_ATTRIBUTE = "artifactory.ociRoot";
+	public static final String API_VERSION_HEADER = "Docker-Distribution-API-Version";
+	public static final String API_VERSION = "registry/2.0";
+	public static final String OCI_MANIFEST = "application/vnd.oci.image.manifest.v1+json";
+	public static final String OCI_INDEX = "application/vnd.oci.image.index.v1+json";
+	public static final String DOCKER_MANIFEST = "application/vnd.docker.distribution.manifest.v2+json";
+	public static final String DOCKER_MANIFEST_LIST = "application/vnd.docker.distribution.manifest.list.v2+json";
+	private static final Set<String> INDEX_TYPES = Set.of(OCI_INDEX, DOCKER_MANIFEST_LIST);
+	private static final Set<String> MANIFEST_TYPES = Set.of(OCI_MANIFEST, OCI_INDEX, DOCKER_MANIFEST, DOCKER_MANIFEST_LIST);
 	private final Map<String, UploadSession> uploads = new ConcurrentHashMap<>();
-
+	
 	public OciHandler(@NonNull Services services) {
 		super(services);
 	}
-
+	
 	@NonNull
 	public static String blobPath(@NonNull String digest) {
 		return "blobs/sha256/" + digest.substring("sha256:".length());
 	}
-
+	
 	@NonNull
 	public static String manifestPath(@NonNull String image, @NonNull String digest) {
 		return image + "/manifests/sha256/" + digest.substring("sha256:".length());
 	}
-
+	
 	public static boolean isValidName(@NonNull String name) {
 		return name.length() <= MAX_NAME_LENGTH && NAME.matcher(name).matches();
 	}
-
+	
 	/**
 	 * Returns the digests of the blobs a manifest references (config and layers, foreign layers with urls excluded).<br>
 	 */
@@ -112,14 +112,14 @@ public class OciHandler extends FormatHandler {
 		}
 		return digests;
 	}
-
+	
 	@NonNull
 	static HttpError error(int status, @NonNull String code, @NonNull String message) {
 		ObjectNode root = Json.object();
 		root.putArray("errors").addObject().put("code", code).put("message", message);
 		return HttpError.json(status, message, Json.write(root));
 	}
-
+	
 	@NonNull
 	private static String sha256(byte @NonNull [] data) {
 		try {
@@ -128,12 +128,12 @@ public class OciHandler extends FormatHandler {
 			throw new IllegalStateException("Missing digest algorithm SHA-256", e);
 		}
 	}
-
+	
 	@NonNull
 	private static String range(long size) {
 		return "0-" + Math.max(0, size - 1);
 	}
-
+	
 	private static int pageSize(@NonNull Context ctx) {
 		try {
 			return Math.clamp(Integer.parseInt(Objects.requireNonNullElse(ctx.queryParam("n"), String.valueOf(DEFAULT_PAGE_SIZE))), 0, DEFAULT_PAGE_SIZE);
@@ -141,7 +141,7 @@ public class OciHandler extends FormatHandler {
 			return DEFAULT_PAGE_SIZE;
 		}
 	}
-
+	
 	/**
 	 * Returns the page of the sorted values after {@code last}, a {@code Link} header to the next page is added if there are more values.<br>
 	 */
@@ -156,7 +156,7 @@ public class OciHandler extends FormatHandler {
 		}
 		return page;
 	}
-
+	
 	@NonNull
 	private static String mediaType(@Nullable String header, @NonNull JsonNode manifest) {
 		String fromBody = Json.text(manifest, "mediaType");
@@ -177,12 +177,42 @@ public class OciHandler extends FormatHandler {
 		}
 		return mediaType;
 	}
-
+	
+	/**
+	 * Deletes the blobs of the OCI repositories that no manifest references and that are older than the given age.<br>
+	 * The age protects blobs of a push in progress, its manifest is uploaded after all blobs.<br>
+	 *
+	 * @return The number of deleted blobs
+	 */
+	public static int collectGarbage(@NonNull Services services, @NonNull Duration minAge) throws SqlException {
+		Instant threshold = Instant.now().minus(minAge);
+		int deleted = 0;
+		for (RepositoryEntity repository : services.repositories().list()) {
+			if (!RepositoryType.OCI.id().equals(repository.type())) {
+				continue;
+			}
+			Set<String> referenced = new HashSet<>();
+			List<String> images = services.packages().packageNames(repository.name());
+			for (List<PackageVersionEntity> versions : services.packages().versions(repository.name(), images).values()) {
+				for (PackageVersionEntity version : versions) {
+					Json.parseObject(version.metadata()).path("blobs").forEach(digest -> referenced.add(digest.asString()));
+				}
+			}
+			for (FileEntity file : services.artifacts().list(repository.name(), "blobs/sha256/")) {
+				String digest = "sha256:" + file.path().substring("blobs/sha256/".length());
+				if (file.createdAt().isBefore(threshold) && !referenced.contains(digest) && services.artifacts().delete(repository.name(), file.path())) {
+					deleted++;
+				}
+			}
+		}
+		return deleted;
+	}
+	
 	@Override
 	public @NonNull RepositoryType type() {
 		return RepositoryType.OCI;
 	}
-
+	
 	@Override
 	public void handle(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String rawPath) throws Exception {
 		ctx.header(API_VERSION_HEADER, API_VERSION);
@@ -194,7 +224,7 @@ public class OciHandler extends FormatHandler {
 		String method = Requests.method(ctx);
 		boolean read = "GET".equals(method) || "HEAD".equals(method);
 		int size = rest.size();
-
+		
 		if (rest.isEmpty()) {
 			if (!read) {
 				throw HttpError.methodNotAllowed();
@@ -235,7 +265,7 @@ public class OciHandler extends FormatHandler {
 			throw error(404, "NAME_UNKNOWN", "Unknown registry endpoint");
 		}
 	}
-
+	
 	/**
 	 * Answers the version check of a client, credentials are required so clients learn the challenge and send them on later requests.<br>
 	 * An anonymous client still reads public repositories, it ignores the challenge if it has no credentials.<br>
@@ -247,7 +277,7 @@ public class OciHandler extends FormatHandler {
 		}
 		json(ctx, 200, Json.object());
 	}
-
+	
 	/**
 	 * Lists the images of all OCI repositories readable by the caller, prefixed with the repository name.<br>
 	 */
@@ -267,11 +297,11 @@ public class OciHandler extends FormatHandler {
 		page(ctx, names, Requests.baseUrl(ctx, this.services.config()) + "/v2/_catalog").forEach(repositories::add);
 		json(ctx, 200, root);
 	}
-
+	
 	private boolean isRoot(@NonNull Context ctx) {
 		return Boolean.TRUE.equals(ctx.attribute(ROOT_ATTRIBUTE));
 	}
-
+	
 	@NonNull
 	private String image(@NonNull List<String> rest, int end) {
 		String image = String.join("/", rest.subList(0, end));
@@ -283,7 +313,7 @@ public class OciHandler extends FormatHandler {
 		}
 		return image;
 	}
-
+	
 	/**
 	 * Returns the url of the registry api of the repository with a trailing slash, the image name is appended to it.<br>
 	 */
@@ -294,7 +324,7 @@ public class OciHandler extends FormatHandler {
 		}
 		return this.repositoryUrl(ctx, repository) + "/v2/";
 	}
-
+	
 	/**
 	 * Returns the image name as the client sees it.<br>
 	 */
@@ -302,7 +332,7 @@ public class OciHandler extends FormatHandler {
 	private String clientName(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image) {
 		return this.isRoot(ctx) ? repository.name() + "/" + image : image;
 	}
-
+	
 	@NonNull
 	private String requireDigest(@NonNull String digest) {
 		if (!DIGEST.matcher(digest).matches()) {
@@ -310,7 +340,7 @@ public class OciHandler extends FormatHandler {
 		}
 		return digest;
 	}
-
+	
 	//region Manifests
 	private void manifest(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String reference, @NonNull String method) throws Exception {
 		switch (method) {
@@ -320,7 +350,7 @@ public class OciHandler extends FormatHandler {
 			default -> throw HttpError.methodNotAllowed();
 		}
 	}
-
+	
 	private void getManifest(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String reference) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
 		String digest = DIGEST.matcher(reference).matches() ? reference : TAG.matcher(reference).matches() ? this.services.packages().tags(repository.name(), image).get(reference) : null;
@@ -334,7 +364,7 @@ public class OciHandler extends FormatHandler {
 		ctx.res().setCharacterEncoding(null);
 		ctx.res().setHeader("Content-Type", file.contentType());
 	}
-
+	
 	private void putManifest(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String reference) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		boolean byDigest = DIGEST.matcher(reference).matches();
@@ -346,7 +376,7 @@ public class OciHandler extends FormatHandler {
 		if (byDigest && !reference.equals(digest)) {
 			throw error(400, "DIGEST_INVALID", "The manifest has the digest " + digest + ", not " + reference);
 		}
-
+		
 		JsonNode manifest;
 		try {
 			manifest = Json.parse(body);
@@ -359,14 +389,14 @@ public class OciHandler extends FormatHandler {
 		String mediaType = mediaType(ctx.header("Content-Type"), manifest);
 		ObjectNode metadata = this.validateReferences(repository, image, manifest, mediaType);
 		metadata.put("size", body.length);
-
+		
 		if (!byDigest && !repository.allowRedeploy()) {
 			String current = this.services.packages().tags(repository.name(), image).get(reference);
 			if (current != null && !current.equals(digest)) {
 				throw error(409, "DENIED", "Tag " + reference + " already exists, the repository does not allow redeploys");
 			}
 		}
-
+		
 		StoredBlob blob = this.services.artifacts().upload(body);
 		String path = manifestPath(image, digest);
 		this.services.artifacts().transaction(work -> {
@@ -379,7 +409,7 @@ public class OciHandler extends FormatHandler {
 			}
 			return null;
 		});
-
+		
 		String subject = Json.text(metadata, "subject");
 		if (subject != null) {
 			ctx.header("OCI-Subject", subject);
@@ -388,7 +418,7 @@ public class OciHandler extends FormatHandler {
 		ctx.header("Docker-Content-Digest", digest);
 		ctx.status(201).result("");
 	}
-
+	
 	/**
 	 * Checks that the blobs (or for an index the manifests) referenced by the manifest exist and returns the metadata of the manifest.<br>
 	 */
@@ -420,7 +450,7 @@ public class OciHandler extends FormatHandler {
 				blobs.add(digest);
 			}
 		}
-
+		
 		String artifactType = Json.text(manifest, "artifactType");
 		if (artifactType == null && OCI_MANIFEST.equals(mediaType)) {
 			artifactType = Json.text(manifest.path("config"), "mediaType");
@@ -437,7 +467,7 @@ public class OciHandler extends FormatHandler {
 		}
 		return metadata;
 	}
-
+	
 	private void deleteManifest(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String reference) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
 		if (!DIGEST.matcher(reference).matches()) {
@@ -462,7 +492,7 @@ public class OciHandler extends FormatHandler {
 		}
 		ctx.status(202).result("");
 	}
-
+	
 	private void tags(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
 		SortedSet<String> tags = new TreeSet<>(this.services.packages().tags(repository.name(), image).keySet());
@@ -475,7 +505,8 @@ public class OciHandler extends FormatHandler {
 		page(ctx, tags, this.registryUrl(ctx, repository) + image + "/tags/list").forEach(list::add);
 		json(ctx, 200, root);
 	}
-
+	//endregion
+	
 	private void referrers(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String digest) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.READ);
 		this.requireDigest(digest);
@@ -505,8 +536,7 @@ public class OciHandler extends FormatHandler {
 		}
 		ctx.status(200).contentType(OCI_INDEX).result(Json.write(root));
 	}
-	//endregion
-
+	
 	//region Blobs
 	private void blob(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String digest, @NonNull String method) throws Exception {
 		switch (method) {
@@ -529,18 +559,18 @@ public class OciHandler extends FormatHandler {
 			default -> throw HttpError.methodNotAllowed();
 		}
 	}
-
+	
 	private void startUpload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		String blobUrl = this.registryUrl(ctx, repository) + image + "/blobs/";
-
+		
 		// Blobs are shared by all images of a repository, a mount from another image of it always succeeds
 		String mount = ctx.queryParam("mount");
 		if (mount != null && DIGEST.matcher(mount).matches() && this.services.artifacts().get(repository.name(), blobPath(mount)) != null) {
 			this.created(ctx, blobUrl, mount);
 			return;
 		}
-
+		
 		String digest = ctx.queryParam("digest");
 		if (digest != null) {
 			this.requireDigest(digest);
@@ -552,7 +582,7 @@ public class OciHandler extends FormatHandler {
 			this.created(ctx, blobUrl, digest);
 			return;
 		}
-
+		
 		this.pruneUploads();
 		if (this.uploads.size() >= MAX_UPLOAD_SESSIONS) {
 			throw error(429, "TOOMANYREQUESTS", "Too many concurrent uploads, try again later");
@@ -565,7 +595,7 @@ public class OciHandler extends FormatHandler {
 		ctx.header("Docker-Upload-UUID", id);
 		ctx.status(202).result("");
 	}
-
+	
 	private void upload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String id, @NonNull String method) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		UploadSession session = this.uploads.get(id);
@@ -574,7 +604,7 @@ public class OciHandler extends FormatHandler {
 		}
 		String uploadUrl = this.registryUrl(ctx, repository) + image + "/blobs/uploads/" + id;
 		ctx.header("Docker-Upload-UUID", id);
-
+		
 		synchronized (session) {
 			switch (method) {
 				case "GET", "HEAD" -> {
@@ -616,7 +646,7 @@ public class OciHandler extends FormatHandler {
 			}
 		}
 	}
-
+	
 	private void append(@NonNull Context ctx, @NonNull UploadSession session) throws IOException {
 		long max = this.services.artifacts().blobStore().maxSize();
 		try (InputStream input = ctx.bodyInputStream(); OutputStream output = Files.newOutputStream(session.file, StandardOpenOption.APPEND)) {
@@ -632,7 +662,7 @@ public class OciHandler extends FormatHandler {
 		}
 		session.lastUsed = Instant.now();
 	}
-
+	
 	/**
 	 * Records an uploaded blob in the repository after checking it has the digest the client announced.<br>
 	 */
@@ -656,20 +686,21 @@ public class OciHandler extends FormatHandler {
 			}
 		}
 	}
-
+	
 	private void created(@NonNull Context ctx, @NonNull String blobUrl, @NonNull String digest) {
 		ctx.header("Location", blobUrl + digest);
 		ctx.header("Docker-Content-Digest", digest);
 		ctx.status(201).result("");
 	}
-
+	
 	private void closeUpload(@NonNull String id, @NonNull UploadSession session) {
 		this.uploads.remove(id);
 		try {
 			Files.deleteIfExists(session.file);
 		} catch (IOException ignored) {}
 	}
-
+	//endregion
+	
 	/**
 	 * Removes abandoned uploads, their temporary file is deleted by the blob store maintenance at the same age.<br>
 	 */
@@ -677,50 +708,19 @@ public class OciHandler extends FormatHandler {
 		Instant threshold = Instant.now().minus(UPLOAD_MAX_AGE);
 		this.uploads.entrySet().removeIf(entry -> entry.getValue().lastUsed.isBefore(threshold) || !Files.exists(entry.getValue().file));
 	}
-	//endregion
-
-	/**
-	 * Deletes the blobs of the OCI repositories that no manifest references and that are older than the given age.<br>
-	 * The age protects blobs of a push in progress, its manifest is uploaded after all blobs.<br>
-	 *
-	 * @return The number of deleted blobs
-	 */
-	public static int collectGarbage(@NonNull Services services, @NonNull Duration minAge) throws SqlException {
-		Instant threshold = Instant.now().minus(minAge);
-		int deleted = 0;
-		for (RepositoryEntity repository : services.repositories().list()) {
-			if (!RepositoryType.OCI.id().equals(repository.type())) {
-				continue;
-			}
-			Set<String> referenced = new HashSet<>();
-			List<String> images = services.packages().packageNames(repository.name());
-			for (List<PackageVersionEntity> versions : services.packages().versions(repository.name(), images).values()) {
-				for (PackageVersionEntity version : versions) {
-					Json.parseObject(version.metadata()).path("blobs").forEach(digest -> referenced.add(digest.asString()));
-				}
-			}
-			for (FileEntity file : services.artifacts().list(repository.name(), "blobs/sha256/")) {
-				String digest = "sha256:" + file.path().substring("blobs/sha256/".length());
-				if (file.createdAt().isBefore(threshold) && !referenced.contains(digest) && services.artifacts().delete(repository.name(), file.path())) {
-					deleted++;
-				}
-			}
-		}
-		return deleted;
-	}
-
+	
 	/**
 	 * A chunked blob upload, the received bytes are appended to a temporary file.<br>
 	 */
 	private static final class UploadSession {
-
+		
 		private final String repository;
 		private final String image;
 		private final @Nullable String username;
 		private final Path file;
 		private long size;
 		private volatile Instant lastUsed = Instant.now();
-
+		
 		private UploadSession(@NonNull String repository, @NonNull String image, @Nullable String username, @NonNull Path file) {
 			this.repository = repository;
 			this.image = image;
