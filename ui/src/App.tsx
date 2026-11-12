@@ -2,6 +2,7 @@ import {Layout} from './components/Layout';
 import {Empty, Spinner} from './components/ui';
 import {Account} from './pages/Account';
 import {Artifacts} from './pages/Artifacts';
+import {Audit} from './pages/Audit';
 import {Login} from './pages/Login';
 import {Overview} from './pages/Overview';
 import {Permissions} from './pages/Permissions';
@@ -9,6 +10,7 @@ import {Repositories} from './pages/Repositories';
 import {RepositoryDetail} from './pages/RepositoryDetail';
 import {Tokens} from './pages/Tokens';
 import {Users} from './pages/Users';
+import {Webhooks} from './pages/Webhooks';
 import {href, useRoute} from './router';
 import {SessionProvider} from './session';
 import {type Principal, REPOSITORY_TYPES, type RepositoryType} from './types';
@@ -45,6 +47,12 @@ function Routes({principal}: { principal: Principal }) {
 			break;
 		case 'tokens':
 			page = <Tokens/>;
+			break;
+		case 'webhooks':
+			page = principal.admin ? <Webhooks /> : null;
+			break;
+		case 'audit':
+			page = principal.admin ? <Audit /> : null;
 			break;
 		case 'account':
 			page = <Account/>;

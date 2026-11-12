@@ -67,6 +67,10 @@ public class HttpError extends RuntimeException {
 	public static @NonNull HttpError methodNotAllowed() {
 		return of(405, "Method not allowed");
 	}
+
+	public static @NonNull HttpError rateLimited(long retryAfterSeconds) {
+		return new HttpError(429, "Rate limit exceeded", "text/plain", "Rate limit exceeded", Map.of("Retry-After", String.valueOf(Math.max(1, retryAfterSeconds))));
+	}
 	
 	public int status() {
 		return this.status;

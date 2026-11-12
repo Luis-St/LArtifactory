@@ -40,7 +40,73 @@ public final class Migrations {
 				.primaryKey(SESSION_ID)
 			);
 			builder.createIndex(SESSIONS, "idx_sessions_username", index -> index.columns(SESSION_USERNAME).method(SqlIndexMethod.BTREE));
-		}, (builder, _) -> builder.dropTable(SESSIONS))
+		}, (builder, _) -> builder.dropTable(SESSIONS)),
+		migration(Version.of(1, 3, 0), "Token metadata, audit log, webhooks, remote and virtual repositories", (builder, _) -> {
+			builder.createTable(TOKEN_META, table -> table
+				.column(TOKEN_META_ID, SqlTypes.STRING.configure(SqlParameter.length(36)), SqlMigrationColumnBuilder::notNull)
+				.column(TOKEN_META_ALLOWED_IPS, SqlTypes.TEXT)
+				.column(TOKEN_META_RATE_LIMIT, SqlTypes.LONG, SqlMigrationColumnBuilder::notNull)
+				.column(TOKEN_META_LAST_USED_AT, SqlTypes.INSTANT.configure(SqlParameter.fractional(6)))
+				.column(TOKEN_META_LAST_USED_IP, SqlTypes.STRING.configure(SqlParameter.length(64)))
+				.primaryKey(TOKEN_META_ID)
+			);
+			builder.createTable(AUDIT_LOG, table -> table
+				.column(AUDIT_ID, SqlTypes.STRING.configure(SqlParameter.length(36)), SqlMigrationColumnBuilder::notNull)
+				.column(AUDIT_TIMESTAMP, SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SqlMigrationColumnBuilder::notNull)
+				.column(AUDIT_ACTOR, SqlTypes.STRING.configure(SqlParameter.length(128)))
+				.column(AUDIT_ACTION, SqlTypes.STRING.configure(SqlParameter.length(64)), SqlMigrationColumnBuilder::notNull)
+				.column(AUDIT_REPOSITORY, SqlTypes.STRING.configure(SqlParameter.length(64)))
+				.column(AUDIT_TARGET, SqlTypes.STRING.configure(SqlParameter.length(1024)))
+				.column(AUDIT_IP, SqlTypes.STRING.configure(SqlParameter.length(64)))
+				.column(AUDIT_DETAIL, SqlTypes.TEXT)
+				.primaryKey(AUDIT_ID)
+			);
+			builder.createIndex(AUDIT_LOG, "idx_audit_log_timestamp", index -> index.columns(AUDIT_TIMESTAMP).method(SqlIndexMethod.BTREE));
+			builder.createTable(WEBHOOKS, table -> table
+				.column(WEBHOOK_ID, SqlTypes.STRING.configure(SqlParameter.length(36)), SqlMigrationColumnBuilder::notNull)
+				.column(WEBHOOK_REPOSITORY, SqlTypes.STRING.configure(SqlParameter.length(64)))
+				.column(WEBHOOK_URL, SqlTypes.STRING.configure(SqlParameter.length(1024)), SqlMigrationColumnBuilder::notNull)
+				.column(WEBHOOK_SECRET, SqlTypes.STRING.configure(SqlParameter.length(256)))
+				.column(WEBHOOK_EVENTS, SqlTypes.TEXT)
+				.column(WEBHOOK_ACTIVE, SqlTypes.BOOLEAN, SqlMigrationColumnBuilder::notNull)
+				.column(WEBHOOK_CREATED_AT, SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SqlMigrationColumnBuilder::notNull)
+				.column(WEBHOOK_CREATED_BY, SqlTypes.STRING.configure(SqlParameter.length(128)))
+				.primaryKey(WEBHOOK_ID)
+			);
+			builder.createTable(WEBHOOK_DELIVERIES, table -> table
+				.column(DELIVERY_ID, SqlTypes.STRING.configure(SqlParameter.length(36)), SqlMigrationColumnBuilder::notNull)
+				.column(DELIVERY_WEBHOOK, SqlTypes.STRING.configure(SqlParameter.length(36)), SqlMigrationColumnBuilder::notNull)
+				.column(DELIVERY_EVENT, SqlTypes.STRING.configure(SqlParameter.length(64)), SqlMigrationColumnBuilder::notNull)
+				.column(DELIVERY_REPOSITORY, SqlTypes.STRING.configure(SqlParameter.length(64)))
+				.column(DELIVERY_SUCCESS, SqlTypes.BOOLEAN, SqlMigrationColumnBuilder::notNull)
+				.column(DELIVERY_STATUS, SqlTypes.LONG, SqlMigrationColumnBuilder::notNull)
+				.column(DELIVERY_ERROR, SqlTypes.TEXT)
+				.column(DELIVERY_CREATED_AT, SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SqlMigrationColumnBuilder::notNull)
+				.primaryKey(DELIVERY_ID)
+			);
+			builder.createIndex(WEBHOOK_DELIVERIES, "idx_webhook_deliveries_webhook", index -> index.columns(DELIVERY_WEBHOOK).method(SqlIndexMethod.BTREE));
+			builder.createTable(REMOTE_REPOSITORIES, table -> table
+				.column(REMOTE_REPOSITORY, SqlTypes.STRING.configure(SqlParameter.length(64)), SqlMigrationColumnBuilder::notNull)
+				.column(REMOTE_URL, SqlTypes.STRING.configure(SqlParameter.length(1024)), SqlMigrationColumnBuilder::notNull)
+				.column(REMOTE_CACHE_ENABLED, SqlTypes.BOOLEAN, SqlMigrationColumnBuilder::notNull)
+				.column(REMOTE_USERNAME, SqlTypes.STRING.configure(SqlParameter.length(256)))
+				.column(REMOTE_PASSWORD, SqlTypes.STRING.configure(SqlParameter.length(512)))
+				.primaryKey(REMOTE_REPOSITORY)
+			);
+			builder.createTable(VIRTUAL_MEMBERS, table -> table
+				.column(VIRTUAL_REPOSITORY, SqlTypes.STRING.configure(SqlParameter.length(64)), SqlMigrationColumnBuilder::notNull)
+				.column(VIRTUAL_MEMBER, SqlTypes.STRING.configure(SqlParameter.length(64)), SqlMigrationColumnBuilder::notNull)
+				.column(VIRTUAL_POSITION, SqlTypes.LONG, SqlMigrationColumnBuilder::notNull)
+				.primaryKey(VIRTUAL_REPOSITORY, VIRTUAL_MEMBER)
+			);
+		}, (builder, _) -> {
+			builder.dropTable(VIRTUAL_MEMBERS);
+			builder.dropTable(REMOTE_REPOSITORIES);
+			builder.dropTable(WEBHOOK_DELIVERIES);
+			builder.dropTable(WEBHOOKS);
+			builder.dropTable(AUDIT_LOG);
+			builder.dropTable(TOKEN_META);
+		})
 	);
 	
 	private Migrations() {}

@@ -9,14 +9,17 @@ import io.javalin.json.JavalinJackson3;
 import io.javalin.openapi.plugin.OpenApiPlugin;
 import io.javalin.openapi.plugin.swagger.SwaggerPlugin;
 import net.luis.artifactory.auth.AuthService;
+import net.luis.artifactory.auth.TokenUsageService;
 import net.luis.artifactory.auth.UserService;
 import net.luis.artifactory.config.*;
 import net.luis.artifactory.database.DatabaseProvider;
 import net.luis.artifactory.database.SqlErrors;
 import net.luis.artifactory.dto.response.ErrorResponse;
 import net.luis.artifactory.handler.HealthHandler;
+import net.luis.artifactory.handler.admin.AuditAdminHandler;
 import net.luis.artifactory.handler.admin.RepositoryAdminHandler;
 import net.luis.artifactory.handler.admin.UserAdminHandler;
+import net.luis.artifactory.handler.admin.WebhookAdminHandler;
 import net.luis.artifactory.handler.format.RepositoryDispatcher;
 import net.luis.artifactory.http.*;
 import net.luis.artifactory.repository.*;
@@ -73,15 +76,21 @@ public class Application {
 		BlobStore blobStore = new BlobStore(serverConfig.storagePath(), serverConfig.maxUploadSize(), ORPHAN_GRACE_PERIOD);
 		UserService userService = new UserService(database);
 		userService.bootstrapAdmin(serverConfig.adminUsername(), serverConfig.adminPassword());
-		ArtifactService artifactService = new ArtifactService(database, blobStore);
+		WebhookService webhookService = new WebhookService(database);
+		ArtifactService artifactService = new ArtifactService(database, blobStore, webhookService);
+		TokenUsageService tokenUsageService = new TokenUsageService(userService);
 		Services services = new Services(
 			serverConfig,
 			userService,
-			new AuthService(userService, serverConfig),
+			new AuthService(userService, tokenUsageService, serverConfig),
+			tokenUsageService,
 			new RepositoryService(database, artifactService),
 			artifactService,
 			new PackageService(database),
-			new BodyReader(Math.min(serverConfig.maxBufferedUploadSize(), serverConfig.maxUploadSize() * 2), Runtime.getRuntime().maxMemory())
+			new BodyReader(Math.min(serverConfig.maxBufferedUploadSize(), serverConfig.maxUploadSize() * 2), Runtime.getRuntime().maxMemory()),
+			new AuditService(database),
+			webhookService,
+			new ProxyService(serverConfig.maxUploadSize())
 		);
 		
 		Javalin app = createApp(services, databaseProvider).start(serverConfig.port());
@@ -114,6 +123,8 @@ public class Application {
 		var healthHandler = new HealthHandler(databaseProvider);
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);
 		var userAdminHandler = new UserAdminHandler(services);
+		var auditAdminHandler = new AuditAdminHandler(services);
+		var webhookAdminHandler = new WebhookAdminHandler(services);
 		var dispatcher = new RepositoryDispatcher(services);
 		
 		return Javalin.create(config -> {
@@ -220,6 +231,8 @@ public class Application {
 			
 			// Health
 			config.routes.get("/health", healthHandler::health);
+			config.routes.get("/health/live", healthHandler::live);
+			config.routes.get("/health/ready", healthHandler::ready);
 			
 			// Web ui
 			config.routes.get("/", ctx -> ctx.redirect("/ui/"));
@@ -247,6 +260,14 @@ public class Application {
 			config.routes.get("/api/tokens", userAdminHandler::listTokens);
 			config.routes.post("/api/tokens", userAdminHandler::createToken);
 			config.routes.delete("/api/tokens/{id}", userAdminHandler::deleteToken);
+			config.routes.get("/api/audit", auditAdminHandler::list);
+			config.routes.get("/api/webhooks", webhookAdminHandler::list);
+			config.routes.post("/api/webhooks", webhookAdminHandler::create);
+			config.routes.get("/api/webhooks/{id}", webhookAdminHandler::get);
+			config.routes.patch("/api/webhooks/{id}", webhookAdminHandler::update);
+			config.routes.delete("/api/webhooks/{id}", webhookAdminHandler::delete);
+			config.routes.post("/api/webhooks/{id}/test", webhookAdminHandler::test);
+			config.routes.get("/api/webhooks/{id}/deliveries", webhookAdminHandler::deliveries);
 			
 			// Repositories: /{type}/{repository}/...
 			for (RepositoryType type : RepositoryType.values()) {
@@ -270,6 +291,7 @@ public class Application {
 		public void stop() {
 			this.maintenance.shutdownNow();
 			this.app.stop();
+			this.services.webhooks().close();
 			try {
 				this.databaseProvider.close();
 			} catch (SqlException e) {

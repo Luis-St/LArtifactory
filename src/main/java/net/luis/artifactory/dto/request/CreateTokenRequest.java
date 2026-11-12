@@ -6,5 +6,7 @@ public record CreateTokenRequest(
 	@Nullable String name,
 	@Nullable String username,
 	@Nullable String level,
-	@Nullable Integer expiresInDays
+	@Nullable Integer expiresInDays,
+	@Nullable String allowedIps,
+	@Nullable Integer rateLimitPerMinute
 ) {}

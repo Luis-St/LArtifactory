@@ -41,12 +41,14 @@ public class AuthService {
 	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
 	
 	private final UserService userService;
+	private final TokenUsageService tokenUsage;
 	private final ServerConfig config;
 	private final LoginThrottle throttle;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 	
-	public AuthService(@NonNull UserService userService, @NonNull ServerConfig config) {
+	public AuthService(@NonNull UserService userService, @NonNull TokenUsageService tokenUsage, @NonNull ServerConfig config) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
+		this.tokenUsage = Objects.requireNonNull(tokenUsage, "Token usage service must not be null");
 		this.config = Objects.requireNonNull(config, "Config must not be null");
 		this.throttle = new LoginThrottle(config.loginMaxFailures(), Duration.ofMinutes(config.loginLockoutMinutes()));
 	}
@@ -234,18 +236,18 @@ public class AuthService {
 				return this.requireSession(value);
 			}
 			if ("Bearer".equalsIgnoreCase(scheme) || "token".equalsIgnoreCase(scheme)) {
-				return this.requireToken(value, null);
+				return this.requireToken(ctx, value, null);
 			}
 			if (space < 0) {
-				return this.requireToken(value, null); // Cargo sends the raw token
+				return this.requireToken(ctx, value, null); // Cargo sends the raw token
 			}
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-		
+
 		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
 			String apiKey = ctx.header(header);
 			if (apiKey != null && !apiKey.isBlank()) {
-				return this.requireToken(apiKey.strip(), null);
+				return this.requireToken(ctx, apiKey.strip(), null);
 			}
 		}
 		return null;
@@ -266,7 +268,7 @@ public class AuthService {
 		String secret = decoded.substring(colon + 1);
 		
 		if ("__token__".equals(username) || secret.startsWith("lat_")) {
-			return this.requireToken(secret, "__token__".equals(username) ? null : username);
+			return this.requireToken(ctx, secret, "__token__".equals(username) ? null : username);
 		}
 		
 		String cacheKey = "basic:" + BlobStore.sha256Hex(decoded);
@@ -280,14 +282,19 @@ public class AuthService {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
 		Principal principal = new Principal(user.username(), user.admin(), null);
-		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null));
+		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null, null));
 		return principal;
 	}
 	
-	private @NonNull Principal requireToken(@NonNull String secret, @Nullable String expectedUser) throws SqlException {
+	private @NonNull Principal requireToken(@NonNull Context ctx, @NonNull String secret, @Nullable String expectedUser) throws SqlException {
 		String cacheKey = "token:" + UserService.hashToken(secret);
-		Principal principal = this.cached(cacheKey);
-		if (principal == null) {
+		CacheEntry cached = this.cached(cacheKey);
+		Principal principal;
+		String tokenId;
+		if (cached != null) {
+			principal = cached.principal();
+			tokenId = Objects.requireNonNull(cached.tokenId(), "Token cache entry must have a token id");
+		} else {
 			TokenEntity token = this.userService.findTokenBySecret(secret);
 			if (token == null || (token.expiresAt() != null && token.expiresAt().isBefore(Instant.now()))) {
 				throw HttpError.unauthorized("Basic realm=\"artifactory\"");
@@ -298,20 +305,23 @@ public class AuthService {
 			}
 			AccessLevel level = Objects.requireNonNullElse(AccessLevel.parse(token.level()), AccessLevel.READ);
 			principal = new Principal(user.username(), user.admin(), level);
-			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt()));
+			tokenId = token.id();
+			this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, token.expiresAt(), token.id()));
 		}
-		
+
 		if (expectedUser != null && !expectedUser.equals(principal.username())) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
+		// Enforce the token ip allowlist and rate limit on every request (also on cache hits), and record the usage
+		this.tokenUsage.enforceAndRecord(tokenId, Requests.clientIp(ctx, this.config));
 		return principal;
 	}
 	
 	private @NonNull Principal requireSession(@NonNull String secret) throws SqlException {
 		String cacheKey = "session:" + UserService.hashToken(secret);
-		Principal principal = this.cached(cacheKey);
-		if (principal != null) {
-			return principal;
+		CacheEntry cached = this.cached(cacheKey);
+		if (cached != null) {
+			return cached.principal();
 		}
 		SessionEntity session = this.userService.findSessionBySecret(secret);
 		if (session == null || session.expiresAt().isBefore(Instant.now())) {
@@ -321,22 +331,22 @@ public class AuthService {
 		if (user == null) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-		principal = new Principal(user.username(), user.admin(), null);
-		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, session.expiresAt()));
+		Principal principal = new Principal(user.username(), user.admin(), null);
+		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, session.expiresAt(), null));
 		return principal;
 	}
 	
 	/**
-	 * Returns the cached principal, entries are re-checked against the expiry of their token or session so a credential that
+	 * Returns the cached entry, entries are re-checked against the expiry of their token or session so a credential that
 	 * expires within the cache window stops working immediately.<br>
 	 */
-	private @Nullable Principal cached(@NonNull String cacheKey) {
+	private @Nullable CacheEntry cached(@NonNull String cacheKey) {
 		CacheEntry cached = this.cache.get(cacheKey);
 		if (cached != null && cached.expiresAt() > System.currentTimeMillis() && (cached.credentialExpiresAt() == null || cached.credentialExpiresAt().isAfter(Instant.now()))) {
-			return cached.principal();
+			return cached;
 		}
 		return null;
 	}
 	
-	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant credentialExpiresAt) {}
+	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant credentialExpiresAt, @Nullable String tokenId) {}
 }

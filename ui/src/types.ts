@@ -15,6 +15,15 @@ export interface Health {
 	database: string;
 }
 
+export const REPOSITORY_CLASSES = ['LOCAL', 'REMOTE', 'VIRTUAL'] as const;
+export type RepositoryClass = (typeof REPOSITORY_CLASSES)[number];
+
+export interface RemoteInfo {
+	url: string;
+	cacheEnabled: boolean;
+	username: string | null;
+}
+
 export interface Repository {
 	name: string;
 	type: RepositoryType;
@@ -23,6 +32,9 @@ export interface Repository {
 	allowRedeploy: boolean;
 	createdAt: string;
 	url: string;
+	kind: RepositoryClass;
+	remote: RemoteInfo | null;
+	members: string[];
 }
 
 export interface PackageVersion {
@@ -63,6 +75,41 @@ export interface Permission {
 	level: AccessLevel;
 }
 
+export const WEBHOOK_EVENTS = ['artifact.published', 'artifact.deleted', 'package.deleted', 'repository.created', 'repository.deleted'] as const;
+export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
+
+export interface Webhook {
+	id: string;
+	repository: string | null;
+	url: string;
+	hasSecret: boolean;
+	events: string[];
+	active: boolean;
+	createdAt: string;
+	createdBy: string | null;
+}
+
+export interface WebhookDelivery {
+	id: string;
+	event: string;
+	repository: string | null;
+	success: boolean;
+	statusCode: number;
+	error: string | null;
+	createdAt: string;
+}
+
+export interface AuditEntry {
+	id: string;
+	timestamp: string;
+	actor: string | null;
+	action: string;
+	repository: string | null;
+	target: string | null;
+	ip: string | null;
+	detail: string | null;
+}
+
 export interface Token {
 	id: string;
 	username: string;
@@ -70,5 +117,9 @@ export interface Token {
 	level: AccessLevel;
 	createdAt: string;
 	expiresAt: string | null;
+	allowedIps: string | null;
+	rateLimit: number;
+	lastUsedAt: string | null;
+	lastUsedIp: string | null;
 	token: string | null;
 }

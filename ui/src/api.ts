@@ -1,4 +1,4 @@
-import type {AccessLevel, FileEntry, Health, Package, Permission, Principal, Repository, Token, User} from './types';
+import type {AccessLevel, AuditEntry, FileEntry, Health, Package, Permission, Principal, Repository, Token, User, Webhook, WebhookDelivery} from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -142,10 +142,22 @@ export const api = {
 	
 	repositories: () => request<Repository[]>('GET', '/api/repositories'),
 	repository: (name: string) => request<Repository>('GET', `/api/repositories/${enc(name)}`),
-	createRepository: (body: { name: string; type: string; description?: string; publicRead: boolean; allowRedeploy: boolean }) =>
-		request<Repository>('POST', '/api/repositories', body),
-	updateRepository: (name: string, body: { description?: string; publicRead?: boolean; allowRedeploy?: boolean }) =>
-		request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
+	createRepository: (body: {
+		name: string;
+		type: string;
+		description?: string;
+		publicRead: boolean;
+		allowRedeploy: boolean;
+		remote?: { url: string; cacheEnabled: boolean; username?: string; password?: string };
+		members?: string[];
+	}) => request<Repository>('POST', '/api/repositories', body),
+	updateRepository: (name: string, body: {
+		description?: string;
+		publicRead?: boolean;
+		allowRedeploy?: boolean;
+		remote?: { url: string; cacheEnabled: boolean; username?: string; password?: string };
+		members?: string[];
+	}) => request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
 	deleteRepository: (name: string) => request<void>('DELETE', `/api/repositories/${enc(name)}`),
 	packages: (name: string, q?: string) => requestAll<Package>(`/api/repositories/${enc(name)}/packages`, {q}, 500),
 	deletePackage: (name: string, pkg: string, version?: string) =>
@@ -162,8 +174,18 @@ export const api = {
 	deletePermission: (repository: string, username: string) => request<void>('DELETE', `/api/permissions${query({repository, username})}`),
 	
 	tokens: (username?: string) => request<Token[]>('GET', `/api/tokens${query({username})}`),
-	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number }) => request<Token>('POST', '/api/tokens', body),
+	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number; allowedIps?: string; rateLimitPerMinute?: number }) => request<Token>('POST', '/api/tokens', body),
 	deleteToken: (id: string) => request<void>('DELETE', `/api/tokens/${enc(id)}`),
+
+	audit: (filter: { repository?: string; actor?: string; action?: string; limit?: number; offset?: number } = {}) =>
+		request<AuditEntry[]>('GET', `/api/audit${query({ repository: filter.repository, actor: filter.actor, action: filter.action, limit: filter.limit?.toString(), offset: filter.offset?.toString() })}`),
+
+	webhooks: (repository?: string) => request<Webhook[]>('GET', `/api/webhooks${query({ repository })}`),
+	createWebhook: (body: { repository?: string; url: string; secret?: string; events: string[]; active: boolean }) => request<Webhook>('POST', '/api/webhooks', body),
+	updateWebhook: (id: string, body: { url?: string; events?: string[]; active?: boolean }) => request<Webhook>('PATCH', `/api/webhooks/${enc(id)}`, body),
+	deleteWebhook: (id: string) => request<void>('DELETE', `/api/webhooks/${enc(id)}`),
+	testWebhook: (id: string) => request<WebhookDelivery>('POST', `/api/webhooks/${enc(id)}/test`),
+	webhookDeliveries: (id: string) => request<WebhookDelivery[]>('GET', `/api/webhooks/${enc(id)}/deliveries`),
 };
 
 /**

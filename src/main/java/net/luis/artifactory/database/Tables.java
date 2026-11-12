@@ -25,6 +25,13 @@ public final class Tables {
 	public static final SqlColumn<TokenEntity, Instant> TOKEN_CREATED_AT = TOKENS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenEntity::createdAt, SqlColumnBuilder::notNull);
 	public static final SqlColumn<TokenEntity, Instant> TOKEN_EXPIRES_AT = TOKENS.column("expires_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenEntity::expiresAt);
 	
+	public static final SqlTable<TokenMetaEntity> TOKEN_META = SqlTable.create(TokenMetaEntity.class, "token_meta");
+	public static final SqlColumn<TokenMetaEntity, String> TOKEN_META_ID = TOKEN_META.column("token_id", SqlTypes.STRING.configure(SqlParameter.length(36)), TokenMetaEntity::tokenId, col -> col.primaryKey().notNull());
+	public static final SqlColumn<TokenMetaEntity, String> TOKEN_META_ALLOWED_IPS = TOKEN_META.column("allowed_ips", SqlTypes.TEXT, TokenMetaEntity::allowedIps);
+	public static final SqlColumn<TokenMetaEntity, Long> TOKEN_META_RATE_LIMIT = TOKEN_META.column("rate_limit", SqlTypes.LONG, TokenMetaEntity::rateLimit, SqlColumnBuilder::notNull);
+	public static final SqlColumn<TokenMetaEntity, Instant> TOKEN_META_LAST_USED_AT = TOKEN_META.column("last_used_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), TokenMetaEntity::lastUsedAt);
+	public static final SqlColumn<TokenMetaEntity, String> TOKEN_META_LAST_USED_IP = TOKEN_META.column("last_used_ip", SqlTypes.STRING.configure(SqlParameter.length(64)), TokenMetaEntity::lastUsedIp);
+	
 	public static final SqlTable<SessionEntity> SESSIONS = SqlTable.create(SessionEntity.class, "sessions");
 	public static final SqlColumn<SessionEntity, String> SESSION_ID = SESSIONS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), SessionEntity::id, col -> col.primaryKey().notNull());
 	public static final SqlColumn<SessionEntity, String> SESSION_USERNAME = SESSIONS.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), SessionEntity::username, SqlColumnBuilder::notNull);
@@ -78,6 +85,49 @@ public final class Tables {
 	public static final SqlColumn<DistTagEntity, String> TAG_NAME = DIST_TAGS.column("tag", SqlTypes.STRING.configure(SqlParameter.length(128)), DistTagEntity::tag, col -> col.primaryKey().notNull());
 	public static final SqlColumn<DistTagEntity, String> TAG_VERSION = DIST_TAGS.column("version", SqlTypes.STRING.configure(SqlParameter.length(128)), DistTagEntity::version, SqlColumnBuilder::notNull);
 	public static final SqlCompositePrimaryKey<DistTagEntity> TAG_PK = DIST_TAGS.compositePrimaryKey(TAG_REPOSITORY, TAG_PACKAGE, TAG_NAME);
+	
+	public static final SqlTable<RemoteConfigEntity> REMOTE_REPOSITORIES = SqlTable.create(RemoteConfigEntity.class, "remote_repositories");
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_REPOSITORY = REMOTE_REPOSITORIES.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), RemoteConfigEntity::repository, col -> col.primaryKey().notNull());
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_URL = REMOTE_REPOSITORIES.column("url", SqlTypes.STRING.configure(SqlParameter.length(1024)), RemoteConfigEntity::url, SqlColumnBuilder::notNull);
+	public static final SqlColumn<RemoteConfigEntity, Boolean> REMOTE_CACHE_ENABLED = REMOTE_REPOSITORIES.column("cache_enabled", SqlTypes.BOOLEAN, RemoteConfigEntity::cacheEnabled, SqlColumnBuilder::notNull);
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_USERNAME = REMOTE_REPOSITORIES.column("username", SqlTypes.STRING.configure(SqlParameter.length(256)), RemoteConfigEntity::username);
+	public static final SqlColumn<RemoteConfigEntity, String> REMOTE_PASSWORD = REMOTE_REPOSITORIES.column("password", SqlTypes.STRING.configure(SqlParameter.length(512)), RemoteConfigEntity::password);
+	
+	public static final SqlTable<VirtualMemberEntity> VIRTUAL_MEMBERS = SqlTable.create(VirtualMemberEntity.class, "virtual_members");
+	public static final SqlColumn<VirtualMemberEntity, String> VIRTUAL_REPOSITORY = VIRTUAL_MEMBERS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), VirtualMemberEntity::repository, col -> col.primaryKey().notNull());
+	public static final SqlColumn<VirtualMemberEntity, String> VIRTUAL_MEMBER = VIRTUAL_MEMBERS.column("member", SqlTypes.STRING.configure(SqlParameter.length(64)), VirtualMemberEntity::member, col -> col.primaryKey().notNull());
+	public static final SqlColumn<VirtualMemberEntity, Long> VIRTUAL_POSITION = VIRTUAL_MEMBERS.column("position", SqlTypes.LONG, VirtualMemberEntity::position, SqlColumnBuilder::notNull);
+	public static final SqlCompositePrimaryKey<VirtualMemberEntity> VIRTUAL_PK = VIRTUAL_MEMBERS.compositePrimaryKey(VIRTUAL_REPOSITORY, VIRTUAL_MEMBER);
+	
+	public static final SqlTable<WebhookEntity> WEBHOOKS = SqlTable.create(WebhookEntity.class, "webhooks");
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_ID = WEBHOOKS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_REPOSITORY = WEBHOOKS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), WebhookEntity::repository);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_URL = WEBHOOKS.column("url", SqlTypes.STRING.configure(SqlParameter.length(1024)), WebhookEntity::url, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_SECRET = WEBHOOKS.column("secret", SqlTypes.STRING.configure(SqlParameter.length(256)), WebhookEntity::secret);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_EVENTS = WEBHOOKS.column("events", SqlTypes.TEXT, WebhookEntity::events);
+	public static final SqlColumn<WebhookEntity, Boolean> WEBHOOK_ACTIVE = WEBHOOKS.column("active", SqlTypes.BOOLEAN, WebhookEntity::active, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookEntity, Instant> WEBHOOK_CREATED_AT = WEBHOOKS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), WebhookEntity::createdAt, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookEntity, String> WEBHOOK_CREATED_BY = WEBHOOKS.column("created_by", SqlTypes.STRING.configure(SqlParameter.length(128)), WebhookEntity::createdBy);
+	
+	public static final SqlTable<WebhookDeliveryEntity> WEBHOOK_DELIVERIES = SqlTable.create(WebhookDeliveryEntity.class, "webhook_deliveries");
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_ID = WEBHOOK_DELIVERIES.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookDeliveryEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_WEBHOOK = WEBHOOK_DELIVERIES.column("webhook_id", SqlTypes.STRING.configure(SqlParameter.length(36)), WebhookDeliveryEntity::webhookId, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_EVENT = WEBHOOK_DELIVERIES.column("event", SqlTypes.STRING.configure(SqlParameter.length(64)), WebhookDeliveryEntity::event, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_REPOSITORY = WEBHOOK_DELIVERIES.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), WebhookDeliveryEntity::repository);
+	public static final SqlColumn<WebhookDeliveryEntity, Boolean> DELIVERY_SUCCESS = WEBHOOK_DELIVERIES.column("success", SqlTypes.BOOLEAN, WebhookDeliveryEntity::success, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, Long> DELIVERY_STATUS = WEBHOOK_DELIVERIES.column("status_code", SqlTypes.LONG, WebhookDeliveryEntity::statusCode, SqlColumnBuilder::notNull);
+	public static final SqlColumn<WebhookDeliveryEntity, String> DELIVERY_ERROR = WEBHOOK_DELIVERIES.column("error", SqlTypes.TEXT, WebhookDeliveryEntity::error);
+	public static final SqlColumn<WebhookDeliveryEntity, Instant> DELIVERY_CREATED_AT = WEBHOOK_DELIVERIES.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), WebhookDeliveryEntity::createdAt, SqlColumnBuilder::notNull);
+	
+	public static final SqlTable<AuditEntity> AUDIT_LOG = SqlTable.create(AuditEntity.class, "audit_log");
+	public static final SqlColumn<AuditEntity, String> AUDIT_ID = AUDIT_LOG.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), AuditEntity::id, col -> col.primaryKey().notNull());
+	public static final SqlColumn<AuditEntity, Instant> AUDIT_TIMESTAMP = AUDIT_LOG.column("timestamp", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), AuditEntity::timestamp, SqlColumnBuilder::notNull);
+	public static final SqlColumn<AuditEntity, String> AUDIT_ACTOR = AUDIT_LOG.column("actor", SqlTypes.STRING.configure(SqlParameter.length(128)), AuditEntity::actor);
+	public static final SqlColumn<AuditEntity, String> AUDIT_ACTION = AUDIT_LOG.column("action", SqlTypes.STRING.configure(SqlParameter.length(64)), AuditEntity::action, SqlColumnBuilder::notNull);
+	public static final SqlColumn<AuditEntity, String> AUDIT_REPOSITORY = AUDIT_LOG.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), AuditEntity::repository);
+	public static final SqlColumn<AuditEntity, String> AUDIT_TARGET = AUDIT_LOG.column("target", SqlTypes.STRING.configure(SqlParameter.length(1024)), AuditEntity::target);
+	public static final SqlColumn<AuditEntity, String> AUDIT_IP = AUDIT_LOG.column("ip", SqlTypes.STRING.configure(SqlParameter.length(64)), AuditEntity::ip);
+	public static final SqlColumn<AuditEntity, String> AUDIT_DETAIL = AUDIT_LOG.column("detail", SqlTypes.TEXT, AuditEntity::detail);
 	
 	/**
 	 * The tables of the initial schema, they are created if missing on startup.<br>

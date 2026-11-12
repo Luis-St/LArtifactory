@@ -36,10 +36,12 @@ public class ArtifactService {
 	
 	private final SqlDatabase database;
 	private final BlobStore blobStore;
-	
-	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore) {
+	private final WebhookService webhooks;
+
+	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore, @NonNull WebhookService webhooks) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 		this.blobStore = Objects.requireNonNull(blobStore, "Blob store must not be null");
+		this.webhooks = Objects.requireNonNull(webhooks, "Webhook service must not be null");
 	}
 	
 	private static @Nullable FileEntity get(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String path) throws SqlException {
@@ -129,17 +131,21 @@ public class ArtifactService {
 	}
 	
 	/**
-	 * Runs the action in one database transaction, the blobs of files removed by it are released after the commit.<br>
+	 * Runs the action in one database transaction, the blobs of files removed by it are released and the actions registered
+	 * for after the commit (e.g. webhooks) are run once the transaction was committed.<br>
 	 */
 	public <T> T transaction(@NonNull ThrowableFunction<UnitOfWork, T, SqlException> action) throws SqlException {
 		List<FileEntity> removed = new ArrayList<>();
+		List<Runnable> afterCommit = new ArrayList<>();
 		T result = this.database.inTransaction(transaction -> {
 			UnitOfWork work = new UnitOfWork(transaction);
 			T value = action.apply(work);
 			removed.addAll(work.removedFiles());
+			afterCommit.addAll(work.afterCommitActions());
 			return value;
 		});
 		this.releaseBlobs(removed);
+		afterCommit.forEach(Runnable::run);
 		return result;
 	}
 	
@@ -218,12 +224,26 @@ public class ArtifactService {
 	}
 	
 	public @NonNull FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
+		return this.put(work, repository, path, blob, contentType, packageName, version, metadata, createdBy, true);
+	}
+	
+	/**
+	 * Records a cached copy of an artifact fetched from a remote repository, without firing a publish webhook.<br>
+	 */
+	public @NonNull FileEntity putCached(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType) throws SqlException {
+		return this.transaction(work -> this.put(work, repository, path, blob, contentType, null, null, null, "remote-cache", false));
+	}
+	
+	private @NonNull FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify) throws SqlException {
 		FileEntity file = new FileEntity(repository, path, packageName, version, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), contentType, metadata, Instant.now(), createdBy);
 		FileEntity previous = get(work.sql(), repository, path);
 		work.sql().from(FILES).delete().where(fileCondition(repository, path)).execute();
 		work.sql().from(FILES).insert(file).execute();
 		if (previous != null && !previous.sha256().equals(blob.sha256())) {
 			work.removed(List.of(previous));
+		}
+		if (notify) {
+			work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_PUBLISHED, repository, path));
 		}
 		return file;
 	}
@@ -239,6 +259,7 @@ public class ArtifactService {
 		}
 		work.sql().from(FILES).delete().where(fileCondition(repository, path)).execute();
 		work.removed(List.of(file));
+		work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, path));
 		return true;
 	}
 	
@@ -248,6 +269,9 @@ public class ArtifactService {
 			work.sql().from(FILES).delete().where(fileCondition(repository, file.path())).execute();
 		}
 		work.removed(files);
+		if (!files.isEmpty()) {
+			work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, prefix));
+		}
 		return files;
 	}
 	
@@ -255,6 +279,9 @@ public class ArtifactService {
 		List<FileEntity> files = listByVersion(work.sql(), repository, packageName, version);
 		work.sql().from(FILES).delete().where(versionCondition(repository, packageName, version)).execute();
 		work.removed(files);
+		if (!files.isEmpty()) {
+			work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, packageName + "@" + version));
+		}
 		return files.size();
 	}
 	

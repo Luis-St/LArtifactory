@@ -51,7 +51,9 @@ artifacts are always served with `Content-Disposition: attachment` and `X-Conten
 ## Web UI
 The server ships a web ui at `/ui/` (`/` redirects there). It shows an overview of the stored artifacts per repository type,
 lets you browse packages, versions and files, and covers the configuration of repositories, users, permissions and tokens,
-including copy-ready client setup snippets for every repository. Users sign in with their password or an access token.
+including copy-ready client setup snippets for every repository.
+Administrators also get an audit log of administrative actions and can manage webhooks.
+Users sign in with their password or an access token.
 Signing in with a password creates a session (`POST /api/session`), only the session token is kept in the browser and never the password.
 The ui is a React single page application in `ui/`, built with Vite and packaged into the jar by Gradle (requires Node.js 20.19+):
 
@@ -75,6 +77,28 @@ Repositories are created with the management api, every repository has one of th
 
 Released versions are immutable: uploading a different file over an existing release returns `409 Conflict`
 (Maven snapshots can always be redeployed, repositories can allow redeploys with `allowRedeploy`).
+
+### Local, remote and virtual repositories
+
+Besides normal local repositories, which store the artifacts that are published to them, a repository can be remote or virtual.
+A remote repository proxies an upstream and optionally caches what is fetched.
+A virtual repository aggregates several repositories and resolves reads across them in order.
+Remote and virtual repositories are read-only and currently support only the path based `maven` and `generic` types.
+
+```bash
+# A remote repository proxying Maven Central, caching downloads locally
+curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \
+	-d '{"name":"maven-central","type":"maven","remote":{"url":"https://repo1.maven.org/maven2","cacheEnabled":true}}'
+
+# A virtual repository that serves releases, snapshots and the proxy under one url (first match wins)
+curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \
+	-d '{"name":"maven-all","type":"maven","members":["releases","snapshots","maven-central"]}'
+```
+
+A remote repository fetches a missing artifact from `{upstream}/{path}`.
+With `cacheEnabled` the fetched artifact is stored locally on first access.
+A virtual repository resolves each read against its members, local or remote, in order and serves the first match.
+It never generates or merges Maven metadata, so metadata is served from whichever member provides it as a real file.
 ### Client configuration
 **Gradle**
 
@@ -148,7 +172,9 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 - Users authenticate with their password (basic auth) or with tokens.
 - Tokens are created with `POST /api/tokens` and can be used as password (basic auth, any user name or `__token__`),
   as bearer token (npm), as `X-NuGet-ApiKey` (NuGet) or as raw `Authorization` header (Cargo).
-  A token can be limited to a lower access level than its user and can expire.
+  A token can be limited to a lower access level than its user and can expire. Tokens may additionally be restricted
+  to an IP allowlist (`allowedIps`, a comma or whitespace separated list of IPs or CIDR ranges) and to a per minute
+  request rate limit (`rateLimitPerMinute`); the server records when and from which IP each token was last used.
 - Access levels per repository: `READ` (download), `WRITE` (publish, tags, yank, unlist) and `DELETE` (delete, unpublish).
   Permissions are granted per repository or for all repositories with `*`. Administrators have full access.
 - The management api (`/api/*`) requires authenticating with the user password (basic auth) or a web ui session.
@@ -178,12 +204,29 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | `GET` `PUT` `DELETE`   | `/api/permissions`                  | List / grant / revoke permissions                                            |
 | `GET` `POST`           | `/api/tokens`                       | List / create tokens                                                         |
 | `DELETE`               | `/api/tokens/{id}`                  | Revoke a token                                                               |
+| `GET`                  | `/api/audit`                        | List audit log entries (admin, `?repository=&actor=&action=&limit=&offset=`) |
+| `GET` `POST`           | `/api/webhooks`                     | List / create webhooks (admin)                                               |
+| `GET` `PATCH` `DELETE` | `/api/webhooks/{id}`                | Get / update / delete a webhook (admin)                                      |
+| `POST`                 | `/api/webhooks/{id}/test`           | Send a test ping and return the delivery result (admin)                      |
+| `GET`                  | `/api/webhooks/{id}/deliveries`     | List recent delivery attempts of a webhook (admin)                           |
 
 Users changing their own password also send `currentPassword`,
 so a stolen web ui session alone can not be used to take over the account.
 The package and file lists are paged, the total number of entries is returned in the `X-Total-Count` header.
 A page holds at most 500 packages or 5000 files, so a single request can not load a whole large repository into memory.
 The full api is documented in `openapi.json` and served by Swagger UI at `/swagger`.
+
+### Webhooks
+
+Webhooks notify external services when something changes. Each webhook has a target url, an optional repository scope
+(empty means all repositories), an optional set of event types (empty means all) and an optional signing secret.
+
+Events: `artifact.published`, `artifact.deleted`, `package.deleted`, `repository.created`, `repository.deleted`.
+
+Deliveries are sent asynchronously as a JSON `POST` and retried a few times; the body is
+`{"event":..., "repository":..., "target":..., "timestamp":...}`. Each request carries `X-LArtifactory-Event`,
+`X-LArtifactory-Delivery` and, when a secret is configured, `X-LArtifactory-Signature: sha256=<hmac>` (HMAC-SHA256 of
+the raw body). The last delivery attempts are recorded and can be inspected in the web UI or via the API.
 
 ```bash
 curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \
@@ -206,7 +249,18 @@ curl -u ci:a-long-password -X POST https://repo.example.com/api/tokens -H 'Conte
 
 `./gradlew compileJava` also regenerates `openapi.json` from the `@OpenApi` annotations.
 The integration tests start the server against a PostgreSQL container with Testcontainers and are skipped if no docker daemon is available.
-Swagger UI is served at `/swagger`, the health endpoint at `/health`.
+Swagger UI is served at `/swagger`, the health endpoints below are served at `/health`.
+
+### Health probes
+
+| Path            | Checks                 | Status codes                                     | Use for                                |
+|-----------------|------------------------|--------------------------------------------------|----------------------------------------|
+| `/health`       | database (aggregate)   | `200` when the database is reachable, else `503` | dashboards, load balancers             |
+| `/health/live`  | nothing (process only) | `200`                                            | liveness probe (restart the container) |
+| `/health/ready` | database               | `200` when ready, `503` when not                 | readiness probe (route traffic)        |
+
+Liveness never touches the database, so a database outage does not cause the container to be restarted.
+Readiness returns `503` while the database is unreachable, so load balancers stop sending traffic until it recovers.
 ### Repository tests
 `test/` contains a package for every repository type and a script that publishes, downloads, lists and installs them
 with the native clients (gradle, mvn, twine, pip, npm, dotnet, cargo) against a running server:
