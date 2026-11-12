@@ -7,7 +7,7 @@ import {latestVersion} from '../inventory';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {ociRegistry, setupSnippets} from '../setup';
-import {ACCESS_LEVELS, type AccessLevel, type FileEntry, type Package, type Repository} from '../types';
+import {ACCESS_LEVELS, type AccessLevel, type FileEntry, IMMUTABLE_TYPES, type Package, type Repository} from '../types';
 
 type Tab = 'packages' | 'files' | 'setup' | 'settings' | 'access';
 
@@ -351,7 +351,7 @@ function Settings({repository, onSaved}: { repository: Repository; onSaved: () =
 		setBusy(true);
 		setError(undefined);
 		try {
-			await api.updateRepository(repository.name, {description, publicRead, allowRedeploy});
+			await api.updateRepository(repository.name, {description, publicRead, allowRedeploy: allowRedeploy && !IMMUTABLE_TYPES.includes(repository.type)});
 			notify('Repository settings saved');
 			onSaved();
 		} catch (e) {
@@ -388,7 +388,7 @@ function Settings({repository, onSaved}: { repository: Repository; onSaved: () =
 					<Field label="Name"><input value={repository.name} disabled/></Field>
 					<Field label="Description"><input value={description} onChange={event => setDescription(event.target.value)}/></Field>
 					<Toggle checked={publicRead} onChange={setPublicRead} label="Public read" description="Anyone can download without credentials"/>
-					<Toggle checked={allowRedeploy} onChange={setAllowRedeploy} label="Allow redeploy" description="Released versions can be overwritten"/>
+					{!IMMUTABLE_TYPES.includes(repository.type) && <Toggle checked={allowRedeploy} onChange={setAllowRedeploy} label="Allow redeploy" description="Released versions can be overwritten"/>}
 					{error && <ErrorBox error={error}/>}
 					<div><Button variant="primary" type="submit" disabled={busy || !dirty}>{busy ? 'Saving…' : 'Save changes'}</Button></div>
 				</form>

@@ -9,6 +9,7 @@ import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.repository.RepositoryType;
+import net.luis.artifactory.storage.BlobStore;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
 import net.luis.artifactory.util.Versions;
@@ -230,6 +231,15 @@ public class CargoHandler extends FormatHandler {
 			line.remove("_publish");
 			builder.append(Json.write(line)).append('\n');
 		}
+		// The sparse protocol revalidates index files with conditional requests, a yank changes the content and so the etag
+		String etag = "\"" + BlobStore.sha256Hex(builder.toString()) + "\"";
+		ctx.header("ETag", etag);
+		ctx.header("Cache-Control", "no-cache");
+		String ifNoneMatch = ctx.header("If-None-Match");
+		if (ifNoneMatch != null && Arrays.stream(ifNoneMatch.split(",")).map(String::strip).anyMatch(value -> value.equals(etag) || value.equals("W/" + etag) || value.equals("*"))) {
+			ctx.status(304);
+			return;
+		}
 		ctx.status(200).contentType("text/plain; charset=utf-8").result(builder.toString());
 	}
 	
@@ -257,12 +267,12 @@ public class CargoHandler extends FormatHandler {
 			if (!query.isEmpty() && !crate.contains(query.replace('_', '-')) && !crate.contains(query)) {
 				continue;
 			}
-			total++;
-			if (crates.size() >= perPage) {
-				continue;
-			}
 			List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), crate);
 			if (versions.isEmpty()) {
+				continue;
+			}
+			total++;
+			if (crates.size() >= perPage) {
 				continue;
 			}
 			PackageVersionEntity latest = versions.stream()

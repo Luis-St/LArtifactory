@@ -36,6 +36,14 @@ public class NpmHandler extends FormatHandler {
 	
 	private static final Pattern NAME = Pattern.compile("(@[a-z0-9][a-z0-9._~-]*/)?[a-z0-9._~][a-z0-9._~-]*");
 	private static final Pattern TAG = Pattern.compile("[A-Za-z][A-Za-z0-9._-]*");
+	/**
+	 * A strict semantic version, a version such as {@code latest} or {@code 1.0} would shadow a dist tag or become an invalid tarball name.<br>
+	 */
+	private static final Pattern SEMVER = Pattern.compile(
+		"(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)" +
+			"(?:-(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?" +
+			"(?:\\+[0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*)?"
+	);
 	private static final int MAX_SEARCH_SIZE = 250;
 	private static final int SEARCH_BATCH_SIZE = 100;
 	
@@ -76,12 +84,15 @@ public class NpmHandler extends FormatHandler {
 		return versions.size() + "-" + BlobStore.sha256Hex(builder.toString()).substring(0, 16);
 	}
 	
-	private static byte @NonNull [] findAttachment(@NonNull JsonNode attachments, @NonNull String name, @NonNull String version) {
+	/**
+	 * Returns the tarball of a version, a single attachment with another name is only taken if a single version is published.<br>
+	 */
+	private static byte @NonNull [] findAttachment(@NonNull JsonNode attachments, @NonNull String name, @NonNull String version, boolean singleVersion) {
 		JsonNode attachment = attachments.get(name + "-" + version + ".tgz");
 		if (attachment == null) {
 			attachment = attachments.get(tarballName(name, version));
 		}
-		if (attachment == null && attachments.size() == 1) {
+		if (attachment == null && singleVersion && attachments.size() == 1) {
 			attachment = attachments.values().iterator().next();
 		}
 		if (attachment == null) {
@@ -492,11 +503,22 @@ public class NpmHandler extends FormatHandler {
 			if (!(entry.getValue() instanceof ObjectNode manifest)) {
 				throw npmError(400, "Invalid version manifest for " + version);
 			}
+			if (!SEMVER.matcher(version).matches()) {
+				throw npmError(400, "Invalid version: " + version + ", versions must be valid semver");
+			}
+			String manifestName = Json.text(manifest, "name", name);
+			String manifestVersion = Json.text(manifest, "version", version);
+			if (!manifestName.equals(name) || !manifestVersion.equals(version)) {
+				throw npmError(400, "Manifest " + manifestName + "@" + manifestVersion + " does not match " + name + "@" + version);
+			}
+			manifest.put("name", name);
+			manifest.put("version", version);
+			// The public registry answers a publish over an existing version with 403, npm retries a 409 as a revision conflict
 			if (this.services.packages().get(repository.name(), name, version) != null) {
-				throw npmError(409, "cannot modify pre-existing version: " + version);
+				throw npmError(403, "cannot modify pre-existing version: " + version);
 			}
 			
-			byte[] tarball = findAttachment(body.get("_attachments"), name, version);
+			byte[] tarball = findAttachment(body.get("_attachments"), name, version, versionsNode.size() == 1);
 			ObjectNode dist = manifest.has("dist") && manifest.get("dist").isObject() ? (ObjectNode) manifest.get("dist") : manifest.putObject("dist");
 			String shasum = hex("SHA-1", tarball);
 			String integrity = "sha512-" + Base64.getEncoder().encodeToString(digest("SHA-512", tarball));
@@ -524,7 +546,7 @@ public class NpmHandler extends FormatHandler {
 				for (Map.Entry<String, ObjectNode> entry : manifests.entrySet()) {
 					String version = entry.getKey();
 					if (this.services.packages().get(work, repository.name(), name, version) != null) {
-						throw npmError(409, "cannot modify pre-existing version: " + version);
+						throw npmError(403, "cannot modify pre-existing version: " + version);
 					}
 					this.services.artifacts().put(work, repository.name(), name + "/-/" + tarballName(name, version), blobs.get(version), "application/octet-stream", name, version, null, username(principal));
 					this.services.packages().create(work, repository.name(), name, version, Json.write(entry.getValue()), username(principal));
@@ -550,7 +572,7 @@ public class NpmHandler extends FormatHandler {
 		} catch (RuntimeException | SqlException e) {
 			this.releaseUploads(repository, blobs.values());
 			if (SqlErrors.isUniqueViolation(e)) {
-				throw npmError(409, "cannot modify pre-existing version, it was published concurrently");
+				throw npmError(403, "cannot modify pre-existing version, it was published concurrently");
 			}
 			throw e;
 		}

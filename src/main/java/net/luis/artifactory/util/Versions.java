@@ -19,7 +19,7 @@ public final class Versions {
 			"(?:[-_.]?(a|alpha|b|beta|c|rc|pre|preview)[-_.]?(\\d*))?" +
 			"(?:-(\\d+)|[-_.]?(?:post|rev|r)[-_.]?(\\d*))?" +
 			"(?:[-_.]?dev[-_.]?(\\d*))?" +
-			"(?:\\+[a-z0-9]+(?:[-_.][a-z0-9]+)*)?",
+			"(?:\\+([a-z0-9]+(?:[-_.][a-z0-9]+)*))?",
 		Pattern.CASE_INSENSITIVE
 	);
 	/**
@@ -39,44 +39,135 @@ public final class Versions {
 	private Versions() {}
 	
 	private static int compareMaven(@NonNull String first, @NonNull String second) {
-		List<Object> a = tokenizeMaven(first);
-		List<Object> b = tokenizeMaven(second);
-		int length = Math.max(a.size(), b.size());
-		for (int i = 0; i < length; i++) {
-			Object left = i < a.size() ? a.get(i) : null;
-			Object right = i < b.size() ? b.get(i) : null;
-			int result = compareMavenItem(left, right);
-			if (result != 0) {
-				return result;
-			}
-		}
-		return 0;
+		return compareMavenItem(parseMaven(first), parseMaven(second));
 	}
 	
-	private static int compareMavenItem(Object left, Object right) {
-		if (left == null && right == null) {
-			return 0;
+	/**
+	 * Parses a version into the item tree of Maven's {@code ComparableVersion}: a dash and a change between digits and letters
+	 * start a nested list, each list is normalized by removing its trailing null items (zero, release qualifiers, empty lists).<br>
+	 */
+	@NonNull
+	private static List<Object> parseMaven(@NonNull String version) {
+		String value = version.toLowerCase(Locale.ROOT);
+		List<Object> root = new ArrayList<>();
+		List<Object> list = root;
+		Deque<List<Object>> stack = new ArrayDeque<>();
+		stack.push(root);
+		boolean digit = false;
+		int start = 0;
+		for (int i = 0; i < value.length(); i++) {
+			char c = value.charAt(i);
+			if (c == '.' || c == '-') {
+				list.add(i == start ? BigInteger.ZERO : mavenItem(value.substring(start, i), digit, false));
+				start = i + 1;
+				if (c == '-') {
+					list = nestedList(list, stack);
+				}
+			} else if (Character.isDigit(c)) {
+				if (!digit && i > start) {
+					list.add(mavenItem(value.substring(start, i), false, true));
+					start = i;
+					list = nestedList(list, stack);
+				}
+				digit = true;
+			} else {
+				if (digit && i > start) {
+					list.add(mavenItem(value.substring(start, i), true, false));
+					start = i;
+					list = nestedList(list, stack);
+				}
+				digit = false;
+			}
 		}
+		if (value.length() > start) {
+			list.add(mavenItem(value.substring(start), digit, false));
+		}
+		while (!stack.isEmpty()) {
+			normalizeMaven(stack.pop());
+		}
+		return root;
+	}
+	
+	@NonNull
+	private static List<Object> nestedList(@NonNull List<Object> parent, @NonNull Deque<List<Object>> stack) {
+		List<Object> nested = new ArrayList<>();
+		parent.add(nested);
+		stack.push(nested);
+		return nested;
+	}
+	
+	@NonNull
+	private static Object mavenItem(@NonNull String token, boolean digit, boolean followedByDigit) {
+		if (digit) {
+			return new BigInteger(token);
+		}
+		if (followedByDigit && token.length() == 1) {
+			// a1, b2 and m3 are short forms, a single letter without number is a plain qualifier
+			return switch (token) {
+				case "a" -> "alpha";
+				case "b" -> "beta";
+				case "m" -> "milestone";
+				default -> token;
+			};
+		}
+		return token;
+	}
+	
+	private static void normalizeMaven(@NonNull List<Object> list) {
+		for (int i = list.size() - 1; i >= 0; i--) {
+			Object item = list.get(i);
+			if (isNullMavenItem(item)) {
+				list.remove(i);
+			} else if (!(item instanceof List<?>)) {
+				break;
+			}
+		}
+	}
+	
+	private static boolean isNullMavenItem(@NonNull Object item) {
+		return switch (item) {
+			case BigInteger number -> number.signum() == 0;
+			case String qualifier -> qualifierKey(qualifier).equals(qualifierKey(""));
+			case List<?> list -> list.isEmpty();
+			default -> false;
+		};
+	}
+	
+	@SuppressWarnings("unchecked")
+	private static int compareMavenItem(@Nullable Object left, @Nullable Object right) {
 		if (left == null) {
-			return -compareMavenItem(right, null);
+			return right == null ? 0 : -compareMavenItem(right, null);
 		}
-		if (left instanceof BigInteger number) {
-			if (right == null) {
-				return number.signum() == 0 ? 0 : 1;
+		return switch (left) {
+			case BigInteger number -> switch (right) {
+				case null -> number.signum() == 0 ? 0 : 1;
+				case BigInteger other -> number.compareTo(other);
+				default -> 1; // numbers are newer than qualifiers and lists
+			};
+			case String qualifier -> switch (right) {
+				case null -> compareQualifier(qualifier, "");
+				case String other -> compareQualifier(qualifier, other);
+				default -> -1;
+			};
+			default -> {
+				List<Object> list = (List<Object>) left;
+				yield switch (right) {
+					case null -> list.isEmpty() ? 0 : compareMavenItem(list.getFirst(), null);
+					case BigInteger ignored -> -1;
+					case String ignored -> 1;
+					default -> {
+						List<Object> other = (List<Object>) right;
+						for (int i = 0; i < Math.max(list.size(), other.size()); i++) {
+							int result = compareMavenItem(i < list.size() ? list.get(i) : null, i < other.size() ? other.get(i) : null);
+							if (result != 0) {
+								yield result;
+							}
+						}
+						yield 0;
+					}
+				};
 			}
-			if (right instanceof BigInteger other) {
-				return number.compareTo(other);
-			}
-			return 1; // numbers are newer than qualifiers
-		}
-		String qualifier = (String) left;
-		if (right == null) {
-			return compareQualifier(qualifier, "");
-		}
-		if (right instanceof BigInteger) {
-			return -1;
-		}
-		return compareQualifier(qualifier, (String) right);
+		};
 	}
 	
 	private static int compareQualifier(@NonNull String first, @NonNull String second) {
@@ -86,59 +177,12 @@ public final class Versions {
 	@NonNull
 	private static String qualifierKey(@NonNull String qualifier) {
 		String normalized = switch (qualifier) {
-			case "a" -> "alpha";
-			case "b" -> "beta";
-			case "m" -> "milestone";
 			case "cr" -> "rc";
 			case "ga", "final", "release" -> "";
 			default -> qualifier;
 		};
 		int index = MAVEN_QUALIFIERS.indexOf(normalized);
 		return index >= 0 ? String.valueOf(index) : MAVEN_QUALIFIERS.size() + "-" + normalized;
-	}
-	
-	@NonNull
-	private static List<Object> tokenizeMaven(@NonNull String version) {
-		List<Object> tokens = new ArrayList<>();
-		StringBuilder current = new StringBuilder();
-		Boolean digit = null;
-		for (char c : version.toLowerCase(Locale.ROOT).toCharArray()) {
-			if (c == '.' || c == '-' || c == '_' || c == '+') {
-				addMavenToken(tokens, current);
-				digit = null;
-				continue;
-			}
-			boolean isDigit = Character.isDigit(c);
-			if (digit != null && digit != isDigit) {
-				addMavenToken(tokens, current);
-			}
-			digit = isDigit;
-			current.append(c);
-		}
-		addMavenToken(tokens, current);
-		
-		while (!tokens.isEmpty()) { // trailing zeros and release qualifiers are irrelevant
-			Object last = tokens.getLast();
-			if ((last instanceof BigInteger number && number.signum() == 0) || (last instanceof String text && qualifierKey(text).equals(qualifierKey("")))) {
-				tokens.removeLast();
-			} else {
-				break;
-			}
-		}
-		return tokens;
-	}
-	
-	private static void addMavenToken(@NonNull List<Object> tokens, @NonNull StringBuilder current) {
-		if (current.isEmpty()) {
-			return;
-		}
-		String token = current.toString();
-		current.setLength(0);
-		if (token.chars().allMatch(Character::isDigit)) {
-			tokens.add(new BigInteger(token));
-		} else {
-			tokens.add(token);
-		}
 	}
 	
 	private static int compareSemver(@NonNull String first, @NonNull String second) {
@@ -229,6 +273,38 @@ public final class Versions {
 		return first.compareTo(second);
 	}
 	
+	/**
+	 * Returns the normalized form of a PEP 440 version, e.g. {@code 1.0.0b1} for {@code 1.0.0-beta1} and {@code 1.0.post1} for {@code 1.0-1}.<br>
+	 * Trailing zeros of the release segment are kept, {@code 1.0} and {@code 1.0.0} are equal according to {@link #PEP440} but stay distinct strings.<br>
+	 *
+	 * @return The normalized version, null if the version does not follow PEP 440
+	 */
+	@Nullable
+	public static String normalizePep440(@NonNull String version) {
+		Pep440Version parsed = Pep440Version.parse(version);
+		if (parsed == null) {
+			return null;
+		}
+		StringBuilder builder = new StringBuilder();
+		if (parsed.epoch().signum() != 0) {
+			builder.append(parsed.epoch()).append('!');
+		}
+		builder.append(String.join(".", parsed.release().stream().map(BigInteger::toString).toList()));
+		if (parsed.preRank() >= 0 && parsed.preRank() <= 2) {
+			builder.append(List.of("a", "b", "rc").get(parsed.preRank())).append(parsed.preNumber());
+		}
+		if (parsed.post() != null) {
+			builder.append(".post").append(parsed.post());
+		}
+		if (parsed.dev() != null) {
+			builder.append(".dev").append(parsed.dev());
+		}
+		if (parsed.local() != null) {
+			builder.append('+').append(parsed.local().toLowerCase(Locale.ROOT).replace('-', '.').replace('_', '.'));
+		}
+		return builder.toString();
+	}
+	
 	public static boolean isPrerelease(@NonNull String version) {
 		return stripBuild(version).contains("-");
 	}
@@ -291,8 +367,9 @@ public final class Versions {
 	 *                (older than all pre-releases) and 3 without pre-release
 	 * @param post The post-release number, null without post-release
 	 * @param dev The dev-release number, null without dev-release
+	 * @param local The local version label as written, null without local version
 	 */
-	private record Pep440Version(@NonNull BigInteger epoch, @NonNull List<BigInteger> release, int preRank, @NonNull BigInteger preNumber, @Nullable BigInteger post, @Nullable BigInteger dev) {
+	private record Pep440Version(@NonNull BigInteger epoch, @NonNull List<BigInteger> release, int preRank, @NonNull BigInteger preNumber, @Nullable BigInteger post, @Nullable BigInteger dev, @Nullable String local) {
 		
 		@Nullable
 		private static Pep440Version parse(@NonNull String version) {
@@ -318,7 +395,7 @@ public final class Versions {
 				};
 			}
 			BigInteger preNumber = phase == null || matcher.group(4).isEmpty() ? BigInteger.ZERO : new BigInteger(matcher.group(4));
-			return new Pep440Version(matcher.group(1) == null ? BigInteger.ZERO : new BigInteger(matcher.group(1)), release, preRank, preNumber, post, dev);
+			return new Pep440Version(matcher.group(1) == null ? BigInteger.ZERO : new BigInteger(matcher.group(1)), release, preRank, preNumber, post, dev, matcher.group(8));
 		}
 		
 		/**

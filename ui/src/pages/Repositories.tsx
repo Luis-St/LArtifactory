@@ -5,7 +5,7 @@ import {formatDate} from '../format';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
+import {IMMUTABLE_TYPES, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
 
 const PROXYABLE_TYPES: RepositoryType[] = ['maven', 'generic'];
 
@@ -115,7 +115,7 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 				type,
 				description: description.trim() || undefined,
 				publicRead,
-				allowRedeploy,
+				allowRedeploy: allowRedeploy && !IMMUTABLE_TYPES.includes(type),
 				remote: kind === 'REMOTE' ? {url: remoteUrl.trim(), cacheEnabled, username: remoteUser.trim() || undefined, password: remotePassword.trim() || undefined} : undefined,
 				members: kind === 'VIRTUAL' ? members : undefined,
 			});
@@ -188,7 +188,7 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 					</Field>
 				)}
 	
-				{kind === 'LOCAL' && <Toggle checked={allowRedeploy} onChange={setAllowRedeploy} label="Allow redeploy" description="Released versions can be overwritten (not recommended)"/>}
+				{kind === 'LOCAL' && !IMMUTABLE_TYPES.includes(type) && <Toggle checked={allowRedeploy} onChange={setAllowRedeploy} label="Allow redeploy" description="Released versions can be overwritten (not recommended)"/>}
 				<Toggle checked={publicRead} onChange={setPublicRead} label="Public read" description="Anyone can download without credentials"/>
 				{error && <ErrorBox error={error}/>}
 				<div className="modal-footer">

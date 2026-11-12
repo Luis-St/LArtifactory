@@ -199,7 +199,7 @@ class ApplicationIntegrationTest {
 			}
 		}
 		assertEquals(1, statuses.stream().filter(status -> status == 201).count(), statuses.toString());
-		assertTrue(statuses.stream().allMatch(status -> status == 201 || status == 409), statuses.toString());
+		assertTrue(statuses.stream().allMatch(status -> status == 201 || status == 403), statuses.toString());
 		
 		JsonNode packument = Json.parse(this.send("GET", "/npm/npm/race", basic("admin", ADMIN_PASSWORD), null).body());
 		assertEquals("1.0.0", packument.get("dist-tags").get("latest").asString());
@@ -396,6 +396,102 @@ class ApplicationIntegrationTest {
 		
 		assertEquals(202, this.send("DELETE", "/v2/oci/team/app/manifests/" + sha256(manifestBytes), admin, null).statusCode());
 		assertEquals(404, this.send("GET", "/v2/oci/team/app/manifests/1.0", admin, null).statusCode(), "deleting a manifest removes its tags");
+	}
+	
+	@Test
+	void ociTokenFlowAllowsAnonymousPullFromPublicRepositories() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"oci-public\",\"type\":\"oci\",\"publicRead\":true}").statusCode());
+		byte[] config = "{}".getBytes(StandardCharsets.UTF_8);
+		String configDigest = sha256(config);
+		assertEquals(201, this.sendBytes("POST", URI.create(this.base + "/v2/oci-public/app/blobs/uploads/?digest=" + configDigest), admin, null, config).statusCode());
+		String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\",\"config\":{\"mediaType\":\"application/vnd.oci.image.config.v1+json\",\"digest\":\"" + configDigest + "\",\"size\":2},\"layers\":[]}";
+		assertEquals(201, this.sendBytes("PUT", URI.create(this.base + "/v2/oci-public/app/manifests/1.0"), admin, "application/vnd.oci.image.manifest.v1+json", manifest.getBytes(StandardCharsets.UTF_8)).statusCode());
+		
+		HttpResponse<String> ping = this.send("GET", "/v2/", null, null);
+		assertEquals(401, ping.statusCode());
+		String challenge = ping.headers().firstValue("WWW-Authenticate").orElse("");
+		assertTrue(challenge.startsWith("Bearer realm=\"" + this.base + "/v2/token\""), challenge);
+		assertEquals("UNAUTHORIZED", Json.parse(ping.body()).get("errors").get(0).get("code").asString());
+		
+		String anonymous = Json.parse(this.send("GET", "/v2/token?service=LArtifactory&scope=repository:oci-public/app:pull", null, null).body()).get("token").asString();
+		assertEquals(200, this.send("GET", "/v2/oci-public/app/manifests/1.0", "Bearer " + anonymous, null).statusCode(), "anonymous tokens read public repositories");
+		assertEquals(401, this.send("GET", "/v2/oci/team/app/tags/list", "Bearer " + anonymous, null).statusCode(), "anonymous tokens do not read private repositories");
+		
+		JsonNode token = Json.parse(this.send("GET", "/v2/token?service=LArtifactory", admin, null).body());
+		assertTrue(token.get("token").asString().startsWith("las_"), "a password is exchanged for a session");
+		assertTrue(token.get("expires_in").asLong() > 0);
+		assertEquals(200, this.send("GET", "/v2/", "Bearer " + token.get("token").asString(), null).statusCode());
+		assertEquals(401, this.send("GET", "/v2/token", basic("admin", "wrong-password"), null).statusCode());
+		
+		HttpResponse<String> referrers = this.send("GET", "/v2/oci-public/app/referrers/" + sha256(manifest.getBytes(StandardCharsets.UTF_8)), admin, null);
+		assertEquals("application/vnd.oci.image.index.v1+json", referrers.headers().firstValue("Content-Type").orElse(null));
+		HttpResponse<String> referenced = this.send("DELETE", "/v2/oci-public/app/blobs/" + configDigest, admin, null);
+		assertEquals(409, referenced.statusCode(), "a referenced blob is not deleted");
+		assertEquals("DENIED", Json.parse(referenced.body()).get("errors").get(0).get("code").asString());
+	}
+	
+	@Test
+	void virtualMavenRepositoryServesMergedMetadataAndChecksums() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"maven-second\",\"type\":\"maven\"}").statusCode());
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"maven-group\",\"type\":\"maven\",\"members\":[\"maven\",\"maven-second\"]}").statusCode());
+		assertEquals(201, this.send("PUT", "/maven/maven/net/example/merged/1.0/merged-1.0.jar", admin, "a").statusCode());
+		assertEquals(201, this.send("PUT", "/maven/maven-second/net/example/merged/2.0/merged-2.0.jar", admin, "b").statusCode());
+		assertEquals(201, this.send("PUT", "/maven/maven-second/net/example/merged/3.0-SNAPSHOT/merged-3.0-20250101.120000-1.jar", admin, "c").statusCode());
+		
+		HttpResponse<String> metadata = this.send("GET", "/maven/maven-group/net/example/merged/maven-metadata.xml", admin, null);
+		assertEquals(200, metadata.statusCode());
+		assertTrue(metadata.body().contains("<version>1.0</version>") && metadata.body().contains("<version>2.0</version>"), metadata.body());
+		assertTrue(metadata.body().contains("<release>2.0</release>"), metadata.body());
+		assertEquals(200, this.send("GET", "/maven/maven-group/net/example/merged/maven-metadata.xml.sha1", admin, null).statusCode());
+		assertEquals(200, this.send("GET", "/maven/maven-group/net/example/merged/1.0/merged-1.0.jar.sha1", admin, null).statusCode());
+		assertEquals("c", this.send("GET", "/maven/maven-group/net/example/merged/3.0-SNAPSHOT/merged-3.0-SNAPSHOT.jar", admin, null).body());
+	}
+	
+	@Test
+	void genericRepositoryStoresChecksumFilesAsContent() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("PUT", "/generic/files/sums/file", admin, "content").statusCode());
+		assertEquals(404, this.send("GET", "/generic/files/sums/file.md5", admin, null).statusCode(), "no sidecar is computed");
+		assertEquals(201, this.send("PUT", "/generic/files/sums/file.sha256", admin, "SHA256 (file) = abc\nSHA256 (other) = def").statusCode());
+		assertEquals("SHA256 (file) = abc\nSHA256 (other) = def", this.send("GET", "/generic/files/sums/file.sha256", admin, null).body());
+	}
+	
+	@Test
+	void downloadsHaveValidDatesRangesAndDirectoryRedirects() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("PUT", "/generic/files/ranges/data.txt", admin, "0123456789").statusCode());
+		HttpResponse<String> download = this.sendHeaders("GET", "/generic/files/ranges/data.txt", Map.of("Authorization", admin));
+		String lastModified = download.headers().firstValue("Last-Modified").orElse("");
+		assertTrue(lastModified.matches("[A-Z][a-z]{2}, \\d{2} [A-Z][a-z]{2} \\d{4} \\d{2}:\\d{2}:\\d{2} GMT"), lastModified);
+		
+		assertEquals("234", this.sendHeaders("GET", "/generic/files/ranges/data.txt", Map.of("Authorization", admin, "Range", "bytes=2-4")).body());
+		HttpResponse<String> unsatisfiable = this.sendHeaders("GET", "/generic/files/ranges/data.txt", Map.of("Authorization", admin, "Range", "bytes=10-"));
+		assertEquals(416, unsatisfiable.statusCode());
+		assertEquals("bytes */10", unsatisfiable.headers().firstValue("Content-Range").orElse(null));
+		
+		HttpResponse<String> directory = this.sendHeaders("GET", "/generic/files/ranges", Map.of("Authorization", admin));
+		assertEquals(301, directory.statusCode());
+		assertEquals("ranges/", directory.headers().firstValue("Location").orElse(null));
+	}
+	
+	@Test
+	void npmRejectsInvalidVersionsAndRepublishes() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(400, this.send("PUT", "/npm/npm/bad-version", admin, npmPublishBody("bad-version", "latest")).statusCode());
+		assertEquals(400, this.send("PUT", "/npm/npm/bad-version", admin, npmPublishBody("bad-version", "1.0")).statusCode());
+		String otherName = npmPublishBody("bad-version", "1.0.0").replace("{\"name\":\"bad-version\",\"version\"", "{\"name\":\"other\",\"version\"");
+		assertEquals(400, this.send("PUT", "/npm/npm/bad-version", admin, otherName).statusCode(), "the manifest must name the package");
+		assertEquals(201, this.send("PUT", "/npm/npm/republished", admin, npmPublishBody("republished", "1.0.0")).statusCode());
+		assertEquals(403, this.send("PUT", "/npm/npm/republished", admin, npmPublishBody("republished", "1.0.0")).statusCode());
+		assertEquals(400, this.send("POST", "/api/repositories", admin, "{\"name\":\"npm-redeploy\",\"type\":\"npm\",\"allowRedeploy\":true}").statusCode());
+	}
+	
+	private HttpResponse<String> sendHeaders(String method, String path, Map<String, String> headers) throws IOException, InterruptedException {
+		HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path)).method(method, HttpRequest.BodyPublishers.noBody());
+		headers.forEach(builder::header);
+		return this.client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
 	}
 	
 	private HttpResponse<String> sendBytes(String method, URI uri, String authorization, String contentType, byte[] body) throws IOException, InterruptedException {

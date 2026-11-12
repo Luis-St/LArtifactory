@@ -35,6 +35,13 @@ import static net.luis.artifactory.http.Requests.*;
 public class PypiHandler extends FormatHandler {
 	
 	private static final String JSON_TYPE = "application/vnd.pypi.simple.v1+json";
+	private static final String LATEST_JSON_TYPE = "application/vnd.pypi.simple.latest+json";
+	private static final String HTML_TYPE = "application/vnd.pypi.simple.v1+html";
+	private static final String LATEST_HTML_TYPE = "application/vnd.pypi.simple.latest+html";
+	/**
+	 * The formats of the simple api in the order of the server preference, used when the client rates several equally.<br>
+	 */
+	private static final List<String> SIMPLE_TYPES = List.of(JSON_TYPE, LATEST_JSON_TYPE, HTML_TYPE, LATEST_HTML_TYPE, "text/html");
 	private static final Pattern NORMALIZE = Pattern.compile("[-_.]+");
 	private static final Pattern FILE_NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._+!-]*");
 	private static final List<String> SDIST_EXTENSIONS = List.of(".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".zip");
@@ -81,15 +88,56 @@ public class PypiHandler extends FormatHandler {
 			fileProject = stem.substring(0, dash);
 			fileVersion = stem.substring(dash + 1);
 		}
-		return normalize(fileProject).equals(normalize(name)) && fileVersion.replace('_', '-').equalsIgnoreCase(version.replace('_', '-'));
+		return normalize(fileProject).equals(normalize(name)) && sameVersion(fileVersion.replace('_', '-'), version.replace('_', '-'));
 	}
 	
-	private static boolean wantsJson(@NonNull Context ctx) {
+	/**
+	 * Compares versions as PEP 440 defines it ({@code 1.0.0-beta1} equals {@code 1.0.0b1}), including the local version label.<br>
+	 * Versions that do not follow PEP 440 have to be equal ignoring case.<br>
+	 */
+	private static boolean sameVersion(@NonNull String first, @NonNull String second) {
+		String a = Versions.normalizePep440(first);
+		String b = Versions.normalizePep440(second);
+		if (a == null || b == null) {
+			return first.equalsIgnoreCase(second);
+		}
+		int plusA = a.indexOf('+');
+		int plusB = b.indexOf('+');
+		String localA = plusA < 0 ? "" : a.substring(plusA);
+		String localB = plusB < 0 ? "" : b.substring(plusB);
+		return Versions.PEP440.compare(a, b) == 0 && localA.equals(localB);
+	}
+	
+	/**
+	 * Selects the format of a simple api response, {@code format} overrides the {@code Accept} header.<br>
+	 *
+	 * @return The content type of the response
+	 */
+	@NonNull
+	private static String responseType(@NonNull Context ctx) {
+		ctx.header("Vary", "Accept");
 		String format = ctx.queryParam("format");
 		if (format != null) {
-			return format.contains("json");
+			return format.contains("json") ? JSON_TYPE : "text/html";
 		}
-		return Requests.accepts(ctx, JSON_TYPE);
+		String accept = ctx.header("Accept");
+		// Clients without Accept header predate PEP 691 and expect html
+		String selected = accept == null || accept.isBlank() ? null : Requests.negotiate(ctx, SIMPLE_TYPES);
+		if (selected == null) {
+			return "text/html";
+		}
+		return switch (selected) {
+			case JSON_TYPE, LATEST_JSON_TYPE -> JSON_TYPE;
+			case HTML_TYPE, LATEST_HTML_TYPE -> HTML_TYPE;
+			default -> "text/html";
+		};
+	}
+	
+	private static void html(@NonNull Context ctx, @NonNull String type, @NonNull String html) {
+		Requests.html(ctx, 200, html);
+		if (HTML_TYPE.equals(type)) {
+			ctx.contentType(HTML_TYPE + "; charset=utf-8");
+		}
 	}
 	
 	@NonNull
@@ -165,7 +213,8 @@ public class PypiHandler extends FormatHandler {
 	
 	private void projectList(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		List<String> projects = this.services.packages().packageNames(repository.name());
-		if (wantsJson(ctx)) {
+		String type = responseType(ctx);
+		if (JSON_TYPE.equals(type)) {
 			ObjectNode root = Json.object();
 			root.putObject("meta").put("api-version", "1.1");
 			ArrayNode array = root.putArray("projects");
@@ -181,7 +230,7 @@ public class PypiHandler extends FormatHandler {
 			html.append("    <a href=\"").append(escapeHtml(project)).append("/\">").append(escapeHtml(project)).append("</a>\n");
 		}
 		html.append("  </body>\n</html>\n");
-		Requests.html(ctx, 200, html.toString());
+		html(ctx, type, html.toString());
 	}
 	
 	private void projectPage(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String normalized) throws Exception {
@@ -194,7 +243,8 @@ public class PypiHandler extends FormatHandler {
 			versions.put(version.version(), version);
 		}
 		
-		if (wantsJson(ctx)) {
+		String type = responseType(ctx);
+		if (JSON_TYPE.equals(type)) {
 			ObjectNode root = Json.object();
 			root.putObject("meta").put("api-version", "1.1");
 			root.put("name", normalized);
@@ -238,7 +288,7 @@ public class PypiHandler extends FormatHandler {
 			html.append(">").append(escapeHtml(fileName)).append("</a><br/>\n");
 		}
 		html.append("  </body>\n</html>\n");
-		Requests.html(ctx, 200, html.toString());
+		html(ctx, type, html.toString());
 	}
 	
 	private void projectJson(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String normalized) throws Exception {
@@ -274,6 +324,24 @@ public class PypiHandler extends FormatHandler {
 		json(ctx, 200, root);
 	}
 	
+	/**
+	 * Returns the version an upload belongs to: the normalized PEP 440 form, or an existing version that is equal to it,
+	 * so {@code 1.0} and {@code 1.0.0} or {@code 1.0.0-beta1} and {@code 1.0.0b1} end up in one release.<br>
+	 */
+	@NonNull
+	private String releaseVersion(@NonNull RepositoryEntity repository, @NonNull String normalized, @NonNull String version) throws Exception {
+		String canonical = Versions.normalizePep440(version);
+		if (canonical == null) {
+			return version;
+		}
+		for (PackageVersionEntity existing : this.services.packages().versions(repository.name(), normalized)) {
+			if (sameVersion(existing.version(), canonical)) {
+				return existing.version();
+			}
+		}
+		return canonical;
+	}
+	
 	private void upload(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		if (!ctx.isMultipartFormData()) {
@@ -285,9 +353,9 @@ public class PypiHandler extends FormatHandler {
 			throw HttpError.badRequest("Unsupported action: " + action);
 		}
 		String name = required(ctx, "name");
-		String version = required(ctx, "version");
-		if (!VERSION.matcher(version).matches()) {
-			throw HttpError.badRequest("Invalid version: " + version);
+		String declaredVersion = required(ctx, "version");
+		if (!VERSION.matcher(declaredVersion).matches()) {
+			throw HttpError.badRequest("Invalid version: " + declaredVersion);
 		}
 		UploadedFile content = ctx.uploadedFile("content");
 		if (content == null) {
@@ -301,9 +369,10 @@ public class PypiHandler extends FormatHandler {
 		String normalized = normalize(name);
 		// Files of all projects share one directory, so a file must belong to the uploaded project and version,
 		// otherwise an upload could claim (or with redeploys overwrite) the file name of another project
-		if (!matchesProject(fileName, name, version)) {
-			throw HttpError.badRequest("File name " + fileName + " does not match project " + name + " " + version);
+		if (!matchesProject(fileName, name, declaredVersion)) {
+			throw HttpError.badRequest("File name " + fileName + " does not match project " + name + " " + declaredVersion);
 		}
+		String version = this.releaseVersion(repository, normalized, declaredVersion);
 		String path = "packages/" + fileName;
 		FileEntity existing = this.services.artifacts().get(repository.name(), path);
 		if (existing != null && !repository.allowRedeploy()) {

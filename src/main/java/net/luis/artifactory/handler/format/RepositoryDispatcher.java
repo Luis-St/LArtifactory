@@ -15,7 +15,12 @@ import java.util.*;
  */
 public class RepositoryDispatcher {
 	
-	private static final List<String> RESERVED_PREFIXES = List.of("/api/", "/health", "/swagger", "/openapi", "/webjars/", "/ui/");
+	/**
+	 * First segments of the management api, only these are taken from a mapped host so that e.g. a Maven group {@code api.example} stays reachable.<br>
+	 */
+	private static final Set<String> API_RESOURCES = Set.of("me", "session", "repositories", "users", "permissions", "tokens", "audit", "webhooks");
+	private static final Set<String> HEALTH_PATHS = Set.of("/health", "/health/live", "/health/ready");
+	private static final Set<String> API_DOCS_SEGMENTS = Set.of("swagger", "openapi", "webjars");
 	public static final String HOST_MAPPED_ATTRIBUTE = "artifactory.hostMapped";
 	private final Services services;
 	private final Map<RepositoryType, FormatHandler> handlers = new EnumMap<>(RepositoryType.class);
@@ -45,7 +50,7 @@ public class RepositoryDispatcher {
 		}
 		String name = mapping.get(host);
 		String rawPath = Requests.rawPath(ctx);
-		if (name == null || RESERVED_PREFIXES.stream().anyMatch(rawPath::startsWith)) {
+		if (name == null || this.isReserved(rawPath)) {
 			return;
 		}
 		
@@ -60,16 +65,51 @@ public class RepositoryDispatcher {
 	}
 	
 	/**
+	 * Checks whether a path of a mapped host belongs to the server instead of the repository.<br>
+	 * Paths are matched by whole segments, so packages such as {@code healthcheck}, {@code swagger-ui} or {@code ui-kit} are not hidden.<br>
+	 */
+	private boolean isReserved(@NonNull String rawPath) {
+		if (HEALTH_PATHS.contains(rawPath)) {
+			return true;
+		}
+		List<String> segments = Arrays.stream(rawPath.split("/")).filter(segment -> !segment.isEmpty()).toList();
+		if (segments.isEmpty()) {
+			return false;
+		}
+		String first = segments.getFirst();
+		if ("ui".equals(first)) {
+			return true;
+		}
+		if ("api".equals(first)) {
+			return segments.size() >= 2 && API_RESOURCES.contains(segments.get(1));
+		}
+		return this.services.config().apiDocsEnabled() && API_DOCS_SEGMENTS.stream().anyMatch(segment -> first.equals(segment) || first.startsWith(segment + "."));
+	}
+	
+	/**
 	 * Handles the OCI distribution api at the root of the host ({@code /v2/...}), the only location Docker supports.<br>
 	 * The first component of the image name selects the repository: {@code docker push host/{repository}/{image}:{tag}}.<br>
 	 */
 	public void handleRegistry(@NonNull Context ctx) throws Exception {
 		OciHandler oci = (OciHandler) this.handlers.get(RepositoryType.OCI);
+		try {
+			this.handleRegistry(ctx, oci);
+		} catch (HttpError e) {
+			throw oci.translate(ctx, e, null);
+		}
+	}
+	
+	private void handleRegistry(@NonNull Context ctx, @NonNull OciHandler oci) throws Exception {
 		String rawPath = Requests.rawPath(ctx);
 		String rest = rawPath.length() > "/v2/".length() ? rawPath.substring("/v2/".length()) : "";
 		List<String> segments = Requests.decodedSegments(rest);
 		if (segments.isEmpty()) {
-			oci.ping(ctx, "Basic realm=\"artifactory\"");
+			oci.ping(ctx);
+			return;
+		}
+		// A repository named token is still reachable, its endpoints have at least an image and an endpoint segment
+		if (segments.equals(List.of("token"))) {
+			oci.token(ctx);
 			return;
 		}
 		if (segments.equals(List.of("_catalog"))) {

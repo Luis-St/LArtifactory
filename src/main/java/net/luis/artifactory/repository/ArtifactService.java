@@ -85,7 +85,15 @@ public class ArtifactService {
 	}
 	
 	/**
-	 * Parses a single byte range header, returns null if absent, unsupported or not satisfiable.<br>
+	 * Marks a range header that is valid but can not be satisfied, answered with 416.<br>
+	 */
+	private static final long[] UNSATISFIABLE = new long[0];
+	
+	/**
+	 * Parses a single byte range header.<br>
+	 *
+	 * @return The first and last byte of the range, null if the header is absent or unsupported (the full file is sent)
+	 * and {@link #UNSATISFIABLE} if no byte of the range is inside the file
 	 */
 	private static long @Nullable [] parseRange(@Nullable String header, long size) {
 		if (header == null || !header.startsWith("bytes=") || header.contains(",") || size == 0) {
@@ -103,13 +111,26 @@ public class ArtifactService {
 			long end;
 			if (startText.isEmpty()) {
 				long suffix = Long.parseLong(endText);
+				if (suffix < 0) {
+					return null;
+				}
+				if (suffix == 0) {
+					return UNSATISFIABLE;
+				}
 				start = Math.max(0, size - suffix);
 				end = size - 1;
 			} else {
 				start = Long.parseLong(startText);
-				end = endText.isEmpty() ? size - 1 : Math.min(Long.parseLong(endText), size - 1);
+				long last = endText.isEmpty() ? Long.MAX_VALUE : Long.parseLong(endText);
+				if (start < 0 || last < start) {
+					return null; // syntactically invalid, the header is ignored
+				}
+				if (start >= size) {
+					return UNSATISFIABLE;
+				}
+				end = Math.min(last, size - 1);
 			}
-			return start <= end && start < size ? new long[] { start, end } : null;
+			return new long[] { start, end };
 		} catch (NumberFormatException e) {
 			return null;
 		}
@@ -356,7 +377,7 @@ public class ArtifactService {
 		ctx.header("X-Checksum-Sha1", file.sha1());
 		ctx.header("X-Checksum-Sha256", file.sha256());
 		ctx.header("X-Checksum-Md5", file.md5());
-		ctx.header("Last-Modified", java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME.format(file.createdAt().atZone(java.time.ZoneOffset.UTC)));
+		ctx.header("Last-Modified", Requests.httpDate(file.createdAt()));
 		
 		if (etag.equals(ctx.header("If-None-Match"))) {
 			ctx.status(304);
@@ -369,6 +390,12 @@ public class ArtifactService {
 			return;
 		}
 		long[] range = parseRange(ctx.header("Range"), file.size());
+		if (range == UNSATISFIABLE) {
+			ctx.status(416).contentType(contentType);
+			ctx.header("Content-Range", "bytes */" + file.size());
+			ctx.result("");
+			return;
+		}
 		if (range != null) {
 			long length = range[1] - range[0] + 1;
 			InputStream input = this.blobStore.open(file.sha256());

@@ -22,7 +22,8 @@ public record ServerConfig(
 	int sessionHours,
 	int sessionRememberDays,
 	int npmTokenDays,
-	int maintenanceIntervalMinutes
+	int maintenanceIntervalMinutes,
+	int remoteMetadataTtlMinutes
 ) {
 	
 	public ServerConfig {
@@ -45,6 +46,7 @@ public record ServerConfig(
 		requireAtLeast(EnvKeys.SESSION_REMEMBER_DAYS, sessionRememberDays, 1);
 		requireAtLeast(EnvKeys.NPM_TOKEN_DAYS, npmTokenDays, 0);
 		requireAtLeast(EnvKeys.MAINTENANCE_INTERVAL, maintenanceIntervalMinutes, 1);
+		requireAtLeast(EnvKeys.REMOTE_METADATA_TTL, remoteMetadataTtlMinutes, 0);
 		if (baseUrl != null) {
 			baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
 		}
@@ -68,7 +70,8 @@ public record ServerConfig(
 			env.integer(EnvKeys.SESSION_HOURS, 12),
 			env.integer(EnvKeys.SESSION_REMEMBER_DAYS, 30),
 			env.integer(EnvKeys.NPM_TOKEN_DAYS, 90),
-			env.integer(EnvKeys.MAINTENANCE_INTERVAL, 60)
+			env.integer(EnvKeys.MAINTENANCE_INTERVAL, 60),
+			env.integer(EnvKeys.REMOTE_METADATA_TTL, 30)
 		);
 	}
 	

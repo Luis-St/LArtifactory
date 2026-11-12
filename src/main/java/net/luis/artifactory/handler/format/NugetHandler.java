@@ -40,6 +40,15 @@ public class NugetHandler extends FormatHandler {
 	private static final int MAX_TAKE = 1000;
 	private static final int SEARCH_BATCH_SIZE = 100;
 	private static final Pattern PACKAGE_ID = Pattern.compile("\\w+(?:[.\\-_]\\w+)*");
+	private static final Pattern PACKAGE_TYPE = Pattern.compile("<(?:\\w+:)?packageType\\b[^>]*\\bname\\s*=\\s*\"([^\"]+)\"");
+	/**
+	 * Registration hive without SemVer 2.0.0 packages, served for the unversioned, {@code 3.0.0-rc}, {@code 3.0.0-beta} and {@code 3.4.0} types.<br>
+	 */
+	private static final String REGISTRATION = "registration";
+	/**
+	 * Registration hive with all packages, served for the {@code 3.6.0} type.<br>
+	 */
+	private static final String REGISTRATION_SEMVER2 = "registration-semver2";
 	
 	public NugetHandler(@NonNull Services services) {
 		super(services);
@@ -97,6 +106,15 @@ public class NugetHandler extends FormatHandler {
 			ObjectNode metadata = Json.object();
 			metadata.put("id", id);
 			metadata.put("nuspec", new String(data, StandardCharsets.UTF_8));
+			// Build metadata is dropped by the normalization, but makes the package a SemVer 2.0.0 package
+			metadata.put("semVer2", isSemVer2(version));
+			ArrayNode packageTypes = metadata.putArray("packageTypes");
+			for (Element packageType : children(child(metadataElement, "packageTypes"), "packageType")) {
+				String name = packageType.getAttribute("name").strip();
+				if (!name.isEmpty()) {
+					packageTypes.add(name);
+				}
+			}
 			for (String field : List.of("description", "authors", "title", "summary", "projectUrl")) {
 				String value = childText(metadataElement, field);
 				if (value != null) {
@@ -153,8 +171,11 @@ public class NugetHandler extends FormatHandler {
 	}
 	
 	@NonNull
-	private static List<Element> children(@NonNull Element parent, @NonNull String name) {
+	private static List<Element> children(@Nullable Element parent, @NonNull String name) {
 		List<Element> result = new ArrayList<>();
+		if (parent == null) {
+			return result;
+		}
 		NodeList nodes = parent.getChildNodes();
 		for (int i = 0; i < nodes.getLength(); i++) {
 			if (nodes.item(i) instanceof Element element && name.equals(element.getLocalName() == null ? element.getNodeName() : element.getLocalName())) {
@@ -165,7 +186,7 @@ public class NugetHandler extends FormatHandler {
 	}
 	
 	@Nullable
-	private static Element child(@NonNull Element parent, @NonNull String name) {
+	private static Element child(@Nullable Element parent, @NonNull String name) {
 		List<Element> elements = children(parent, name);
 		return elements.isEmpty() ? null : elements.getFirst();
 	}
@@ -187,6 +208,50 @@ public class NugetHandler extends FormatHandler {
 		} catch (IllegalArgumentException e) {
 			throw HttpError.badRequest(e.getMessage());
 		}
+	}
+	
+	/**
+	 * A SemVer 2.0.0 version has a dotted prerelease label or build metadata, clients before NuGet 4.3 can not handle them.<br>
+	 */
+	private static boolean isSemVer2(@NonNull String version) {
+		int dash = version.indexOf('-');
+		int plus = version.indexOf('+');
+		String prerelease = dash < 0 ? "" : version.substring(dash + 1, plus > dash ? plus : version.length());
+		return plus >= 0 || prerelease.contains(".");
+	}
+	
+	private static boolean isSemVer2(@NonNull PackageVersionEntity version) {
+		return isSemVer2(version.version()) || Json.parseObject(version.metadata()).path("semVer2").asBoolean(false);
+	}
+	
+	/**
+	 * Whether a query asks for SemVer 2.0.0 packages with {@code semVerLevel=2.0.0}, they are hidden from older clients.<br>
+	 */
+	private static boolean includesSemVer2(@NonNull Context ctx) {
+		String level = ctx.queryParam("semVerLevel");
+		return level != null && Versions.SEMVER.compare(level.strip(), "2.0.0") >= 0;
+	}
+	
+	private static boolean isListed(@NonNull PackageVersionEntity version) {
+		return Json.parseObject(version.metadata()).path("listed").asBoolean(true);
+	}
+	
+	/**
+	 * Returns the package types of a version, {@code Dependency} if the nuspec declares none.<br>
+	 */
+	@NonNull
+	private static List<String> packageTypes(@NonNull ObjectNode metadata) {
+		List<String> types = new ArrayList<>();
+		if (metadata.has("packageTypes")) {
+			metadata.path("packageTypes").forEach(type -> types.add(type.asString()));
+		} else {
+			// Packages pushed before the types were recorded
+			var matcher = PACKAGE_TYPE.matcher(Json.text(metadata, "nuspec", ""));
+			while (matcher.find()) {
+				types.add(matcher.group(1));
+			}
+		}
+		return types.isEmpty() ? List.of("Dependency") : types;
 	}
 	
 	private static int parseInt(@Nullable String value, int defaultValue) {
@@ -236,16 +301,20 @@ public class NugetHandler extends FormatHandler {
 			this.versionList(ctx, repository, segments.get(1).toLowerCase(Locale.ROOT));
 		} else if (segments.size() == 4 && "v3-flatcontainer".equals(segments.getFirst())) {
 			this.flatFile(ctx, repository, segments.get(1).toLowerCase(Locale.ROOT), segments.get(2).toLowerCase(Locale.ROOT), segments.get(3).toLowerCase(Locale.ROOT));
-		} else if (segments.size() == 4 && segments.subList(0, 2).equals(List.of("v3", "registration"))) {
+		} else if (segments.size() == 4 && "v3".equals(segments.getFirst()) && List.of(REGISTRATION, REGISTRATION_SEMVER2).contains(segments.get(1))) {
+			boolean semVer2 = REGISTRATION_SEMVER2.equals(segments.get(1));
 			String id = segments.get(2).toLowerCase(Locale.ROOT);
 			String file = segments.get(3).toLowerCase(Locale.ROOT);
 			if ("index.json".equals(file)) {
-				this.registrationIndex(ctx, repository, id);
+				this.registrationIndex(ctx, repository, id, semVer2);
 			} else if (file.endsWith(".json")) {
-				this.registrationLeaf(ctx, repository, id, file.substring(0, file.length() - 5));
+				this.registrationLeaf(ctx, repository, id, file.substring(0, file.length() - 5), semVer2);
 			} else {
 				throw HttpError.notFound();
 			}
+		} else if (segments.size() == 4 && segments.subList(0, 2).equals(List.of("v3", "catalog")) && segments.get(3).toLowerCase(Locale.ROOT).endsWith(".json")) {
+			String file = segments.get(3).toLowerCase(Locale.ROOT);
+			this.catalogEntry(ctx, repository, segments.get(2).toLowerCase(Locale.ROOT), file.substring(0, file.length() - 5));
 		} else if (segments.equals(List.of("v3", "query"))) {
 			this.search(ctx, repository);
 		} else if (segments.equals(List.of("v3", "autocomplete"))) {
@@ -261,9 +330,10 @@ public class NugetHandler extends FormatHandler {
 		root.put("version", "3.0.0");
 		ArrayNode resources = root.putArray("resources");
 		addResource(resources, base + "/v3-flatcontainer/", "PackageBaseAddress/3.0.0");
-		for (String type : List.of("RegistrationsBaseUrl", "RegistrationsBaseUrl/3.0.0-rc", "RegistrationsBaseUrl/3.0.0-beta", "RegistrationsBaseUrl/3.4.0", "RegistrationsBaseUrl/3.6.0")) {
-			addResource(resources, base + "/v3/registration/", type);
+		for (String type : List.of("RegistrationsBaseUrl", "RegistrationsBaseUrl/3.0.0-rc", "RegistrationsBaseUrl/3.0.0-beta", "RegistrationsBaseUrl/3.4.0")) {
+			addResource(resources, base + "/v3/" + REGISTRATION + "/", type);
 		}
+		addResource(resources, base + "/v3/" + REGISTRATION_SEMVER2 + "/", "RegistrationsBaseUrl/3.6.0");
 		for (String type : List.of("SearchQueryService", "SearchQueryService/3.0.0-rc", "SearchQueryService/3.0.0-beta", "SearchQueryService/3.5.0")) {
 			addResource(resources, base + "/v3/query", type);
 		}
@@ -311,13 +381,14 @@ public class NugetHandler extends FormatHandler {
 		this.services.artifacts().serve(ctx, entity, "application/octet-stream");
 	}
 	
-	private void registrationIndex(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String lowerId) throws Exception {
-		List<PackageVersionEntity> versions = this.sortedVersions(repository, lowerId);
+	private void registrationIndex(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String lowerId, boolean semVer2) throws Exception {
+		List<PackageVersionEntity> versions = this.sortedVersions(repository, lowerId).stream().filter(version -> semVer2 || !isSemVer2(version)).toList();
 		if (versions.isEmpty()) {
 			throw HttpError.notFound();
 		}
 		String base = this.repositoryUrl(ctx, repository);
-		String indexUrl = base + "/v3/registration/" + lowerId + "/index.json";
+		String hive = base + "/v3/" + (semVer2 ? REGISTRATION_SEMVER2 : REGISTRATION) + "/";
+		String indexUrl = hive + lowerId + "/index.json";
 		
 		ObjectNode root = Json.object();
 		root.put("@id", indexUrl);
@@ -330,32 +401,58 @@ public class NugetHandler extends FormatHandler {
 		page.put("parent", indexUrl);
 		ArrayNode items = page.putArray("items");
 		for (PackageVersionEntity version : versions) {
-			items.add(this.registrationLeafNode(base, lowerId, version));
+			ObjectNode leaf = items.addObject();
+			leaf.put("@id", hive + lowerId + "/" + version.version() + ".json");
+			leaf.put("@type", "Package");
+			// A registration page embeds the catalog entry, the leaf only links it
+			leaf.set("catalogEntry", this.catalogEntryNode(base, lowerId, version));
+			leaf.put("packageContent", packageContent(base, lowerId, version));
+			leaf.put("registration", indexUrl);
 		}
 		json(ctx, 200, root);
 	}
 	
-	private void registrationLeaf(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String lowerId, @NonNull String version) throws Exception {
+	private void registrationLeaf(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String lowerId, @NonNull String version, boolean semVer2) throws Exception {
+		PackageVersionEntity entity = this.services.packages().get(repository.name(), lowerId, normalize(version).toLowerCase(Locale.ROOT));
+		if (entity == null || (!semVer2 && isSemVer2(entity))) {
+			throw HttpError.notFound();
+		}
+		String base = this.repositoryUrl(ctx, repository);
+		String hive = base + "/v3/" + (semVer2 ? REGISTRATION_SEMVER2 : REGISTRATION) + "/";
+		ObjectNode leaf = Json.object();
+		leaf.put("@id", hive + lowerId + "/" + entity.version() + ".json");
+		leaf.putArray("@type").add("Package").add("http://schema.nuget.org/catalog#Permalink");
+		leaf.put("catalogEntry", catalogUrl(base, lowerId, entity));
+		leaf.put("listed", isListed(entity));
+		leaf.put("packageContent", packageContent(base, lowerId, entity));
+		leaf.put("published", DateTimeFormatter.ISO_INSTANT.format(entity.createdAt()));
+		leaf.put("registration", hive + lowerId + "/index.json");
+		json(ctx, 200, leaf);
+	}
+	
+	private void catalogEntry(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String lowerId, @NonNull String version) throws Exception {
 		PackageVersionEntity entity = this.services.packages().get(repository.name(), lowerId, normalize(version).toLowerCase(Locale.ROOT));
 		if (entity == null) {
 			throw HttpError.notFound();
 		}
-		ObjectNode leaf = this.registrationLeafNode(this.repositoryUrl(ctx, repository), lowerId, entity);
-		leaf.put("listed", Json.parseObject(entity.metadata()).path("listed").asBoolean(true));
-		json(ctx, 200, leaf);
+		json(ctx, 200, this.catalogEntryNode(this.repositoryUrl(ctx, repository), lowerId, entity));
 	}
 	
 	@NonNull
-	private ObjectNode registrationLeafNode(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
+	private static String catalogUrl(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
+		return base + "/v3/catalog/" + lowerId + "/" + version.version() + ".json";
+	}
+	
+	@NonNull
+	private static String packageContent(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
+		return base + "/v3-flatcontainer/" + lowerId + "/" + version.version() + "/" + lowerId + "." + version.version() + ".nupkg";
+	}
+	
+	@NonNull
+	private ObjectNode catalogEntryNode(@NonNull String base, @NonNull String lowerId, @NonNull PackageVersionEntity version) {
 		ObjectNode metadata = Json.parseObject(version.metadata());
-		String leafUrl = base + "/v3/registration/" + lowerId + "/" + version.version() + ".json";
-		String content = base + "/v3-flatcontainer/" + lowerId + "/" + version.version() + "/" + lowerId + "." + version.version() + ".nupkg";
-		
-		ObjectNode leaf = Json.object();
-		leaf.put("@id", leafUrl);
-		leaf.put("@type", "Package");
-		ObjectNode entry = leaf.putObject("catalogEntry");
-		entry.put("@id", leafUrl + "#catalogEntry");
+		ObjectNode entry = Json.object();
+		entry.put("@id", catalogUrl(base, lowerId, version));
 		entry.put("@type", "PackageDetails");
 		entry.put("id", Json.text(metadata, "id", lowerId));
 		entry.put("version", Json.text(metadata, "version", version.version()));
@@ -367,14 +464,12 @@ public class NugetHandler extends FormatHandler {
 		entry.put("licenseExpression", Json.text(metadata, "licenseExpression", ""));
 		entry.put("listed", metadata.path("listed").asBoolean(true));
 		entry.put("published", DateTimeFormatter.ISO_INSTANT.format(version.createdAt()));
-		entry.put("packageContent", content);
+		entry.put("packageContent", packageContent(base, lowerId, version));
 		if (metadata.has("tags")) {
 			entry.set("tags", metadata.get("tags"));
 		}
 		entry.set("dependencyGroups", metadata.has("dependencyGroups") ? metadata.get("dependencyGroups") : Json.array());
-		leaf.put("packageContent", content);
-		leaf.put("registration", base + "/v3/registration/" + lowerId + "/index.json");
-		return leaf;
+		return entry;
 	}
 	
 	private void search(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
@@ -382,7 +477,10 @@ public class NugetHandler extends FormatHandler {
 		int skip = parseInt(ctx.queryParam("skip"), 0);
 		int take = Math.min(parseInt(ctx.queryParam("take"), 20), MAX_TAKE);
 		boolean prerelease = Boolean.parseBoolean(ctx.queryParam("prerelease"));
+		boolean semVer2 = includesSemVer2(ctx);
+		String packageType = ctx.queryParam("packageType");
 		String base = this.repositoryUrl(ctx, repository);
+		String hive = base + "/v3/" + (semVer2 ? REGISTRATION_SEMVER2 : REGISTRATION) + "/";
 		
 		// Versions are loaded for a batch of packages at a time, only the requested page is kept in memory
 		List<ObjectNode> results = new ArrayList<>();
@@ -395,8 +493,9 @@ public class NugetHandler extends FormatHandler {
 			}
 			String lowerId = names.get(index);
 			List<PackageVersionEntity> versions = versionsByName.getOrDefault(lowerId, List.of()).stream()
-				.filter(version -> Json.parseObject(version.metadata()).path("listed").asBoolean(true))
+				.filter(NugetHandler::isListed)
 				.filter(version -> prerelease || !Versions.isPrerelease(version.version()))
+				.filter(version -> semVer2 || !isSemVer2(version))
 				.sorted(Comparator.comparing(PackageVersionEntity::version, Versions.SEMVER))
 				.toList();
 			if (versions.isEmpty()) {
@@ -408,14 +507,18 @@ public class NugetHandler extends FormatHandler {
 			if (!query.isEmpty() && !id.toLowerCase(Locale.ROOT).contains(query) && !description.toLowerCase(Locale.ROOT).contains(query)) {
 				continue;
 			}
+			List<String> packageTypes = packageTypes(latest);
+			if (packageType != null && !packageType.isBlank() && packageTypes.stream().noneMatch(packageType.strip()::equalsIgnoreCase)) {
+				continue;
+			}
 			if (totalHits++ < skip || results.size() >= take) {
 				continue;
 			}
 			
 			ObjectNode result = Json.object();
-			result.put("@id", base + "/v3/registration/" + lowerId + "/index.json");
+			result.put("@id", hive + lowerId + "/index.json");
 			result.put("@type", "Package");
-			result.put("registration", base + "/v3/registration/" + lowerId + "/index.json");
+			result.put("registration", hive + lowerId + "/index.json");
 			result.put("id", id);
 			result.put("version", Json.text(latest, "version", versions.getLast().version()));
 			result.put("description", description);
@@ -424,7 +527,8 @@ public class NugetHandler extends FormatHandler {
 			result.putArray("authors").add(Json.text(latest, "authors", ""));
 			result.put("totalDownloads", 0);
 			result.put("verified", false);
-			result.putArray("packageTypes").addObject().put("name", "Dependency");
+			ArrayNode typeArray = result.putArray("packageTypes");
+			packageTypes.forEach(type -> typeArray.addObject().put("name", type));
 			ArrayNode versionArray = result.putArray("versions");
 			for (PackageVersionEntity version : versions) {
 				versionArray.addObject()
@@ -442,25 +546,46 @@ public class NugetHandler extends FormatHandler {
 		json(ctx, 200, root);
 	}
 	
+	/**
+	 * Lists package ids or the versions of a package, unlisted versions are never listed and prerelease and SemVer 2.0.0 versions only on request.<br>
+	 */
 	private void autocomplete(@NonNull Context ctx, @NonNull RepositoryEntity repository) throws Exception {
 		String query = Objects.requireNonNullElse(ctx.queryParam("q"), "").toLowerCase(Locale.ROOT);
 		String id = ctx.queryParam("id");
+		boolean prerelease = Boolean.parseBoolean(ctx.queryParam("prerelease"));
+		boolean semVer2 = includesSemVer2(ctx);
+		java.util.function.Predicate<PackageVersionEntity> visible = version -> isListed(version)
+			&& (prerelease || !Versions.isPrerelease(version.version()))
+			&& (semVer2 || !isSemVer2(version));
+		
 		ObjectNode root = Json.object();
 		ArrayNode data = root.putArray("data");
 		if (id != null) {
-			this.sortedVersions(repository, id.toLowerCase(Locale.ROOT)).forEach(version -> data.add(version.version()));
-		} else {
-			int skip = parseInt(ctx.queryParam("skip"), 0);
-			int take = Math.min(parseInt(ctx.queryParam("take"), 20), MAX_TAKE);
-			for (String lowerId : this.services.packages().packageNames(repository.name(), query, skip, take)) {
-				List<PackageVersionEntity> versions = this.services.packages().versions(repository.name(), lowerId);
-				data.add(versions.isEmpty() ? lowerId : Json.text(Json.parseObject(versions.getLast().metadata()), "id", lowerId));
-			}
-			root.put("totalHits", this.services.packages().countPackages(repository.name(), query));
+			this.sortedVersions(repository, id.toLowerCase(Locale.ROOT)).stream()
+				.filter(visible)
+				.forEach(version -> data.add(Json.text(Json.parseObject(version.metadata()), "version", version.version())));
+			root.put("totalHits", data.size());
 			json(ctx, 200, root);
 			return;
 		}
-		root.put("totalHits", data.size());
+		
+		int skip = parseInt(ctx.queryParam("skip"), 0);
+		int take = Math.min(parseInt(ctx.queryParam("take"), 20), MAX_TAKE);
+		List<String> names = this.services.packages().packageNames(repository.name()).stream().filter(name -> name.contains(query)).toList();
+		int totalHits = 0;
+		for (int index = 0; index < names.size(); index += SEARCH_BATCH_SIZE) {
+			Map<String, List<PackageVersionEntity>> versionsByName = this.services.packages().versions(repository.name(), names.subList(index, Math.min(names.size(), index + SEARCH_BATCH_SIZE)));
+			for (String lowerId : names.subList(index, Math.min(names.size(), index + SEARCH_BATCH_SIZE))) {
+				List<PackageVersionEntity> versions = versionsByName.getOrDefault(lowerId, List.of()).stream().filter(visible).toList();
+				if (versions.isEmpty()) {
+					continue;
+				}
+				if (totalHits++ >= skip && data.size() < take) {
+					data.add(Json.text(Json.parseObject(versions.getLast().metadata()), "id", lowerId));
+				}
+			}
+		}
+		root.put("totalHits", totalHits);
 		json(ctx, 200, root);
 	}
 	

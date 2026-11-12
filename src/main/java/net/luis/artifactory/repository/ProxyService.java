@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.*;
 import java.net.*;
 import java.net.http.*;
 import java.nio.charset.StandardCharsets;
@@ -48,10 +49,14 @@ public class ProxyService {
 	}
 	
 	/**
-	 * Fetches a path from the upstream, returns null if it is not found upstream or the request fails.<br>
+	 * Opens a path at the upstream, the body is streamed and has to be closed by the caller.<br>
+	 * A response larger than the max size is rejected by its {@code Content-Length} before the download, a body without (or with a wrong) length
+	 * fails with an {@link IOException} once it exceeds the max size, so a request never buffers more than a read buffer.<br>
+	 *
+	 * @return The response, null if the path is not found upstream, it is too large or the request fails
 	 */
 	@Nullable
-	public Result fetch(@NonNull RemoteConfigEntity remote, @NonNull String path) {
+	public Response open(@NonNull RemoteConfigEntity remote, @NonNull String path) {
 		URI uri;
 		try {
 			uri = URI.create(remote.url() + "/" + encodePath(path));
@@ -69,22 +74,78 @@ public class ProxyService {
 			builder.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8)));
 		}
 		try {
-			HttpResponse<byte[]> response = this.httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+			HttpResponse<InputStream> response = this.httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
 			if (response.statusCode() != 200) {
+				response.body().close();
 				return null;
 			}
-			byte[] body = response.body();
-			if (body.length > this.maxBytes) {
-				LOGGER.warn("Upstream artifact {} from {} exceeds the max size ({} > {})", path, remote.repository(), body.length, this.maxBytes);
+			long length = response.headers().firstValueAsLong("Content-Length").orElse(-1);
+			if (length > this.maxBytes) {
+				response.body().close();
+				LOGGER.warn("Upstream artifact {} from {} exceeds the max size ({} > {})", path, remote.repository(), length, this.maxBytes);
 				return null;
 			}
 			String contentType = response.headers().firstValue("Content-Type").orElse(null);
-			return new Result(body, contentType);
+			return new Response(new LimitedInputStream(response.body(), this.maxBytes, path), contentType, length);
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+			return null;
 		} catch (Exception e) {
 			LOGGER.warn("Failed to fetch {} from upstream of {} ({})", path, remote.repository(), remote.url(), e);
 			return null;
 		}
 	}
 	
-	public record Result(byte @NonNull [] body, @Nullable String contentType) {}
+	/**
+	 * A streamed upstream response.<br>
+	 *
+	 * @param contentLength The announced length of the body, -1 if unknown
+	 */
+	public record Response(@NonNull InputStream body, @Nullable String contentType, long contentLength) implements Closeable {
+		
+		@Override
+		public void close() throws IOException {
+			this.body.close();
+		}
+	}
+	
+	/**
+	 * Fails the read once more than the limit was read.<br>
+	 */
+	private static final class LimitedInputStream extends FilterInputStream {
+		
+		private final long limit;
+		private final String path;
+		private long read;
+		
+		private LimitedInputStream(@NonNull InputStream input, long limit, @NonNull String path) {
+			super(input);
+			this.limit = limit;
+			this.path = path;
+		}
+		
+		private int count(int value) throws IOException {
+			if (value > 0) {
+				this.read += value;
+				if (this.read > this.limit) {
+					throw new IOException("Upstream artifact " + this.path + " exceeds the max size of " + this.limit + " bytes");
+				}
+			}
+			return value;
+		}
+		
+		@Override
+		public int read() throws IOException {
+			int value = super.read();
+			if (value >= 0) {
+				this.count(1);
+			}
+			return value;
+		}
+		
+		@Override
+		public int read(byte @NonNull [] buffer, int offset, int length) throws IOException {
+			return this.count(super.read(buffer, offset, length));
+		}
+	}
 }

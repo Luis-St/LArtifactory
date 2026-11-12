@@ -31,6 +31,10 @@ import java.util.concurrent.*;
  */
 public class AuthService {
 	
+	/**
+	 * Bearer token handed out by the registry token endpoint to anonymous clients, it authenticates as anonymous.<br>
+	 */
+	public static final String ANONYMOUS_TOKEN = "anonymous";
 	private static final String PRINCIPAL_ATTRIBUTE = "artifactory.principal";
 	private static final long CACHE_TTL_MILLIS = 60_000;
 	
@@ -211,6 +215,45 @@ public class AuthService {
 		return principal;
 	}
 	
+	/**
+	 * Returns a bearer token for the credentials of the request, used by the token flow of the OCI registry.<br>
+	 * An access token or session is returned as is, so its restrictions keep applying. A password is never returned,
+	 * a session with the given lifetime is created for it instead.<br>
+	 *
+	 * @return The bearer token, {@link #ANONYMOUS_TOKEN} for an anonymous request
+	 * @throws HttpError 401 if credentials are present but invalid
+	 */
+	@NonNull
+	public String bearerToken(@NonNull Context ctx, @NonNull Duration sessionLifetime) throws SqlException {
+		Principal principal = this.authenticate(ctx);
+		if (principal == null) {
+			return ANONYMOUS_TOKEN;
+		}
+		String authorization = Objects.requireNonNullElse(ctx.header("Authorization"), "").strip();
+		int space = authorization.indexOf(' ');
+		String scheme = space < 0 ? "" : authorization.substring(0, space);
+		String value = space < 0 ? authorization : authorization.substring(space + 1).strip();
+		if ("Basic".equalsIgnoreCase(scheme)) {
+			String decoded = new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+			String username = decoded.substring(0, decoded.indexOf(':'));
+			String secret = decoded.substring(decoded.indexOf(':') + 1);
+			if ("__token__".equals(username) || secret.startsWith("lat_")) {
+				return secret;
+			}
+			return this.userService.createSession(principal.username(), sessionLifetime).secret();
+		}
+		if (!authorization.isEmpty()) {
+			return value;
+		}
+		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
+			String apiKey = ctx.header(header);
+			if (apiKey != null && !apiKey.isBlank()) {
+				return apiKey.strip();
+			}
+		}
+		throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+	}
+	
 	public boolean canRead(@Nullable Principal principal, @NonNull RepositoryEntity repository) throws SqlException {
 		if (repository.publicRead()) {
 			return true;
@@ -241,6 +284,9 @@ public class AuthService {
 			
 			if ("Basic".equalsIgnoreCase(scheme)) {
 				return this.basic(ctx, value);
+			}
+			if ("Bearer".equalsIgnoreCase(scheme) && ANONYMOUS_TOKEN.equals(value)) {
+				return null;
 			}
 			if ("Bearer".equalsIgnoreCase(scheme) && value.startsWith(UserService.SESSION_PREFIX)) {
 				return this.requireSession(value);

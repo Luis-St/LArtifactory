@@ -28,7 +28,8 @@ image_file() {
 # Ping and login
 check_status "anonymous ping is challenged" 401 "$ARTIFACTORY_URL/v2/"
 check_contains "ping returns the api version" "registry/2.0" "$(curl -sS -I "$ARTIFACTORY_URL/v2/")"
-check_contains "challenge asks for basic auth" "Basic realm" "$(curl -sS -I "$ARTIFACTORY_URL/v2/")"
+check_contains "challenge points to the token endpoint" "Bearer realm=\"$ARTIFACTORY_URL/v2/token\"" "$(curl -sS -I "$ARTIFACTORY_URL/v2/")"
+check_contains "token endpoint hands out anonymous tokens" '"token":"anonymous"' "$(curl -sS "$ARTIFACTORY_URL/v2/token")"
 check_status "ping with a token" 200 "${READER[@]}" "$ARTIFACTORY_URL/v2/"
 check_fails "docker login with a wrong password is rejected" docker_login lat-ci wrong-password
 check "docker login with a read only token" docker_login lat-reader "$READER_TOKEN"
@@ -60,6 +61,18 @@ check "docker builds the consumer on the pulled base image" docker build -q --bu
 check_equals "consumer contains the base image content" "hello from lartifactory-test-image 1.0" "$(image_file lartifactory-test-consumer /hello.txt)"
 check "docker logs out" docker logout "$REGISTRY"
 check_fails "anonymous pull from a private repository is rejected" docker pull "$IMAGE:latest"
+
+# Anonymous pull from a public repository, this needs the bearer token flow
+PUBLIC_IMAGE="$REGISTRY/oci-public/lartifactory/test-image"
+api -X DELETE "$ARTIFACTORY_URL/api/repositories/oci-public" > /dev/null
+api -X POST "$ARTIFACTORY_URL/api/repositories" -d '{"name":"oci-public","type":"oci","publicRead":true}' > /dev/null
+check "docker login with a write token for the public repository" docker_login lat-ci "$CI_TOKEN"
+check "docker tags the image for the public repository" docker tag "$IMAGE:1.1" "$PUBLIC_IMAGE:1.1"
+check "docker pushes to the public repository" docker push "$PUBLIC_IMAGE:1.1"
+check "docker removes the public image" docker rmi "$PUBLIC_IMAGE:1.1"
+check "docker logs out of the public repository" docker logout "$REGISTRY"
+check "anonymous docker pull from a public repository" docker pull "$PUBLIC_IMAGE:1.1"
+docker rmi "$PUBLIC_IMAGE:1.1" > /dev/null 2>&1
 
 # Registry api
 TAGS="$(curl -sS "${READER[@]}" "$API/tags/list")"

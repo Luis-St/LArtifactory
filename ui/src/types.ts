@@ -1,6 +1,9 @@
 export const REPOSITORY_TYPES = ['maven', 'generic', 'pypi', 'npm', 'nuget', 'cargo', 'oci'] as const;
 export type RepositoryType = (typeof REPOSITORY_TYPES)[number];
 
+/** npm and Cargo forbid overwriting a published version, the server rejects allowRedeploy for them. */
+export const IMMUTABLE_TYPES: RepositoryType[] = ['npm', 'cargo'];
+
 export const ACCESS_LEVELS = ['READ', 'WRITE', 'DELETE'] as const;
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 

@@ -7,11 +7,24 @@ import org.jspecify.annotations.Nullable;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 
 public final class Requests {
 	
+	/**
+	 * The IMF-fixdate format of HTTP, the day of month always has two digits unlike {@link DateTimeFormatter#RFC_1123_DATE_TIME}.<br>
+	 */
+	private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'GMT'", Locale.US).withZone(ZoneOffset.UTC);
+	
 	private Requests() {}
+	
+	@NonNull
+	public static String httpDate(@NonNull Instant instant) {
+		return HTTP_DATE.format(instant);
+	}
 	
 	@NonNull
 	public static String baseUrl(@NonNull Context ctx, @NonNull ServerConfig config) {
@@ -104,6 +117,67 @@ public final class Requests {
 	public static boolean accepts(@NonNull Context ctx, @NonNull String mediaType) {
 		String accept = ctx.header("Accept");
 		return accept != null && accept.toLowerCase(Locale.ROOT).contains(mediaType.toLowerCase(Locale.ROOT));
+	}
+
+	/**
+	 * Selects the offered media type the client prefers according to the quality values of its {@code Accept} header.<br>
+	 * The quality of an offered type is taken from the most specific matching range ({@code type/subtype} before {@code type/*} before {@code *}{@code /*}),
+	 * on equal quality the type offered first wins.<br>
+	 *
+	 * @param offered The media types the server can produce, in the order of the server preference
+	 * @return The selected type, the first offered type without {@code Accept} header and null if the client accepts none of them
+	 */
+	@Nullable
+	public static String negotiate(@NonNull Context ctx, @NonNull List<String> offered) {
+		String header = ctx.header("Accept");
+		if (header == null || header.isBlank()) {
+			return offered.getFirst();
+		}
+		List<String[]> ranges = new ArrayList<>();
+		for (String part : header.split(",")) {
+			String[] params = part.split(";");
+			String range = params[0].strip().toLowerCase(Locale.ROOT);
+			if (range.isEmpty()) {
+				continue;
+			}
+			String quality = "1";
+			for (int i = 1; i < params.length; i++) {
+				String param = params[i].strip();
+				if (param.regionMatches(true, 0, "q=", 0, 2)) {
+					quality = param.substring(2).strip();
+				}
+			}
+			ranges.add(new String[] { range, quality });
+		}
+
+		String best = null;
+		double bestQuality = 0;
+		for (String type : offered) {
+			String lower = type.toLowerCase(Locale.ROOT);
+			String wildcard = lower.substring(0, lower.indexOf('/') + 1) + "*";
+			int specificity = -1;
+			double quality = 0;
+			for (String[] range : ranges) {
+				int match = range[0].equals(lower) ? 2 : range[0].equals(wildcard) ? 1 : "*/*".equals(range[0]) ? 0 : -1;
+				if (match > specificity) {
+					specificity = match;
+					quality = parseQuality(range[1]);
+				}
+			}
+			if (quality > bestQuality) {
+				best = type;
+				bestQuality = quality;
+			}
+		}
+		return best;
+	}
+
+	private static double parseQuality(@NonNull String value) {
+		try {
+			return Math.clamp(Double.parseDouble(value), 0, 1);
+		} catch (NumberFormatException e) {
+			return 0;
+		}
 	}
 	
 	/**

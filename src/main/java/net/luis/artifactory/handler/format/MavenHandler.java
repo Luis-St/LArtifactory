@@ -14,13 +14,18 @@ import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.node.ObjectNode;
 
+import org.w3c.dom.Element;
+
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
 
 import static net.luis.artifactory.http.Requests.*;
 
@@ -36,6 +41,8 @@ public class MavenHandler extends PathRepositoryHandler {
 	
 	private static final String METADATA = "maven-metadata.xml";
 	private static final DateTimeFormatter LAST_UPDATED = DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(ZoneOffset.UTC);
+	private static final int MAX_REMOTE_METADATA_SIZE = 4 * 1024 * 1024;
+	private static final String PLUGIN_DESCRIPTOR = "META-INF/maven/plugin.xml";
 	private static final Pattern SNAPSHOT_FILE = Pattern.compile("^(\\d{8}\\.\\d{6})-(\\d+)(?:-([^.]+))?\\.(.+)$");
 	
 	public MavenHandler(@NonNull Services services) {
@@ -68,7 +75,21 @@ public class MavenHandler extends PathRepositoryHandler {
 	}
 	
 	@Override
-	protected boolean serveVirtual(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
+	protected boolean checksumSidecars() {
+		return true;
+	}
+	
+	/**
+	 * Metadata, its checksums and snapshots change upstream, release files are immutable.<br>
+	 */
+	@Override
+	protected boolean isVolatile(@NonNull String path) {
+		String base = checksumExtension(path) == null ? path : stripExtension(path);
+		return fileName(base).equals(METADATA) || this.isMutable(base);
+	}
+	
+	@Override
+	protected boolean serveComputed(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		String checksum = checksumExtension(path);
 		String metadataPath = checksum == null ? path : stripExtension(path);
 		if (fileName(metadataPath).equals(METADATA)) {
@@ -92,8 +113,39 @@ public class MavenHandler extends PathRepositoryHandler {
 		return false;
 	}
 	
+	/**
+	 * Merges the metadata of all members, so a virtual repository lists the versions of every member and not only those of the first.<br>
+	 * Local members contribute their generated metadata, remote members the metadata of their upstream.<br>
+	 */
 	@Override
-	protected boolean consumeVirtualUpload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
+	protected boolean serveMerged(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<RepositoryEntity> members, @NonNull String path) throws Exception {
+		String metadataPath = checksumExtension(path) == null ? path : stripExtension(path);
+		if (!fileName(metadataPath).equals(METADATA)) {
+			return false;
+		}
+		List<String> documents = new ArrayList<>();
+		for (RepositoryEntity member : members) {
+			String xml;
+			if (this.services.repositories().classOf(member.name()) == net.luis.artifactory.repository.RepositoryClass.LOCAL) {
+				xml = this.generateMetadata(member, metadataPath);
+			} else {
+				byte[] data = this.readRemote(member, metadataPath, MAX_REMOTE_METADATA_SIZE);
+				xml = data == null ? null : new String(data, StandardCharsets.UTF_8);
+			}
+			if (xml != null) {
+				documents.add(xml);
+			}
+		}
+		String merged = MavenMetadata.merge(documents);
+		if (merged == null) {
+			return false;
+		}
+		serveGenerated(ctx, path, merged, "application/xml");
+		return true;
+	}
+	
+	@Override
+	protected boolean consumeComputedUpload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		String metadataPath = checksumExtension(path) == null ? path : stripExtension(path);
 		if (!fileName(metadataPath).equals(METADATA)) {
 			return false;
@@ -120,14 +172,46 @@ public class MavenHandler extends PathRepositoryHandler {
 				return snapshot;
 			}
 		}
-		if (segments.length >= 2) {
-			return this.generateVersionsMetadata(repository, segments);
+		// A directory can be an artifact and a group (with plugins) at the same time, both parts go into one file
+		MavenMetadata versions = segments.length >= 2 ? this.generateVersionsMetadata(repository, segments) : null;
+		List<MavenMetadata.Plugin> plugins = this.generatePlugins(repository, String.join(".", segments));
+		if (versions == null && plugins.isEmpty()) {
+			return null;
 		}
-		return null;
+		if (versions == null) {
+			versions = new MavenMetadata(null, null, null, null, List.of(), null, plugins);
+		} else if (!plugins.isEmpty()) {
+			versions = versions.withPlugins(plugins);
+		}
+		return versions.toXml();
+	}
+	
+	/**
+	 * Lists the Maven plugins of a group with their prefix, read from the plugin descriptor of the newest version of each plugin.<br>
+	 */
+	@NonNull
+	private List<MavenMetadata.Plugin> generatePlugins(@NonNull RepositoryEntity repository, @NonNull String groupId) throws Exception {
+		List<MavenMetadata.Plugin> plugins = new ArrayList<>();
+		for (String packageName : this.services.packages().packageNames(repository.name())) {
+			int colon = packageName.lastIndexOf(':');
+			if (colon < 0 || !packageName.substring(0, colon).equals(groupId)) {
+				continue;
+			}
+			this.services.artifacts().listByPackage(repository.name(), packageName).stream()
+				.filter(file -> file.metadata() != null && file.version() != null)
+				.filter(file -> Json.text(Json.parseObject(file.metadata()), "goalPrefix") != null)
+				.max(Comparator.comparing(FileEntity::version, Versions.MAVEN))
+				.ifPresent(file -> {
+					ObjectNode metadata = Json.parseObject(file.metadata());
+					String artifactId = packageName.substring(colon + 1);
+					plugins.add(new MavenMetadata.Plugin(Json.text(metadata, "pluginName", artifactId), Objects.requireNonNull(Json.text(metadata, "goalPrefix")), artifactId));
+				});
+		}
+		return plugins;
 	}
 	
 	@Nullable
-	private String generateVersionsMetadata(@NonNull RepositoryEntity repository, String @NonNull [] segments) throws Exception {
+	private MavenMetadata generateVersionsMetadata(@NonNull RepositoryEntity repository, String @NonNull [] segments) throws Exception {
 		String artifactId = segments[segments.length - 1];
 		String groupId = String.join(".", Arrays.copyOf(segments, segments.length - 1));
 		List<FileEntity> files = this.services.artifacts().listByPackage(repository.name(), groupId + ":" + artifactId);
@@ -135,8 +219,7 @@ public class MavenHandler extends PathRepositoryHandler {
 			return null;
 		}
 		
-		// Versions that compare equal (1.0 and 1.0.0) are both listed, they are distinct directories
-		TreeSet<String> versions = new TreeSet<>(Versions.MAVEN.thenComparing(Comparator.naturalOrder()));
+		List<String> versions = new ArrayList<>();
 		Instant lastUpdated = Instant.EPOCH;
 		for (FileEntity file : files) {
 			if (file.version() != null) {
@@ -146,25 +229,7 @@ public class MavenHandler extends PathRepositoryHandler {
 				lastUpdated = file.createdAt();
 			}
 		}
-		String release = versions.descendingSet().stream().filter(version -> !version.endsWith("-SNAPSHOT")).findFirst().orElse(null);
-		
-		StringBuilder xml = new StringBuilder();
-		xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<metadata>\n");
-		xml.append("  <groupId>").append(escapeXml(groupId)).append("</groupId>\n");
-		xml.append("  <artifactId>").append(escapeXml(artifactId)).append("</artifactId>\n");
-		xml.append("  <versioning>\n");
-		xml.append("    <latest>").append(escapeXml(versions.last())).append("</latest>\n");
-		if (release != null) {
-			xml.append("    <release>").append(escapeXml(release)).append("</release>\n");
-		}
-		xml.append("    <versions>\n");
-		for (String version : versions) {
-			xml.append("      <version>").append(escapeXml(version)).append("</version>\n");
-		}
-		xml.append("    </versions>\n");
-		xml.append("    <lastUpdated>").append(LAST_UPDATED.format(lastUpdated)).append("</lastUpdated>\n");
-		xml.append("  </versioning>\n</metadata>\n");
-		return xml.toString();
+		return MavenMetadata.ofVersions(groupId, artifactId, versions, LAST_UPDATED.format(lastUpdated));
 	}
 	
 	@NonNull
@@ -303,14 +368,52 @@ public class MavenHandler extends PathRepositoryHandler {
 		ObjectNode metadata = Json.object();
 		metadata.put("groupId", coordinates.groupId());
 		metadata.put("artifactId", coordinates.artifactId());
+		String fileMetadata = coordinates.fileName().endsWith(".jar") ? this.pluginDescriptor(blob) : null;
 		// Clients upload the files of a version in parallel, the version is created by whichever upload comes first
 		this.services.artifacts().transaction(work -> {
 			if (this.alreadyStored(work, repository, path, blob, immutable)) {
 				return false;
 			}
-			this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), coordinates.packageName(), coordinates.version(), null, username);
+			this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), coordinates.packageName(), coordinates.version(), fileMetadata, username);
 			return this.services.packages().ensure(work, repository.name(), coordinates.packageName(), coordinates.version(), Json.write(metadata), username);
 		});
+	}
+	
+	/**
+	 * Reads the goal prefix and name of a Maven plugin from the descriptor in its jar, they are needed for the plugin list of the group metadata.<br>
+	 *
+	 * @return The file metadata as json, null if the jar is not a Maven plugin
+	 */
+	@Nullable
+	private String pluginDescriptor(@NonNull StoredBlob blob) {
+		try (ZipFile zip = new ZipFile(this.services.artifacts().blobStore().path(blob.sha256()).toFile())) {
+			ZipEntry entry = zip.getEntry(PLUGIN_DESCRIPTOR);
+			if (entry == null) {
+				return null;
+			}
+			byte[] data;
+			try (InputStream input = zip.getInputStream(entry)) {
+				data = input.readNBytes(MAX_REMOTE_METADATA_SIZE + 1);
+			}
+			if (data.length > MAX_REMOTE_METADATA_SIZE) {
+				return null;
+			}
+			Element root = MavenMetadata.parse(data).getDocumentElement();
+			String prefix = MavenMetadata.childText(root, "goalPrefix");
+			if (prefix == null) {
+				return null;
+			}
+			ObjectNode metadata = Json.object();
+			metadata.put("goalPrefix", prefix);
+			String name = MavenMetadata.childText(root, "name");
+			if (name != null) {
+				metadata.put("pluginName", name);
+			}
+			return Json.write(metadata);
+		} catch (Exception e) {
+			// Not a readable jar or descriptor, the artifact is stored without plugin information
+			return null;
+		}
 	}
 	
 	@Override

@@ -14,6 +14,7 @@ import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
 import net.luis.artifactory.repository.*;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.*;
 
@@ -77,6 +78,16 @@ public class RepositoryAdminHandler {
 	@org.jspecify.annotations.Nullable
 	private static String blankToNull(@org.jspecify.annotations.Nullable String value) {
 		return value == null || value.isBlank() ? null : value.strip();
+	}
+	
+	/**
+	 * npm and Cargo forbid overwriting a published version, their clients and caches assume a version never changes,
+	 * so the handlers of these types never redeploy and the flag is rejected instead of silently ignored.<br>
+	 */
+	private static void requireRedeploySupported(@NonNull RepositoryType type, @Nullable Boolean allowRedeploy) {
+		if (Boolean.TRUE.equals(allowRedeploy) && (type == RepositoryType.NPM || type == RepositoryType.CARGO)) {
+			throw HttpError.badRequest(type.id() + " repositories do not support redeploys, published versions are immutable");
+		}
 	}
 	
 	@OpenApi(
@@ -161,6 +172,7 @@ public class RepositoryAdminHandler {
 			throw HttpError.conflict("Repository " + request.name() + " already exists");
 		}
 		
+		requireRedeploySupported(type, request.allowRedeploy());
 		boolean remote = request.remote() != null;
 		boolean virtual = request.members() != null;
 		if (remote && virtual) {
@@ -206,6 +218,7 @@ public class RepositoryAdminHandler {
 		Principal principal = this.services.auth().requireAdmin(ctx);
 		RepositoryEntity repository = this.require(ctx);
 		UpdateRepositoryRequest request = ctx.bodyAsClass(UpdateRepositoryRequest.class);
+		requireRedeploySupported(Objects.requireNonNull(RepositoryType.byId(repository.type())), request.allowRedeploy());
 		this.services.repositories().update(repository.name(), request.description(), request.publicRead(), request.allowRedeploy());
 		
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());

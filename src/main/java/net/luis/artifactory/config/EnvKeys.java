@@ -14,6 +14,7 @@ public final class EnvKeys {
 	public static final String MAX_UPLOAD_SIZE = "ARTIFACTORY_MAX_UPLOAD_SIZE_MB";
 	public static final String MAX_BUFFERED_UPLOAD_SIZE = "ARTIFACTORY_MAX_BUFFERED_UPLOAD_SIZE_MB";
 	public static final String MAINTENANCE_INTERVAL = "ARTIFACTORY_MAINTENANCE_INTERVAL_MINUTES";
+	public static final String REMOTE_METADATA_TTL = "ARTIFACTORY_REMOTE_METADATA_TTL_MINUTES";
 	
 	// Security
 	public static final String ADMIN_USERNAME = "ARTIFACTORY_ADMIN_USERNAME";

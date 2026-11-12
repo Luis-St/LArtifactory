@@ -27,6 +27,7 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_SESSION_REMEMBER_DAYS`        | `30`                                           | Lifetime of a web ui session with "keep me signed in"                                      |
 | `ARTIFACTORY_NPM_TOKEN_DAYS`               | `90`                                           | Lifetime of tokens created by `npm login`, `0` for no expiry                               |
 | `ARTIFACTORY_MAINTENANCE_INTERVAL_MINUTES` | `60`                                           | Interval of the cleanup of orphaned blobs, temporary files and expired sessions            |
+| `ARTIFACTORY_REMOTE_METADATA_TTL_MINUTES`  | `30`                                           | Age after which a remote repository fetches Maven metadata and snapshots again, `0` always |
 | `ARTIFACTORY_DB_URL`                       | `jdbc:postgresql://localhost:5432/artifactory` | JDBC url                                                                                   |
 | `ARTIFACTORY_DB_USERNAME`                  | required                                       | Database user                                                                              |
 | `ARTIFACTORY_DB_PASSWORD`                  | required                                       | Database password                                                                          |
@@ -78,6 +79,8 @@ Repositories are created with the management api, every repository has one of th
 
 Released versions are immutable: uploading a different file over an existing release returns `409 Conflict`
 (Maven snapshots can always be redeployed, repositories can allow redeploys with `allowRedeploy`).
+`npm` and `cargo` repositories reject `allowRedeploy`, because both ecosystems forbid overwriting a published version and their clients cache versions forever.
+Checksum sidecars (`file.sha1`) are a Maven feature, a `generic` repository stores a file named `file.sha256` like any other file.
 
 ### Local, remote and virtual repositories
 
@@ -98,8 +101,14 @@ curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Con
 
 A remote repository fetches a missing artifact from `{upstream}/{path}`.
 With `cacheEnabled` the fetched artifact is stored locally on first access.
-A virtual repository resolves each read against its members, local or remote, in order and serves the first match.
-It never generates or merges Maven metadata, so metadata is served from whichever member provides it as a real file.
+Released artifacts are immutable and stay cached, while `maven-metadata.xml`, its checksums and snapshots change upstream,
+so they are fetched again once the cached copy is older than `ARTIFACTORY_REMOTE_METADATA_TTL_MINUTES`.
+If the upstream does not answer, the stale copy is served, because an outdated version list is more useful than a failed build.
+Upstream files are streamed to storage instead of buffered, a file larger than the max upload size is rejected by its `Content-Length` before the download.
+A virtual repository resolves each read against its members, local or remote, in order and serves the first match,
+including the generated metadata, checksums and non-unique snapshot names of local members.
+`maven-metadata.xml` is the exception, it is merged across all members so the version list contains the versions of every member.
+Snapshot level metadata can not be merged, because build numbers are local to a repository, so the most recently updated one is served.
 ### Client configuration
 **Gradle**
 
@@ -182,6 +191,13 @@ This is stricter than Docker Hub, but a moved tag silently changes what a deploy
 Deleting a manifest removes its tags, its layers stay until the maintenance task removes blobs no manifest references once they are older than a day.
 The age protects a push in progress, which uploads all blobs before its manifest.
 Chunked uploads are kept in memory and in a temporary file, an upload interrupted by a restart of the server has to be started again.
+A blob that a manifest still references can not be deleted (`409`), because the image would be broken while its manifest is still served.
+
+The registry uses the token flow of the distribution spec: an anonymous request is answered with a `Bearer` challenge pointing to `{base}/v2/token`.
+A `Basic` challenge does not work, the Docker engine then aborts every request without stored credentials, so an anonymous pull from a `publicRead` repository would fail.
+Without credentials the token endpoint hands out an anonymous token, which reads public repositories.
+With credentials it returns the access token itself or, for a password, a session that is valid for one hour, so the password is never sent again.
+Basic auth on the api endpoints keeps working for clients such as `curl`.
 
 ### One host per ecosystem
 With `ARTIFACTORY_HOST_REPOSITORIES` a repository can be served at the root of its own host, which allows urls like
@@ -191,7 +207,8 @@ With `ARTIFACTORY_HOST_REPOSITORIES` a repository can be served at the root of i
 ARTIFACTORY_HOST_REPOSITORIES=pypi.example.com=pypi-local,npm.example.com=npm-local,nuget.example.com=nuget-local,cargo.example.com=cargo-local
 ```
 
-All hosts point to the same server (e.g. via nginx), `/api`, `/health` and `/swagger` keep working on every host.
+All hosts point to the same server (e.g. via nginx), the management api, `/health`, `/ui` and the api docs keep working on every host.
+Only these exact paths are taken from the repository, so packages such as `healthcheck`, `swagger-ui` or a Maven group `api.example` stay reachable.
 The mapping matches the `Host` header; if the proxy rewrites `Host` and forwards the original in `X-Forwarded-Host`,
 set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 ## Authentication

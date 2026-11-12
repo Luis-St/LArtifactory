@@ -24,6 +24,14 @@ class VersionsTest {
 	}
 	
 	@Test
+	void mavenRemovesZerosBeforeEveryHyphen() {
+		assertTrue(Versions.MAVEN.compare("1.0-beta", "1.0.0-alpha") > 0);
+		assertEquals(0, Versions.MAVEN.compare("1.0.0-beta", "1.0-beta"));
+		assertTrue(Versions.MAVEN.compare("1.0-1", "1.0.1") < 0, "a dash starts a sublist that is older than a number");
+		assertTrue(Versions.MAVEN.compare("1-SNAPSHOT", "1.0.1") < 0);
+	}
+	
+	@Test
 	void semverOrdersPrereleases() {
 		List<String> versions = new ArrayList<>(List.of("1.0.0", "1.0.0-rc.1", "1.0.0-beta.11", "1.0.0-beta.2", "1.0.0-alpha", "1.0.0-alpha.1", "0.9.0", "1.1.0", "1.0.0-beta"));
 		versions.sort(Versions.SEMVER);
@@ -52,6 +60,18 @@ class VersionsTest {
 		assertEquals(0, Versions.PEP440.compare("1.0+local", "1.0"));
 		assertTrue(Versions.PEP440.compare("1.10", "1.9") > 0);
 		assertTrue(Versions.PEP440.compare("not a version", "0.1") < 0, "invalid versions are older than all valid versions");
+	}
+	
+	@Test
+	void pep440NormalizedForm() {
+		assertEquals("1.0.0b1", Versions.normalizePep440("1.0.0-beta1"));
+		assertEquals("1.0.0a2", Versions.normalizePep440("1.0.0-alpha.2"));
+		assertEquals("1.0.post1", Versions.normalizePep440("1.0-1"));
+		assertEquals("1.0.dev0", Versions.normalizePep440("1.0.dev"));
+		assertEquals("1!2.0rc1", Versions.normalizePep440("1!2.0RC1"));
+		assertEquals("1.0+ubuntu.1", Versions.normalizePep440("1.0+Ubuntu-1"));
+		assertEquals("1.0", Versions.normalizePep440("v1.0"));
+		assertNull(Versions.normalizePep440("not a version"));
 	}
 	
 	@Test

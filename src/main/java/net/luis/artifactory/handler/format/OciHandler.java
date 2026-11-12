@@ -1,5 +1,6 @@
 package net.luis.artifactory.handler.format;
 
+import com.google.common.util.concurrent.Striped;
 import io.javalin.http.Context;
 import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
@@ -27,6 +28,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
 import java.util.regex.Pattern;
 
 /**
@@ -74,6 +77,21 @@ public class OciHandler extends FormatHandler {
 	public static final String DOCKER_MANIFEST_LIST = "application/vnd.docker.distribution.manifest.list.v2+json";
 	private static final Set<String> INDEX_TYPES = Set.of(OCI_INDEX, DOCKER_MANIFEST_LIST);
 	private static final Set<String> MANIFEST_TYPES = Set.of(OCI_MANIFEST, OCI_INDEX, DOCKER_MANIFEST, DOCKER_MANIFEST_LIST);
+	/**
+	 * Lifetime of a session created by the token endpoint for a password, clients fetch a new token once it expired.<br>
+	 */
+	private static final Duration TOKEN_LIFETIME = Duration.ofHours(1);
+	/**
+	 * Clients are told the token expires earlier than its session, so a request in flight never carries an expired session.<br>
+	 */
+	private static final Duration TOKEN_EXPIRY_MARGIN = Duration.ofMinutes(5);
+	private static final String TOKEN_SERVICE = "LArtifactory";
+	private static final String TOKEN_ATTRIBUTE = "artifactory.ociToken";
+	/**
+	 * Serializes the reference check and deletion of blobs (garbage collection and blob deletes) against manifest pushes of the same repository,
+	 * otherwise a manifest could be committed for a blob that is deleted at the same time.<br>
+	 */
+	private static final Striped<ReadWriteLock> REFERENCE_LOCKS = Striped.readWriteLock(64);
 	private final Map<String, UploadSession> uploads = new ConcurrentHashMap<>();
 	
 	public OciHandler(@NonNull Services services) {
@@ -191,21 +209,119 @@ public class OciHandler extends FormatHandler {
 			if (!RepositoryType.OCI.id().equals(repository.type())) {
 				continue;
 			}
-			Set<String> referenced = new HashSet<>();
-			List<String> images = services.packages().packageNames(repository.name());
-			for (List<PackageVersionEntity> versions : services.packages().versions(repository.name(), images).values()) {
-				for (PackageVersionEntity version : versions) {
-					Json.parseObject(version.metadata()).path("blobs").forEach(digest -> referenced.add(digest.asString()));
+			// Manifest pushes wait while the references are read and the blobs are deleted
+			Lock lock = REFERENCE_LOCKS.get(repository.name()).writeLock();
+			lock.lock();
+			try {
+				Set<String> referenced = referencedDigests(services, repository);
+				for (FileEntity file : services.artifacts().list(repository.name(), "blobs/sha256/")) {
+					String digest = "sha256:" + file.path().substring("blobs/sha256/".length());
+					if (file.createdAt().isBefore(threshold) && !referenced.contains(digest) && services.artifacts().delete(repository.name(), file.path())) {
+						deleted++;
+					}
 				}
-			}
-			for (FileEntity file : services.artifacts().list(repository.name(), "blobs/sha256/")) {
-				String digest = "sha256:" + file.path().substring("blobs/sha256/".length());
-				if (file.createdAt().isBefore(threshold) && !referenced.contains(digest) && services.artifacts().delete(repository.name(), file.path())) {
-					deleted++;
-				}
+			} finally {
+				lock.unlock();
 			}
 		}
 		return deleted;
+	}
+	
+	/**
+	 * Returns the digests of all blobs referenced by a manifest of the repository.<br>
+	 */
+	@NonNull
+	private static Set<String> referencedDigests(@NonNull Services services, @NonNull RepositoryEntity repository) throws SqlException {
+		Set<String> referenced = new HashSet<>();
+		List<String> images = services.packages().packageNames(repository.name());
+		for (List<PackageVersionEntity> versions : services.packages().versions(repository.name(), images).values()) {
+			for (PackageVersionEntity version : versions) {
+				Json.parseObject(version.metadata()).path("blobs").forEach(digest -> referenced.add(digest.asString()));
+			}
+		}
+		return referenced;
+	}
+	
+	/**
+	 * Returns the error code of the distribution spec for a status, null if the spec defines none.<br>
+	 */
+	@Nullable
+	private static String errorCode(int status) {
+		return switch (status) {
+			case 401 -> "UNAUTHORIZED";
+			case 403 -> "DENIED";
+			case 405 -> "UNSUPPORTED";
+			case 413 -> "SIZE_INVALID";
+			case 429 -> "TOOMANYREQUESTS";
+			default -> null;
+		};
+	}
+	
+	/**
+	 * Converts a plain error to the error format of the distribution spec and replaces the challenge of a 401 with the bearer challenge of the registry.<br>
+	 */
+	@NonNull
+	HttpError translate(@NonNull Context ctx, @NonNull HttpError error, @Nullable RepositoryEntity repository) {
+		// The token endpoint is not part of the distribution api, invalid credentials keep the basic challenge there
+		if (Boolean.TRUE.equals(ctx.attribute(TOKEN_ATTRIBUTE))) {
+			return error;
+		}
+		Map<String, String> headers = new HashMap<>(error.headers());
+		if (error.status() == 401) {
+			headers.keySet().removeIf("WWW-Authenticate"::equalsIgnoreCase);
+			headers.put("WWW-Authenticate", this.bearerChallenge(ctx, repository));
+		}
+		String code = errorCode(error.status());
+		boolean formatted = error.contentType() != null && error.contentType().startsWith("application/json");
+		if (formatted || code == null) {
+			return error.status() == 401 ? HttpError.json(401, error.getMessage(), Objects.requireNonNullElse(error.body(), ""), headers) : error;
+		}
+		ObjectNode root = Json.object();
+		root.putArray("errors").addObject().put("code", code).put("message", Objects.requireNonNullElse(error.body(), error.getMessage()));
+		return HttpError.json(error.status(), error.getMessage(), Json.write(root), headers);
+	}
+	
+	/**
+	 * The challenge of the token flow, clients fetch a token from the realm (anonymously if they have no credentials) and send it as bearer token.<br>
+	 * A {@code Basic} challenge does not work for anonymous clients: Docker aborts every request without stored credentials after one.<br>
+	 */
+	@NonNull
+	private String bearerChallenge(@NonNull Context ctx, @Nullable RepositoryEntity repository) {
+		return "Bearer realm=\"" + this.tokenUrl(ctx, repository) + "\",service=\"" + TOKEN_SERVICE + "\"";
+	}
+	
+	@NonNull
+	private String tokenUrl(@NonNull Context ctx, @Nullable RepositoryEntity repository) {
+		if (repository == null || this.isRoot(ctx)) {
+			return Requests.baseUrl(ctx, this.services.config()) + "/v2/token";
+		}
+		return this.repositoryUrl(ctx, repository) + "/v2/token";
+	}
+	
+	@Override
+	@NonNull
+	protected String challenge(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+		return this.bearerChallenge(ctx, repository);
+	}
+	
+	/**
+	 * Hands out a bearer token for the credentials of the request, an anonymous token without credentials.<br>
+	 * The token is not limited to the requested scope, every request is still authorized against the permissions of its user.<br>
+	 */
+	public void token(@NonNull Context ctx) throws SqlException {
+		ctx.attribute(TOKEN_ATTRIBUTE, true);
+		String method = Requests.method(ctx);
+		if (!"GET".equals(method) && !"HEAD".equals(method)) {
+			throw HttpError.methodNotAllowed();
+		}
+		String token = this.services.auth().bearerToken(ctx, TOKEN_LIFETIME);
+		ObjectNode root = Json.object();
+		root.put("token", token);
+		root.put("access_token", token);
+		root.put("expires_in", TOKEN_LIFETIME.minus(TOKEN_EXPIRY_MARGIN).toSeconds());
+		root.put("issued_at", java.time.format.DateTimeFormatter.ISO_INSTANT.format(Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS)));
+		ctx.header("Cache-Control", "no-store");
+		json(ctx, 200, root);
 	}
 	
 	@Override
@@ -215,6 +331,14 @@ public class OciHandler extends FormatHandler {
 	
 	@Override
 	public void handle(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String rawPath) throws Exception {
+		try {
+			this.dispatch(ctx, repository, rawPath);
+		} catch (HttpError e) {
+			throw this.translate(ctx, e, repository);
+		}
+	}
+	
+	private void dispatch(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String rawPath) throws Exception {
 		ctx.header(API_VERSION_HEADER, API_VERSION);
 		List<String> segments = Requests.decodedSegments(rawPath);
 		if (segments.isEmpty() || !"v2".equals(segments.getFirst())) {
@@ -229,7 +353,9 @@ public class OciHandler extends FormatHandler {
 			if (!read) {
 				throw HttpError.methodNotAllowed();
 			}
-			this.ping(ctx, this.challenge(ctx, repository));
+			this.ping(ctx);
+		} else if (rest.equals(List.of("token")) && !this.isRoot(ctx)) {
+			this.token(ctx);
 		} else if (rest.equals(List.of("_catalog")) && !this.isRoot(ctx)) {
 			if (!read) {
 				throw HttpError.methodNotAllowed();
@@ -267,13 +393,14 @@ public class OciHandler extends FormatHandler {
 	}
 	
 	/**
-	 * Answers the version check of a client, credentials are required so clients learn the challenge and send them on later requests.<br>
-	 * An anonymous client still reads public repositories, it ignores the challenge if it has no credentials.<br>
+	 * Answers the version check of a client, an anonymous client receives the bearer challenge so it learns where to fetch tokens.<br>
+	 * A client without credentials fetches an anonymous token and reads public repositories with it, a client with credentials
+	 * fetches a token for them, which is why the ping must not answer anonymous clients with 200.<br>
 	 */
-	public void ping(@NonNull Context ctx, @NonNull String challenge) throws SqlException {
+	public void ping(@NonNull Context ctx) throws SqlException {
 		ctx.header(API_VERSION_HEADER, API_VERSION);
 		if (this.services.auth().authenticate(ctx) == null) {
-			throw HttpError.unauthorized(challenge);
+			throw HttpError.unauthorized("Bearer");
 		}
 		json(ctx, 200, Json.object());
 	}
@@ -387,6 +514,17 @@ public class OciHandler extends FormatHandler {
 			throw error(400, "MANIFEST_INVALID", "Only manifests with schemaVersion 2 are supported");
 		}
 		String mediaType = mediaType(ctx.header("Content-Type"), manifest);
+		// The references are checked and the manifest is committed while no blob of the repository can be deleted
+		Lock lock = REFERENCE_LOCKS.get(repository.name()).readLock();
+		lock.lock();
+		try {
+			this.commitManifest(ctx, repository, image, reference, byDigest, principal, body, digest, manifest, mediaType);
+		} finally {
+			lock.unlock();
+		}
+	}
+	
+	private void commitManifest(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String image, @NonNull String reference, boolean byDigest, @Nullable Principal principal, byte @NonNull [] body, @NonNull String digest, @NonNull JsonNode manifest, @NonNull String mediaType) throws Exception {
 		ObjectNode metadata = this.validateReferences(repository, image, manifest, mediaType);
 		metadata.put("size", body.length);
 		
@@ -535,6 +673,9 @@ public class OciHandler extends FormatHandler {
 			ctx.header("OCI-Filters-Applied", "artifactType");
 		}
 		ctx.status(200).contentType(OCI_INDEX).result(Json.write(root));
+		// Jetty appends a charset to +json types, oras compares the media type of the referrers response literally
+		ctx.res().setCharacterEncoding(null);
+		ctx.res().setHeader("Content-Type", OCI_INDEX);
 	}
 	
 	//region Blobs
@@ -551,8 +692,19 @@ public class OciHandler extends FormatHandler {
 			}
 			case "DELETE" -> {
 				this.authorize(ctx, repository, AccessLevel.DELETE);
-				if (!this.services.artifacts().delete(repository.name(), blobPath(this.requireDigest(digest)))) {
-					throw error(404, "BLOB_UNKNOWN", "Unknown blob " + digest);
+				this.requireDigest(digest);
+				Lock lock = REFERENCE_LOCKS.get(repository.name()).writeLock();
+				lock.lock();
+				try {
+					// Deleting a referenced blob is allowed by the spec, but leaves a manifest that is served and can not be pulled
+					if (referencedDigests(this.services, repository).contains(digest)) {
+						throw error(409, "DENIED", "Blob " + digest + " is referenced by a manifest, delete the manifest first");
+					}
+					if (!this.services.artifacts().delete(repository.name(), blobPath(digest))) {
+						throw error(404, "BLOB_UNKNOWN", "Unknown blob " + digest);
+					}
+				} finally {
+					lock.unlock();
 				}
 				ctx.status(202).result("");
 			}

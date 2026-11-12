@@ -31,6 +31,11 @@ public class HttpError extends RuntimeException {
 	}
 	
 	@NonNull
+	public static HttpError json(int status, @NonNull String message, @NonNull String json, @NonNull Map<String, String> headers) {
+		return new HttpError(status, message, "application/json", json, headers);
+	}
+	
+	@NonNull
 	public static HttpError empty(int status) {
 		return new HttpError(status, "HTTP " + status, null, null, Map.of());
 	}
