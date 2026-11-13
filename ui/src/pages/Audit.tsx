@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import { api } from '../api';
-import { Badge, Button, Empty, ErrorBox, PageHeader, Spinner } from '../components/ui';
+import { Badge, Button, Empty, ErrorBox, PageHeader, Spinner, TypeBadge } from '../components/ui';
+import { ACCESS_LEVELS, type AccessLevel, REPOSITORY_TYPES, type AuditEntry, type RepositoryType } from '../types';
+import { levelTone } from './Users';
 import { formatDate, formatIp, formatRelative } from '../format';
 import { useAsync } from '../hooks';
+import {Select} from '../components/Select';
 
 const PAGE_SIZE = 100;
 
@@ -27,6 +30,49 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function shortId(value: string): string {
 	return UUID.test(value) ? `${value.substring(0, 8)}…` : value;
 }
+
+/**
+ * Renders the target of an entry by what it is: repository types as badges, token ids as short ids, names as plain text.
+ */
+function AuditTarget({ entry }: { entry: AuditEntry }) {
+	const target = entry.target;
+	if (!target) {
+		return <span className="faint">—</span>;
+	}
+	if (entry.action.startsWith('repository.') && REPOSITORY_TYPES.includes(target as RepositoryType)) {
+		return <TypeBadge type={target as RepositoryType} />;
+	}
+	if (UUID.test(target)) {
+		return <code className="id-chip" title={target}>{shortId(target)}</code>;
+	}
+	return <span className="break" title={target}>{target}</span>;
+}
+
+/**
+ * Splits details like "user=admin, level=DELETE" into chips, other details are shown as text.
+ */
+function AuditDetail({ detail }: { detail: string | null }) {
+	if (!detail) {
+		return null;
+	}
+	if ((ACCESS_LEVELS as readonly string[]).includes(detail)) {
+		return <Badge tone={levelTone(detail as AccessLevel)}>{detail}</Badge>;
+	}
+	const parts = detail.split(/,\s*/);
+	if (!parts.every(part => /^[\w.-]+=\S*$/.test(part))) {
+		return <span className="muted small">{REPOSITORY_KINDS[detail] ?? detail}</span>;
+	}
+	return (
+		<span className="detail-chips">
+			{parts.map(part => {
+				const [key, value] = part.split('=', 2);
+				return <span key={key} className="detail-chip"><span className="faint">{key}</span> {value}</span>;
+			})}
+		</span>
+	);
+}
+
+const REPOSITORY_KINDS: Record<string, string> = { local: 'Local', remote: 'Remote (proxy)', virtual: 'Virtual (group)' };
 
 function actionTone(action: string): 'neutral' | 'success' | 'warning' | 'danger' | 'accent' {
 	if (action.endsWith('.delete')) {
@@ -67,9 +113,7 @@ export function Audit() {
 				subtitle="Administrative actions on repositories, users, permissions and tokens, newest first."
 			/>
 			<div className="toolbar">
-				<select value={action} aria-label="Action" onChange={event => { setAction(event.target.value); setLimit(PAGE_SIZE); }}>
-					{ACTIONS.map(entry => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-				</select>
+				<Select label="Action" value={action} onChange={value => { setAction(value); setLimit(PAGE_SIZE); }} options={ACTIONS.map(entry => ({value: entry.id, label: entry.label}))}/>
 				<input placeholder="Repository" aria-label="Filter by repository" value={repository} onChange={event => { setRepository(event.target.value); setLimit(PAGE_SIZE); }} />
 				<input placeholder="User" aria-label="Filter by user" value={actor} onChange={event => { setActor(event.target.value); setLimit(PAGE_SIZE); }} />
 				{filtered && <Button variant="ghost" onClick={clear}>Clear filters</Button>}
@@ -85,12 +129,12 @@ export function Audit() {
 							{rows.map(entry => (
 								<tr key={entry.id}>
 									<td className="muted nowrap" title={formatDate(entry.timestamp)}>{formatRelative(entry.timestamp)}</td>
-									<td className="shrink"><Badge tone={actionTone(entry.action)} title={ACTIONS.find(candidate => candidate.id === entry.action)?.label}>{entry.action}</Badge></td>
+									<td className="shrink"><Badge tone={actionTone(entry.action)} title={entry.action}>{ACTIONS.find(candidate => candidate.id === entry.action)?.label ?? entry.action}</Badge></td>
 									<td className="nowrap">{entry.actor ? <button type="button" className="link" onClick={() => { setActor(entry.actor!); setLimit(PAGE_SIZE); }}>{entry.actor}</button> : <span className="muted">anonymous</span>}</td>
 									<td className="nowrap">{entry.repository && entry.repository !== '*' ? <button type="button" className="link" onClick={() => { setRepository(entry.repository!); setLimit(PAGE_SIZE); }}>{entry.repository}</button> : <span className="faint">{entry.repository ?? '—'}</span>}</td>
-									<td className="mono small" title={entry.target ?? undefined}>{entry.target ? shortId(entry.target) : <span className="faint">—</span>}</td>
-									<td className="muted small">{entry.detail ?? ''}</td>
-									<td className="mono small muted nowrap">{formatIp(entry.ip)}</td>
+									<td><AuditTarget entry={entry} /></td>
+									<td><AuditDetail detail={entry.detail} /></td>
+									<td className="muted small nowrap tabular">{formatIp(entry.ip)}</td>
 								</tr>
 							))}
 						</tbody>

@@ -87,7 +87,10 @@ const PATHS: Record<IconName, ReactNode> = {
 		<circle cx="12" cy="12" r="1.2"/>
 		<circle cx="19" cy="12" r="1.2"/>
 	</>,
-	folder: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>,
+	folder: <>
+		<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.4a1.5 1.5 0 0 1 1.1.5L11.5 7h7A2.5 2.5 0 0 1 21 9.5v7a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 16.5z" fill="currentColor" fillOpacity={0.18}/>
+		<path d="M3 10h18"/>
+	</>,
 	file: <>
 		<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/>
 		<path d="M14 3v5h5"/>

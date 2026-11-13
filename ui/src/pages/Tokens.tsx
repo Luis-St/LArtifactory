@@ -7,6 +7,7 @@ import {formatDate, formatRelative} from '../format';
 import {useAsync} from '../hooks';
 import {useSession} from '../session';
 import {ACCESS_LEVELS, type AccessLevel, type Token} from '../types';
+import {Select} from '../components/Select';
 
 export function Tokens() {
 	const {principal, notify} = useSession();
@@ -39,9 +40,7 @@ export function Tokens() {
 				<div className="toolbar">
 					<label className="cell-inline">
 						<span className="muted">Showing tokens of</span>
-						<select value={owner} onChange={event => setOwner(event.target.value)}>
-							{(users.data ?? [{username: principal.username}]).map(user => <option key={user.username} value={user.username}>{user.username}</option>)}
-						</select>
+						<Select label="Token owner" value={owner} onChange={setOwner} options={(users.data ?? [{username: principal.username}]).map(user => ({value: user.username, label: user.username}))}/>
 					</label>
 				</div>
 			)}
@@ -161,18 +160,16 @@ function CreateTokenDialog({owner, maxLevel, onClose, onCreated}: { owner: strin
 					<input value={name} onChange={event => setName(event.target.value)} required autoFocus maxLength={128}/>
 				</Field>
 				<Field label="Access level" hint="Limited to the permissions of the user">
-					<select value={level} onChange={event => setLevel(event.target.value as AccessLevel)}>
-						{levels.map(entry => <option key={entry} value={entry}>{entry}</option>)}
-					</select>
+					<Select<AccessLevel> label="Access level" value={level} onChange={setLevel} options={levels.map(entry => ({value: entry, label: entry}))}/>
 				</Field>
 				<Field label="Expiration">
-					<select value={expires} onChange={event => setExpires(event.target.value)}>
-						<option value="7">7 days</option>
-						<option value="30">30 days</option>
-						<option value="90">90 days</option>
-						<option value="365">1 year</option>
-						<option value="">Never</option>
-					</select>
+					<Select label="Expiration" value={expires} onChange={setExpires} options={[
+						{value: '7', label: '7 days'},
+						{value: '30', label: '30 days'},
+						{value: '90', label: '90 days'},
+						{value: '365', label: '1 year'},
+						{value: '', label: 'Never'},
+					]}/>
 				</Field>
 				<Field label="Allowed IPs" hint="Optional comma/space separated IPs or CIDR ranges, e.g. 10.0.0.0/8 203.0.113.5">
 					<input value={allowedIps} onChange={event => setAllowedIps(event.target.value)} placeholder="Any address" maxLength={2048}/>

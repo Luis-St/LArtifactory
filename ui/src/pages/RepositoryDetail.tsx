@@ -9,6 +9,7 @@ import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {ociRegistry, setupSnippets} from '../setup';
 import {ACCESS_LEVELS, type AccessLevel, type FileEntry, IMMUTABLE_TYPES, type Package, type Repository} from '../types';
+import {Select} from '../components/Select';
 
 type Tab = 'packages' | 'files' | 'setup' | 'settings' | 'access';
 
@@ -166,7 +167,7 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 		<div className={`package${open ? ' open' : ''}`}>
 			<button type="button" className="package-head" onClick={onToggle} aria-expanded={open}>
 				<span className="chevron" aria-hidden><Icon name="chevron-right" size={16}/></span>
-				<span className="mono strong package-name">{pkg.name}</span>
+				<span className="name strong package-name">{pkg.name}</span>
 				{latest && <Badge tone="accent">{latest}</Badge>}
 				<span className="package-meta muted small">
 					{pkg.versions.length} {pkg.versions.length === 1 ? 'version' : 'versions'} · {formatBytes(size)}
@@ -231,8 +232,8 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 				<ConfirmDialog
 					title={deleting.version ? `Delete ${oci ? 'manifest' : 'version'}` : 'Delete package'}
 					message={deleting.version
-						? <>Delete <strong className="mono">{pkg.name} {versionLabel(deleting.version)}</strong> and its files from <strong>{repository.name}</strong>? Clients depending on it will break.</>
-						: <>Delete <strong className="mono">{pkg.name}</strong> with all {pkg.versions.length} versions from <strong>{repository.name}</strong>?</>}
+						? <>Delete <strong>{pkg.name} {versionLabel(deleting.version)}</strong> and its files from <strong>{repository.name}</strong>? Clients depending on it will break.</>
+						: <>Delete <strong>{pkg.name}</strong> with all {pkg.versions.length} versions from <strong>{repository.name}</strong>?</>}
 					onConfirm={async () => {
 						await api.deletePackage(repository.name, pkg.name, deleting.version);
 						notify(deleting.version ? `Deleted ${pkg.name} ${versionLabel(deleting.version)}` : `Deleted ${pkg.name}`);
@@ -310,12 +311,12 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 					<tbody>
 					{prefix && (
 						<tr className="clickable" onClick={() => openFolder(crumbs.slice(0, -1).join('/') + (crumbs.length > 1 ? '/' : ''))}>
-							<td colSpan={4}><span className="entry-name muted"><Icon name="arrow-left" size={16}/>..</span></td>
+							<td colSpan={4}><span className="entry-name muted"><span className="entry-icon"><Icon name="arrow-left" size={16}/></span>Parent folder</span></td>
 						</tr>
 					)}
 					{folders.map(([folder, stats]) => (
 						<tr key={folder} className="clickable" onClick={() => openFolder(prefix + folder + '/')}>
-							<td><span className="entry-name"><span className="folder-icon"><Icon name="folder" size={16}/></span><span className="mono">{folder}/</span></span></td>
+							<td><span className="entry-name"><span className="entry-icon entry-icon-folder"><Icon name="folder" size={16}/></span><span className="name">{folder}</span></span></td>
 							<td className="num muted">{formatBytes(stats.size)}</td>
 							<td className="muted nowrap">{stats.count} {stats.count === 1 ? 'file' : 'files'}</td>
 							<td/>
@@ -323,7 +324,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 					))}
 					{entries.map(file => (
 						<tr key={file.path} className={`clickable${selected?.path === file.path ? ' selected' : ''}`} onClick={() => setSelected(selected?.path === file.path ? null : file)}>
-							<td><span className="entry-name"><Icon name="file" size={16}/><span className="mono break">{file.path.substring(prefix.length)}</span></span></td>
+							<td><span className="entry-name"><span className="entry-icon"><Icon name="file" size={16}/></span><span className="name break">{file.path.substring(prefix.length)}</span></span></td>
 							<td className="num">{formatBytes(file.size)}</td>
 							<td className="muted nowrap" title={formatDate(file.createdAt)}>{file.createdBy ? `${file.createdBy} · ` : ''}{formatRelative(file.createdAt)}</td>
 							<td className="actions">
@@ -340,7 +341,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 				</table>
 			</div>
 			{selected && (
-				<Card title={<span className="mono break">{fileName(selected.path)}</span>} actions={<button type="button" className="icon-btn" onClick={() => setSelected(null)} aria-label="Close details"><Icon name="close"/></button>}>
+				<Card title={<span className="name break">{fileName(selected.path)}</span>} actions={<button type="button" className="icon-btn" onClick={() => setSelected(null)} aria-label="Close details"><Icon name="close"/></button>}>
 					<dl className="details details-stacked">
 						<dt>Path</dt>
 						<dd className="mono break small">{selected.path}</dd>
@@ -350,7 +351,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 						<dd>{formatBytes(selected.size)} ({formatNumber(selected.size)} bytes)</dd>
 						{selected.packageName && <>
 							<dt>Package</dt>
-							<dd className="mono">{selected.packageName} {selected.version && shortDigest(selected.version)}</dd>
+							<dd>{selected.packageName} {selected.version && shortDigest(selected.version)}</dd>
 						</>}
 						<dt>Uploaded</dt>
 						<dd>{formatDate(selected.createdAt)}{selected.createdBy ? ` by ${selected.createdBy}` : ''}</dd>
@@ -502,13 +503,9 @@ function RepositoryAccess({repository}: { repository: Repository }) {
 		<div className="stack">
 			<Card title="Grant access">
 				<form className="inline-form" onSubmit={grant}>
-					<select value={username} onChange={event => setUsername(event.target.value)} required aria-label="User">
-						<option value="">Select user…</option>
-						{(users.data ?? []).filter(user => !user.admin).map(user => <option key={user.username} value={user.username}>{user.username}</option>)}
-					</select>
-					<select value={level} onChange={event => setLevel(event.target.value as AccessLevel)} aria-label="Level">
-						{ACCESS_LEVELS.map(entry => <option key={entry} value={entry}>{entry}</option>)}
-					</select>
+					<Select label="User" placeholder="Select user…" value={username} onChange={setUsername}
+							options={(users.data ?? []).filter(user => !user.admin).map(user => ({value: user.username, label: user.username}))}/>
+					<Select<AccessLevel> label="Level" value={level} onChange={setLevel} options={ACCESS_LEVELS.map(entry => ({value: entry, label: entry}))}/>
 					<Button variant="primary" type="submit" disabled={busy || !username}>Grant</Button>
 				</form>
 				<p className="muted small">READ downloads, WRITE publishes, tags and yanks, DELETE removes artifacts. Each level includes the lower ones.</p>

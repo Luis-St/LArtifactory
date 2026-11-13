@@ -1,11 +1,12 @@
 import {type FormEvent, useState} from 'react';
 import {api} from '../api';
-import {Badge, Button, Card, Empty, ErrorBox, errorText, PageHeader, Spinner, TypeBadge} from '../components/ui';
+import {Badge, Button, Card, Empty, ErrorBox, errorText, PageHeader, Spinner, TYPE_INFO, TypeBadge} from '../components/ui';
 import {useAsync} from '../hooks';
 import {href} from '../router';
 import {useSession} from '../session';
-import {ACCESS_LEVELS, type AccessLevel} from '../types';
+import {ACCESS_LEVELS, type AccessLevel, sortRepositories} from '../types';
 import {levelTone} from './Users';
+import {Select} from '../components/Select';
 
 export function Permissions({params}: { params: URLSearchParams }) {
 	const {notify} = useSession();
@@ -55,32 +56,28 @@ export function Permissions({params}: { params: URLSearchParams }) {
 			
 			<Card title="Grant access">
 				<form className="inline-form" onSubmit={grant}>
-					<select value={username} onChange={event => setUsername(event.target.value)} required aria-label="User">
-						<option value="">Select user…</option>
-						{nonAdmins.map(user => <option key={user.username} value={user.username}>{user.username}</option>)}
-					</select>
-					<select value={repository} onChange={event => setRepository(event.target.value)} aria-label="Repository">
-						<option value="*">* (all repositories)</option>
-						{(repositories.data ?? []).map(entry => <option key={entry.name} value={entry.name}>{entry.name} ({entry.type})</option>)}
-					</select>
-					<select value={level} onChange={event => setLevel(event.target.value as AccessLevel)} aria-label="Level">
-						{ACCESS_LEVELS.map(entry => <option key={entry} value={entry}>{entry}</option>)}
-					</select>
+					<Select label="User" placeholder="Select user…" value={username} onChange={setUsername}
+							options={nonAdmins.map(user => ({value: user.username, label: user.username}))}/>
+					<Select label="Repository" value={repository} onChange={setRepository} options={[
+						{value: '*', label: 'All repositories (*)'},
+						...sortRepositories(repositories.data ?? []).map(entry => ({value: entry.name, label: entry.name, hint: TYPE_INFO[entry.type].label})),
+					]}/>
+					<Select<AccessLevel> label="Level" value={level} onChange={setLevel} options={ACCESS_LEVELS.map(entry => ({value: entry, label: entry}))}/>
 					<Button variant="primary" type="submit" disabled={busy || !username}>Grant</Button>
 				</form>
 				<p className="muted small">READ downloads, WRITE publishes, tags and yanks, DELETE removes artifacts. Granting again replaces the existing level.</p>
 			</Card>
 			
 			<div className="toolbar">
-				<select value={userFilter} onChange={event => setUserFilter(event.target.value)} aria-label="Filter user">
-					<option value="">All users</option>
-					{(users.data ?? []).map(user => <option key={user.username} value={user.username}>{user.username}</option>)}
-				</select>
-				<select value={repositoryFilter} onChange={event => setRepositoryFilter(event.target.value)} aria-label="Filter repository">
-					<option value="">All repositories</option>
-					<option value="*">* (all repositories)</option>
-					{(repositories.data ?? []).map(entry => <option key={entry.name} value={entry.name}>{entry.name}</option>)}
-				</select>
+				<Select label="Filter user" value={userFilter} onChange={setUserFilter} options={[
+					{value: '', label: 'All users'},
+					...(users.data ?? []).map(user => ({value: user.username, label: user.username})),
+				]}/>
+				<Select label="Filter repository" value={repositoryFilter} onChange={setRepositoryFilter} options={[
+					{value: '', label: 'All repositories'},
+					{value: '*', label: 'Granted for all (*)'},
+					...sortRepositories(repositories.data ?? []).map(entry => ({value: entry.name, label: entry.name, hint: TYPE_INFO[entry.type].label})),
+				]}/>
 				{(userFilter || repositoryFilter) && <Button variant="ghost" onClick={() => {
 					setUserFilter('');
 					setRepositoryFilter('');

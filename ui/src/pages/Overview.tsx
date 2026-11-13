@@ -22,7 +22,6 @@ export function Overview() {
 		}),
 		{repositories: 0, packages: 0, versions: 0, files: 0, size: 0},
 	);
-	const maxSize = Math.max(1, ...types.map(type => type.size));
 	const failed = inventory.data?.filter(entry => entry.error) ?? [];
 	
 	return (
@@ -78,12 +77,17 @@ export function Overview() {
 										<dd>{formatNumber(type.files)}</dd>
 									</div>
 								</dl>
-								<div className="meter" title={formatBytes(type.size)}>
-									<span style={{width: `${(type.size / maxSize) * 100}%`, background: TYPE_INFO[type.type].color}}/>
+								<div className="type-card-usage">
+									<div className="type-card-usage-label small">
+										<span><strong>{formatBytes(type.size)}</strong> <span className="muted">· {share(type.size, totals.size)} of all storage</span></span>
+									</div>
+									<div className="meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={totals.size > 0 ? Math.round((type.size / totals.size) * 100) : 0}
+										 aria-label={`${TYPE_INFO[type.type].label} share of all storage`} title={`${formatBytes(type.size)} of ${formatBytes(totals.size)}`}>
+										<span style={{width: `${totals.size > 0 ? (type.size / totals.size) * 100 : 0}%`, background: TYPE_INFO[type.type].color}}/>
+									</div>
 								</div>
 								<div className="type-card-foot muted small">
-									<span>{formatBytes(type.size)}</span>
-									<span>{type.lastUpload ? `Last upload ${formatRelative(type.lastUpload)}` : 'No uploads yet'}</span>
+									{type.lastUpload ? `Last upload ${formatRelative(type.lastUpload)}` : 'No uploads yet'}
 								</div>
 							</a>
 						))}
@@ -97,14 +101,17 @@ export function Overview() {
 							{inventory.data.length === 0 ? (
 								<Empty title="No repositories yet">{principal?.admin ? <a className="link" href={href('repositories')}>Create the first repository</a> : 'Ask an administrator for access.'}</Empty>
 							) : (
-								<ul className="list">
+								<ul className="list list-grid list-repositories">
 									{inventory.data.map(entry => (
 										<li key={entry.repository.name}>
 											<a className="list-row" href={href('repositories', entry.repository.name)}>
-												<TypeBadge type={entry.repository.type}/>
-												<span className="list-main">{entry.repository.name}</span>
-												{entry.repository.publicRead && <Badge tone="success">public</Badge>}
-												<span className="list-meta">{entry.repository.type === 'generic' ? plural(entry.files.length, 'file') : plural(entry.packages.length, 'package')} · {formatBytes(entry.files.reduce((sum, file) => sum + file.size, 0))}</span>
+												<span className="list-type"><TypeBadge type={entry.repository.type}/></span>
+												<span className="list-main">
+													<span className="list-title">{entry.repository.name}</span>
+													{entry.repository.publicRead && <Badge tone="success">public</Badge>}
+												</span>
+												<span className="list-meta">{entry.repository.type === 'generic' ? plural(entry.files.length, 'file') : plural(entry.packages.length, 'package')}</span>
+												<span className="list-meta list-num">{formatBytes(entry.files.reduce((sum, file) => sum + file.size, 0))}</span>
 											</a>
 										</li>
 									))}
@@ -118,6 +125,14 @@ export function Overview() {
 	);
 }
 
+function share(part: number, total: number): string {
+	if (total <= 0 || part <= 0) {
+		return '0%';
+	}
+	const percent = (part / total) * 100;
+	return percent < 1 ? '<1%' : `${Math.round(percent)}%`;
+}
+
 function plural(count: number, word: string): string {
 	return `${formatNumber(count)} ${word}${count === 1 ? '' : 's'}`;
 }
@@ -128,16 +143,17 @@ function RecentList({inventory}: { inventory: Parameters<typeof recentUploads>[0
 		return <Empty title="Nothing published yet">Publish a package with your package manager to see it here.</Empty>;
 	}
 	return (
-		<ul className="list">
+		<ul className="list list-grid list-recent">
 			{recent.map(entry => (
 				<li key={`${entry.repository.name}/${entry.packageName}/${entry.version}`}>
-					<a className="list-row" href={`${href('repositories', entry.repository.name)}?package=${encodeURIComponent(entry.packageName)}`}>
-						<TypeBadge type={entry.repository.type}/>
+					<a className="list-row" href={`${href('repositories', entry.repository.name)}?package=${encodeURIComponent(entry.packageName)}`} title={`${entry.packageName} in ${entry.repository.name}`}>
+						<span className="list-type"><TypeBadge type={entry.repository.type}/></span>
 						<span className="list-main">
-							<span className="mono">{entry.packageName}</span>
-							<span className="muted"> {entry.tags.length > 0 ? entry.tags.join(', ') : shortDigest(entry.version)}</span>
+							<span className="list-title">{entry.packageName}</span>
+							<span className="list-version">{entry.tags.length > 0 ? entry.tags.join(', ') : shortDigest(entry.version)}</span>
 						</span>
-						<span className="list-meta">{entry.createdBy ? `${entry.createdBy} · ` : ''}{formatRelative(entry.createdAt)}</span>
+						<span className="list-meta">{entry.createdBy ?? ''}</span>
+						<span className="list-meta list-num">{formatRelative(entry.createdAt)}</span>
 					</a>
 				</li>
 			))}

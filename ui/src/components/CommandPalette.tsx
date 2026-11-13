@@ -130,7 +130,7 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 						{(position === 0 || entries[position - 1].group !== entry.group) && <div className="palette-group">{entry.group}</div>}
 						<button type="button" role="option" aria-selected={position === active} className="palette-item" onMouseMove={() => setActive(position)} onClick={() => open(entry)}>
 							{entry.repository ? <TypeBadge type={entry.repository.type}/> : entry.icon && <Icon name={entry.icon}/>}
-							<span className={`palette-label${entry.group === 'Packages' ? ' mono' : ''}`}>{entry.label}</span>
+							<span className="palette-label">{entry.label}</span>
 							{entry.detail && <span className="palette-detail muted">{entry.detail}</span>}
 						</button>
 					</li>

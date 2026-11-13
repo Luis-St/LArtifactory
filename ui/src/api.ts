@@ -1,4 +1,4 @@
-import type {AccessLevel, AuditEntry, FileEntry, Health, Package, Permission, Principal, Repository, Token, User, Webhook, WebhookDelivery} from './types';
+import {type AccessLevel, type AuditEntry, type FileEntry, type Health, type Package, type Permission, type Principal, type Repository, sortRepositories, type Token, type User, type Webhook, type WebhookDelivery} from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -140,7 +140,8 @@ export const api = {
 		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', {remember}, true, {Authorization: basicAuthorization(username, password)})),
 	deleteSession: () => request<void>('DELETE', '/api/session', undefined, true),
 	
-	repositories: () => request<Repository[]>('GET', '/api/repositories'),
+	// Sorted by type in the order of REPOSITORY_TYPES, then by name, so every page lists them the same way
+	repositories: () => request<Repository[]>('GET', '/api/repositories').then(sortRepositories),
 	repository: (name: string) => request<Repository>('GET', `/api/repositories/${enc(name)}`),
 	createRepository: (body: {
 		name: string;

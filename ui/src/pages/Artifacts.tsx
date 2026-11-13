@@ -8,6 +8,7 @@ import {loadInventory, type PackageSummary, type RepositoryInventory, summarizeP
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {REPOSITORY_TYPES, type RepositoryType} from '../types';
+import {Select} from '../components/Select';
 
 type Sort = 'name' | 'updated' | 'size' | 'versions';
 
@@ -22,7 +23,20 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 	const counts = useMemo(() => Object.fromEntries(REPOSITORY_TYPES.map(id => [id, id === 'generic'
 		? (inventory.data ?? []).filter(entry => entry.repository.type === id).reduce((sum, entry) => sum + entry.files.length, 0)
 		: all.filter(entry => entry.repository.type === id).length])), [all, inventory.data]);
-	const summary = inventory.data && type ? summarizeTypes(inventory.data).find(entry => entry.type === type) : undefined;
+	// The all tab sums up every type, the type tabs show their own numbers
+	const summary = useMemo(() => {
+		if (!inventory.data) {
+			return undefined;
+		}
+		const types = summarizeTypes(inventory.data).filter(entry => !type || entry.type === type);
+		return types.reduce((sum, entry) => ({
+			repositories: sum.repositories + entry.repositories,
+			packages: sum.packages + entry.packages,
+			versions: sum.versions + entry.versions,
+			files: sum.files + entry.files,
+			size: sum.size + entry.size,
+		}), {repositories: 0, packages: 0, versions: 0, files: 0, size: 0});
+	}, [inventory.data, type]);
 	const repositories = (inventory.data ?? []).map(entry => entry.repository).filter(entry => !type || entry.type === type);
 	
 	const rows = useMemo(() => {
@@ -73,18 +87,18 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 				<>
 					<div className="toolbar">
 						<SearchField placeholder="Search packages…" value={search} onChange={setSearch}/>
-						<select value={repository} onChange={event => setRepository(event.target.value)} aria-label="Repository">
-							<option value="">All repositories</option>
-							{repositories.map(entry => <option key={entry.name} value={entry.name}>{entry.name}</option>)}
-						</select>
+						<Select label="Repository" value={repository} onChange={setRepository} options={[
+							{value: '', label: 'All repositories'},
+							...repositories.map(entry => ({value: entry.name, label: entry.name, hint: type ? undefined : TYPE_INFO[entry.type].label})),
+						]}/>
 						<div className="toolbar-spacer"/>
 						<span className="muted small">{rows.length} of {type ? counts[type] ?? 0 : all.length} packages</span>
-						<select value={sort} onChange={event => setSort(event.target.value as Sort)} aria-label="Sort">
-							<option value="updated">Recently updated</option>
-							<option value="name">Name</option>
-							<option value="versions">Most versions</option>
-							<option value="size">Largest</option>
-						</select>
+						<Select<Sort> label="Sort" value={sort} onChange={setSort} options={[
+							{value: 'updated', label: 'Recently updated'},
+							{value: 'name', label: 'Name'},
+							{value: 'versions', label: 'Most versions'},
+							{value: 'size', label: 'Largest'},
+						]}/>
 					</div>
 					
 					{rows.length === 0 ? (
@@ -112,7 +126,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 										<tr key={`${entry.repository.name}/${entry.pkg.name}`} className="clickable" onClick={() => navigate(target)}>
 											<td>
 												<span className="cell-inline">
-													<a className="mono strong" href={target} onClick={event => event.stopPropagation()}>{entry.pkg.name}</a>
+													<a className="name strong" href={target} onClick={event => event.stopPropagation()}>{entry.pkg.name}</a>
 													{Object.keys(entry.pkg.tags).filter(tag => tag !== 'latest' && tag !== entry.latest).slice(0, 3).map(tag => <Badge key={tag}>{tag}</Badge>)}
 												</span>
 											</td>
@@ -174,7 +188,7 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 						<tbody>
 						{files.slice(0, 500).map(({repository, file}) => (
 							<tr key={`${repository.name}/${file.path}`}>
-								<td className="mono break">{file.path}</td>
+								<td className="name break">{file.path}</td>
 								<td className="nowrap"><a className="link" href={`${href('repositories', repository.name)}?tab=files`}>{repository.name}</a></td>
 								<td className="num">{formatBytes(file.size)}</td>
 								<td className="muted nowrap" title={file.createdAt}>{file.createdBy ? `${file.createdBy} · ` : ''}{formatRelative(file.createdAt)}</td>

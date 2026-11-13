@@ -7,6 +7,7 @@ import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {IMMUTABLE_TYPES, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
+import {Select} from '../components/Select';
 
 const PROXYABLE_TYPES: RepositoryType[] = ['maven', 'generic'];
 
@@ -20,8 +21,7 @@ export function Repositories() {
 	const query = search.trim().toLowerCase();
 	const rows = (repositories.data ?? [])
 		.filter(repository => !filter || repository.type === filter)
-		.filter(repository => !query || repository.name.toLowerCase().includes(query) || (repository.description ?? '').toLowerCase().includes(query))
-		.sort((a, b) => a.name.localeCompare(b.name));
+		.filter(repository => !query || repository.name.toLowerCase().includes(query) || (repository.description ?? '').toLowerCase().includes(query));
 	
 	return (
 		<>
@@ -156,11 +156,11 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 					</div>
 				</div>
 				<Field label="Kind" hint={proxyable ? 'Local stores artifacts, remote proxies an upstream, virtual groups repositories' : 'Remote and virtual repositories currently support only maven and generic'}>
-					<select value={kind} onChange={event => setKind(event.target.value as RepositoryClass)}>
-						<option value="LOCAL">Local</option>
-						<option value="REMOTE" disabled={!proxyable}>Remote (proxy)</option>
-						<option value="VIRTUAL" disabled={!proxyable}>Virtual (group)</option>
-					</select>
+					<Select<RepositoryClass> label="Kind" value={kind} onChange={setKind} options={[
+						{value: 'LOCAL', label: 'Local'},
+						{value: 'REMOTE', label: 'Remote (proxy)', disabled: !proxyable},
+						{value: 'VIRTUAL', label: 'Virtual (group)', disabled: !proxyable},
+					]}/>
 				</Field>
 				<Field label="Name" hint="Letters, digits, dots, dashes and underscores, e.g. releases or npm-local">
 					<input value={name} onChange={event => setName(event.target.value)} required autoFocus pattern="[A-Za-z0-9][A-Za-z0-9._\-]{0,63}" maxLength={64}/>

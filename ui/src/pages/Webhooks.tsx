@@ -1,12 +1,13 @@
 import { useState, type FormEvent } from 'react';
 import { api } from '../api';
 import { Icon } from '../components/icons';
-import { Badge, Button, ConfirmDialog, Empty, ErrorBox, Field, Menu, Modal, PageHeader, Spinner, errorText } from '../components/ui';
+import { Badge, Button, ConfirmDialog, Empty, ErrorBox, Field, Menu, Modal, PageHeader, Spinner, errorText, TYPE_INFO } from '../components/ui';
 import { formatDate, formatRelative } from '../format';
 import { useAsync } from '../hooks';
 import { href } from '../router';
 import { useSession } from '../session';
-import { WEBHOOK_EVENTS, type Webhook } from '../types';
+import { sortRepositories, WEBHOOK_EVENTS, type Webhook } from '../types';
+import {Select} from '../components/Select';
 
 export function Webhooks() {
 	const { notify } = useSession();
@@ -54,11 +55,11 @@ export function Webhooks() {
 						<tbody>
 							{webhooks.data.map(webhook => (
 								<tr key={webhook.id}>
-									<td className="mono small break">{webhook.url}</td>
+									<td className="break"><span className="url-text">{webhook.url}</span></td>
 									<td className="nowrap">{webhook.repository ? <a className="link" href={href('repositories', webhook.repository)}>{webhook.repository}</a> : <span className="muted">All repositories</span>}</td>
 									<td>
 										{webhook.events.length === 0 ? <span className="muted">All events</span> : (
-											<span className="cell-inline">{webhook.events.map(event => <Badge key={event} className="mono">{event}</Badge>)}</span>
+											<span className="cell-inline">{webhook.events.map(event => <Badge key={event} tone={eventTone(event)} title={event}>{eventLabel(event)}</Badge>)}</span>
 										)}
 									</td>
 									<td className="shrink">{webhook.hasSecret ? <Badge tone="success">signed</Badge> : <span className="faint">unsigned</span>}</td>
@@ -96,6 +97,23 @@ export function Webhooks() {
 	);
 }
 
+const EVENT_LABELS: Record<string, string> = {
+	'artifact.published': 'Artifact published',
+	'artifact.deleted': 'Artifact deleted',
+	'package.deleted': 'Package deleted',
+	'repository.created': 'Repository created',
+	'repository.deleted': 'Repository deleted',
+	'ping': 'Test delivery',
+};
+
+function eventLabel(event: string): string {
+	return EVENT_LABELS[event] ?? event;
+}
+
+function eventTone(event: string): 'success' | 'danger' | 'neutral' {
+	return event.endsWith('.deleted') ? 'danger' : event.endsWith('.published') || event.endsWith('.created') ? 'success' : 'neutral';
+}
+
 function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
 	const repositories = useAsync(() => api.repositories(), []);
 	const [url, setUrl] = useState('');
@@ -127,10 +145,10 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 					<input value={url} onChange={e => setUrl(e.target.value)} required autoFocus placeholder="https://ci.example.com/hooks/lartifactory" maxLength={1024} />
 				</Field>
 				<Field label="Repository" hint="Leave empty to receive events from all repositories">
-					<select value={repository} onChange={e => setRepository(e.target.value)}>
-						<option value="">All repositories</option>
-						{(repositories.data ?? []).map(repo => <option key={repo.name} value={repo.name}>{repo.name}</option>)}
-					</select>
+					<Select label="Repository" value={repository} onChange={setRepository} options={[
+						{value: '', label: 'All repositories'},
+						...sortRepositories(repositories.data ?? []).map(repo => ({value: repo.name, label: repo.name, hint: TYPE_INFO[repo.type].label})),
+					]}/>
 				</Field>
 				<Field label="Secret" hint="Optional, used to sign payloads with HMAC-SHA256 (X-LArtifactory-Signature)">
 					<input value={secret} onChange={e => setSecret(e.target.value)} placeholder="Unsigned" maxLength={256} />
@@ -140,7 +158,7 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 						{WEBHOOK_EVENTS.map(event => (
 							<label key={event}>
 								<input type="checkbox" checked={events.includes(event)} onChange={() => toggleEvent(event)} />
-								<span className="mono small">{event}</span>
+								<span className="event-option"><span>{eventLabel(event)}</span><code className="faint">{event}</code></span>
 							</label>
 						))}
 					</div>
@@ -169,7 +187,7 @@ function HistoryDialog({ webhook, onClose }: { webhook: Webhook; onClose: () => 
 							{deliveries.data.map(delivery => (
 								<tr key={delivery.id}>
 									<td className="muted small nowrap" title={formatDate(delivery.createdAt)}>{formatRelative(delivery.createdAt)}</td>
-									<td className="mono small">{delivery.event}</td>
+									<td title={delivery.event}>{eventLabel(delivery.event)}</td>
 									<td>{delivery.success
 										? <Badge tone="success">HTTP {delivery.statusCode}</Badge>
 										: <Badge tone="danger">{delivery.statusCode > 0 ? `HTTP ${delivery.statusCode}` : (delivery.error ?? 'failed')}</Badge>}</td>

@@ -1,5 +1,13 @@
-export const REPOSITORY_TYPES = ['maven', 'generic', 'pypi', 'npm', 'nuget', 'cargo', 'oci'] as const;
+/** The order types are listed in everywhere in the ui */
+export const REPOSITORY_TYPES = ['generic', 'maven', 'nuget', 'cargo', 'npm', 'pypi', 'oci'] as const;
 export type RepositoryType = (typeof REPOSITORY_TYPES)[number];
+
+/**
+ * Orders repositories by type (in the order of REPOSITORY_TYPES), then by name.
+ */
+export function sortRepositories<T extends { name: string; type: RepositoryType }>(repositories: T[]): T[] {
+	return [...repositories].sort((a, b) => REPOSITORY_TYPES.indexOf(a.type) - REPOSITORY_TYPES.indexOf(b.type) || a.name.localeCompare(b.name));
+}
 
 /** npm and Cargo forbid overwriting a published version, the server rejects allowRedeploy for them. */
 export const IMMUTABLE_TYPES: RepositoryType[] = ['npm', 'cargo'];
