@@ -5,7 +5,7 @@ import {Badge, Button, Card, ConfirmDialog, CopyButton, Empty, ErrorBox, errorTe
 import {compareVersions, fileName, formatBytes, formatDate, formatNumber, formatRelative, isDigest, shortDigest} from '../format';
 import {useAsync} from '../hooks';
 import {latestLabel} from '../inventory';
-import {href, navigate} from '../router';
+import {href, navigate, versionHref} from '../router';
 import {useSession} from '../session';
 import {ociRegistry, setupSnippets} from '../setup';
 import {ACCESS_LEVELS, type AccessLevel, type FileEntry, IMMUTABLE_TYPES, type Package, type Repository} from '../types';
@@ -194,7 +194,7 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 						{versions.map(version => {
 							const versionFiles = files.filter(file => file.version === version.version);
 							return (
-								<tr key={version.version}>
+								<tr key={version.version} className="clickable" title="Open this version" onClick={() => navigate(versionHref(repository.name, pkg.name, version.version))}>
 									<td className="shrink">
 										<span className="cell-inline">
 											<span className={`mono${version.yanked ? ' strike' : ''}`} title={version.version}>{versionLabel(version.version)}</span>
@@ -208,7 +208,10 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 										<div className="file-chips">
 											{versionFiles.map(file => (
 												<button key={file.path} type="button" className="file-chip" title={`Download ${file.path}\nsha256 ${file.sha256}`}
-														onClick={() => downloadFile(repository, file).catch(error => notify(error.message, 'error'))}>
+														onClick={event => {
+															event.stopPropagation();
+															downloadFile(repository, file).catch(error => notify(error.message, 'error'));
+														}}>
 													<span>{fileName(file.path)}</span>
 													<span className="muted">{formatBytes(file.size)}</span>
 												</button>
@@ -218,7 +221,10 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 									</td>
 									<td className="actions">
 										<Button small variant="ghost" className="btn-icon danger-text" title={`Delete ${oci ? 'manifest' : 'version'}`} aria-label={`Delete ${version.version}`}
-												onClick={() => setDeleting({version: version.version})}>
+												onClick={event => {
+													event.stopPropagation();
+													setDeleting({version: version.version});
+												}}>
 											<Icon name="trash" size={16}/>
 										</Button>
 									</td>
@@ -229,7 +235,7 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 					</table>
 					<div className="package-footer">
 						<a className="btn btn-secondary btn-small" href={href('repositories', repository.name, 'packages', pkg.name)}>Package details<Icon name="chevron-right" size={14}/></a>
-						<span className="muted small">Click a file to download it.</span>
+						<span className="muted small">Click a version to open it, a file to download it.</span>
 						<div className="toolbar-spacer"/>
 						<Button small variant="ghost" className="danger-text" onClick={() => setDeleting({})}><Icon name="trash" size={15}/>Delete package</Button>
 					</div>
@@ -253,9 +259,12 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 	);
 }
 
-function FileBrowser({repository, files}: { repository: Repository; files: FileEntry[] }) {
+/**
+ * Folder view of files, root is the folder it starts in and the topmost one it can go up to (e.g. the folder of a package version).
+ */
+export function FileBrowser({repository, files, root = '', rootLabel}: { repository: Repository; files: FileEntry[]; root?: string; rootLabel?: string }) {
 	const {notify} = useSession();
-	const [prefix, setPrefix] = useState('');
+	const [prefix, setPrefix] = useState(root);
 	const [selected, setSelected] = useState<FileEntry | null>(null);
 
 	// Folders and files directly below the current prefix
@@ -300,13 +309,16 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 		fileSort.toggle(key);
 		folderSort.toggle(key);
 	};
-	const crumbs = prefix.split('/').filter(Boolean);
+	const crumbs = prefix.substring(root.length).split('/').filter(Boolean);
 	const download = (file: FileEntry) => downloadFile(repository, file).catch(error => notify(error.message, 'error'));
 	const openFolder = (value: string) => {
 		setPrefix(value);
 		setSelected(null);
 	};
 
+	if (files.length === 0 && root) {
+		return <Empty title="No files">This version has no files.</Empty>;
+	}
 	if (files.length === 0) {
 		return <EmptyWithSetup repository={repository} title="No files yet" text="Upload the first file with one of these commands."/>;
 	}
@@ -314,11 +326,11 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 		<div className={`browser${selected ? ' with-details' : ''}`}>
 			<div className="table-wrap">
 				<nav className="breadcrumbs" aria-label="Folder">
-					<button type="button" className={`crumb${crumbs.length === 0 ? ' crumb-current' : ''}`} onClick={() => openFolder('')}>{repository.name}</button>
+					<button type="button" className={`crumb${crumbs.length === 0 ? ' crumb-current' : ''}`} onClick={() => openFolder(root)}>{rootLabel ?? repository.name}</button>
 					{crumbs.map((crumb, index) => (
 						<span key={index} className="cell-inline">
 							<span className="faint">/</span>
-							<button type="button" className={`crumb${index === crumbs.length - 1 ? ' crumb-current' : ''}`} onClick={() => openFolder(crumbs.slice(0, index + 1).join('/') + '/')}>{crumb}</button>
+							<button type="button" className={`crumb${index === crumbs.length - 1 ? ' crumb-current' : ''}`} onClick={() => openFolder(root + crumbs.slice(0, index + 1).join('/') + '/')}>{crumb}</button>
 						</span>
 					))}
 				</nav>
@@ -332,8 +344,8 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 					</tr>
 					</thead>
 					<tbody>
-					{prefix && (
-						<tr className="clickable" onClick={() => openFolder(crumbs.slice(0, -1).join('/') + (crumbs.length > 1 ? '/' : ''))}>
+					{prefix !== root && (
+						<tr className="clickable" onClick={() => openFolder(root + crumbs.slice(0, -1).join('/') + (crumbs.length > 1 ? '/' : ''))}>
 							<td colSpan={4}><span className="entry-name muted"><span className="entry-icon"><Icon name="arrow-left" size={16}/></span>Parent folder</span></td>
 						</tr>
 					)}

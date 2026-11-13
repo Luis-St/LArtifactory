@@ -146,7 +146,9 @@ export function ActivityChart({inventory}: { inventory: RepositoryInventory[] })
 					</div>
 				)}
 			</div>
-			<table className="sr-only">
+			{/* Hidden through a wrapper, browsers do not clip a table caption with overflow on the table itself */}
+			<div className="sr-only">
+			<table>
 				<caption>Publications per day</caption>
 				<thead>
 				<tr>
@@ -163,6 +165,7 @@ export function ActivityChart({inventory}: { inventory: RepositoryInventory[] })
 				))}
 				</tbody>
 			</table>
+			</div>
 		</div>
 	);
 }

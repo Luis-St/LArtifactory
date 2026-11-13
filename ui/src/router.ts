@@ -34,3 +34,10 @@ export function href(...segments: string[]): string {
 export function navigate(target: string): void {
 	window.location.hash = target.startsWith('#') ? target.substring(1) : target;
 }
+
+/**
+ * The page of one version of a package.
+ */
+export function versionHref(repository: string, pkg: string, version: string): string {
+	return href('repositories', repository, 'packages', pkg, 'versions', version);
+}

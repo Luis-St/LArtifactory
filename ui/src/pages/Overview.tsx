@@ -4,7 +4,7 @@ import {Badge, Card, Empty, ErrorBox, PageHeader, Spinner, Stat, Stats, TYPE_INF
 import {formatBytes, formatNumber, formatRelative, shortDigest} from '../format';
 import {useAsync} from '../hooks';
 import {loadInventory, recentUploads, summarizeTypes} from '../inventory';
-import {href} from '../router';
+import {href, versionHref} from '../router';
 import {useSession} from '../session';
 
 export function Overview() {
@@ -151,7 +151,7 @@ function RecentList({inventory}: { inventory: Parameters<typeof recentUploads>[0
 		<ul className="list list-grid list-recent">
 			{recent.map(entry => (
 				<li key={`${entry.repository.name}/${entry.packageName}/${entry.version}`}>
-					<a className="list-row" href={`${href('repositories', entry.repository.name, 'packages', entry.packageName)}?version=${encodeURIComponent(entry.version)}`} title={`${entry.packageName} in ${entry.repository.name}`}>
+					<a className="list-row" href={versionHref(entry.repository.name, entry.packageName, entry.version)} title={`${entry.packageName} in ${entry.repository.name}`}>
 						<span className="list-type"><TypeBadge type={entry.repository.type}/></span>
 						<span className="list-main">
 							<span className="list-title">{entry.packageName}</span>

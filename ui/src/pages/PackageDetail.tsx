@@ -7,7 +7,7 @@ import {Badge, Button, Card, ConfirmDialog, CopyButton, Empty, ErrorBox, PageHea
 import {compareVersions, fileName, formatBytes, formatDate, formatNumber, formatRelative, isDigest, shortDigest} from '../format';
 import {useAsync} from '../hooks';
 import {latestLabel, latestVersion} from '../inventory';
-import {href, navigate} from '../router';
+import {href, navigate, versionHref} from '../router';
 import {useSession} from '../session';
 import {installSnippets} from '../setup';
 import type {FileEntry, PackageVersion} from '../types';
@@ -135,7 +135,8 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 								</thead>
 								<tbody>
 								{visible.map(version => (
-									<tr key={version.version} className={`clickable${version.version === selected?.version ? ' selected' : ''}`} onClick={() => selectVersion(version.version)}>
+									<tr key={version.version} className={`clickable${version.version === selected?.version ? ' selected' : ''}`} title="Open this version"
+										onClick={() => navigate(versionHref(repositoryName, packageName, version.version))}>
 										<td>
 											<span className="cell-inline">
 												<span className={`name${version.yanked ? ' strike' : ''}`} title={version.version}>{versionLabel(version.version)}</span>
@@ -186,6 +187,9 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 								<dd><Badge tone="warning">{yankedLabel}</Badge></dd>
 							</>}
 						</dl>
+						<a className="btn btn-secondary btn-small detail-open" href={versionHref(repositoryName, packageName, selected.version)}>
+							Open {oci ? 'manifest' : 'version'} details<Icon name="chevron-right" size={14}/>
+						</a>
 						<h3 className="subsection-title">Files</h3>
 						{selectedFiles.length === 0 ? <p className="muted small">No files.</p> : (
 							<ul className="file-list">

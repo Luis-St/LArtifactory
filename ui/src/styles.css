@@ -1392,6 +1392,53 @@ input:disabled {
 
 /* Package page */
 
+.detail-open {
+	margin-top: 14px;
+	align-self: flex-start;
+}
+
+.version-nav {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	margin-top: 16px;
+	padding-top: 14px;
+	border-top: 1px solid var(--border);
+}
+
+/* The file browser inside a card: the card already draws the frame */
+.card-browser .table-wrap {
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+.card-browser .browser, .card-browser .browser.with-details {
+	grid-template-columns: minmax(0, 1fr);
+	gap: 0;
+}
+
+.card-browser .browser.with-details > .card {
+	margin: 0 14px 14px;
+}
+
+.card-browser .details-stacked {
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: 8px 20px;
+}
+
+.card-browser .details-stacked dd {
+	margin: 0;
+}
+
+.card-browser .details + .btn {
+	width: auto;
+}
+
+.card-browser .empty {
+	margin: 0 14px 14px;
+}
+
 .detail-grid {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
@@ -1845,7 +1892,11 @@ input:disabled {
 	position: absolute;
 	width: 1px;
 	height: 1px;
+	margin: -1px;
+	padding: 0;
+	border: 0;
 	overflow: hidden;
+	clip: rect(0 0 0 0);
 	clip-path: inset(50%);
 	white-space: nowrap;
 }
