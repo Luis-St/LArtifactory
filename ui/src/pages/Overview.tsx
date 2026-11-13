@@ -29,7 +29,7 @@ export function Overview() {
 		<>
 			<PageHeader
 				title="Overview"
-				subtitle={`Welcome back, ${principal?.username}. Here is what is stored in this instance.`}
+				subtitle={principal ? `Welcome back, ${principal.username}. Here is what is stored in this instance.` : 'You are browsing as a guest, only public repositories are shown.'}
 				actions={
 					<div className="health">
 						<span className={`health-dot health-${health.data?.status === 'UP' ? 'up' : health.data ? 'degraded' : 'unknown'}`}/>
@@ -104,7 +104,7 @@ export function Overview() {
 						</Card>
 						<Card title="Repositories" actions={<a className="link small" href={href('repositories')}>Manage</a>}>
 							{inventory.data.length === 0 ? (
-								<Empty title="No repositories yet">{principal?.admin ? <a className="link" href={href('repositories')}>Create the first repository</a> : 'Ask an administrator for access.'}</Empty>
+								<Empty title="No repositories yet">{principal?.admin ? <a className="link" href={href('repositories')}>Create the first repository</a> : principal ? 'Ask an administrator for access.' : 'No public repositories, sign in to see more.'}</Empty>
 							) : (
 								<ul className="list list-grid list-repositories">
 									{inventory.data.map(entry => (

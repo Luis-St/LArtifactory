@@ -1,10 +1,17 @@
 import type {IconName} from './components/icons';
+import type {Principal} from './types';
 
 export interface NavItem {
 	id: string;
 	label: string;
 	icon: IconName;
 	admin?: boolean;
+	/** Only shown when signed in, hidden while browsing as a guest. */
+	user?: boolean;
+}
+
+export function visibleTo(item: NavItem, principal: Principal | null): boolean {
+	return (!item.admin || principal?.admin === true) && (!item.user || principal !== null);
 }
 
 export const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
@@ -27,8 +34,8 @@ export const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [
 	{
 		label: 'Personal',
 		items: [
-			{id: 'tokens', label: 'Access tokens', icon: 'tokens'},
-			{id: 'account', label: 'Account', icon: 'account'},
+			{id: 'tokens', label: 'Access tokens', icon: 'tokens', user: true},
+			{id: 'account', label: 'Account', icon: 'account', user: true},
 		],
 	},
 ];

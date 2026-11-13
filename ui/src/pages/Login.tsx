@@ -1,5 +1,5 @@
-import {type FormEvent, useState} from 'react';
-import {ApiError} from '../api';
+import {type FormEvent, useEffect, useState} from 'react';
+import {api, ApiError} from '../api';
 import {Icon} from '../components/icons';
 import {ThemeToggle} from '../components/Layout';
 import {Button, Field, TYPE_INFO} from '../components/ui';
@@ -36,7 +36,8 @@ function describeError(error: unknown, withToken: boolean): LoginError {
 }
 
 export function Login() {
-	const {login} = useSession();
+	const {login, continueAsGuest} = useSession();
+	const [publicCount, setPublicCount] = useState(0);
 	const [username, setUsername] = useState('');
 	const [secret, setSecret] = useState('');
 	const [remember, setRemember] = useState(false);
@@ -44,6 +45,11 @@ export function Login() {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<LoginError>();
 	const withToken = username.trim() === '';
+	
+	useEffect(() => {
+		// Without credentials the server lists only the public repositories, guest access is offered when there are any
+		api.repositories().then(repositories => setPublicCount(repositories.length), () => setPublicCount(0));
+	}, []);
 
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
@@ -105,6 +111,17 @@ export function Login() {
 						</div>
 					)}
 					<Button variant="primary" type="submit" className="login-submit" disabled={busy || !secret}>{busy ? 'Signing in…' : withToken ? 'Sign in with token' : 'Sign in'}</Button>
+					{publicCount > 0 && (
+						<>
+							<div className="login-divider"><span>or</span></div>
+							<Button variant="ghost" className="login-submit" onClick={continueAsGuest} disabled={busy}>
+								Continue without signing in
+							</Button>
+							<p className="muted small login-guest-hint">
+								Browse and download from {publicCount === 1 ? 'the public repository' : `${publicCount} public repositories`}.
+							</p>
+						</>
+					)}
 				</form>
 			</div>
 		</div>

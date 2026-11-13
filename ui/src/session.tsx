@@ -4,6 +4,9 @@ import type {Principal} from './types';
 
 interface Session {
 	principal: Principal | null;
+	/** Browsing without credentials, only public repositories are visible. */
+	guest: boolean;
+	continueAsGuest: () => void;
 	login: (username: string, secret: string, remember: boolean) => Promise<void>;
 	logout: () => void;
 	notify: (message: string, kind?: ToastKind) => void;
@@ -29,8 +32,31 @@ export function useSession(): Session {
 
 let nextToastId = 1;
 
-export function SessionProvider({children}: { children: (state: { ready: boolean; principal: Principal | null }) => ReactNode }) {
+const GUEST_KEY = 'lartifactory.guest';
+
+function readGuest(): boolean {
+	try {
+		return sessionStorage.getItem(GUEST_KEY) === 'true';
+	} catch {
+		return false;
+	}
+}
+
+function storeGuest(value: boolean): void {
+	try {
+		if (value) {
+			sessionStorage.setItem(GUEST_KEY, 'true');
+		} else {
+			sessionStorage.removeItem(GUEST_KEY);
+		}
+	} catch {
+		// Storage unavailable, guest mode only lasts for this page
+	}
+}
+
+export function SessionProvider({children}: { children: (state: { ready: boolean; principal: Principal | null; guest: boolean }) => ReactNode }) {
 	const [principal, setPrincipal] = useState<Principal | null>(null);
+	const [guest, setGuest] = useState(() => !hasAuthorization() && readGuest());
 	const [ready, setReady] = useState(!hasAuthorization());
 	const [toasts, setToasts] = useState<Toast[]>([]);
 	
@@ -47,6 +73,14 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 		}
 		setAuthorization(null);
 		setPrincipal(null);
+		storeGuest(false);
+		setGuest(false);
+	}, []);
+	
+	const continueAsGuest = useCallback(() => {
+		setAuthorization(null);
+		storeGuest(true);
+		setGuest(true);
 	}, []);
 	
 	useEffect(() => {
@@ -69,6 +103,8 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 		}
 		try {
 			setPrincipal(await api.me());
+			storeGuest(false);
+			setGuest(false);
 		} catch (error) {
 			setAuthorization(null);
 			throw error;
@@ -76,8 +112,8 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 	}, []);
 	
 	return (
-		<SessionContext.Provider value={{principal, login, logout, notify}}>
-			{children({ready, principal})}
+		<SessionContext.Provider value={{principal, guest, continueAsGuest, login, logout, notify}}>
+			{children({ready, principal, guest})}
 			<div className="toasts" role="status" aria-live="polite">
 				{toasts.map(toast => (
 					<div key={toast.id} className={`toast toast-${toast.kind}`} onClick={() => setToasts(current => current.filter(entry => entry.id !== toast.id))}>

@@ -5,9 +5,9 @@ import {useTheme} from '../theme';
 import {REPOSITORY_TYPES} from '../types';
 import {CommandPalette} from './CommandPalette';
 import {loadPackageIndex, typeCounts} from '../inventory';
-import {NAV_GROUPS} from '../nav';
+import {NAV_GROUPS, visibleTo} from '../nav';
 import {Icon} from './icons';
-import {Avatar, Menu, TYPE_INFO} from './ui';
+import {Avatar, Button, Menu, TYPE_INFO} from './ui';
 
 const COLLAPSED_KEY = 'lartifactory.sidebarCollapsed';
 
@@ -125,7 +125,7 @@ export function Layout({section, type, children}: { section: string; type?: stri
 		});
 	};
 
-	const groups = NAV_GROUPS.map(group => ({...group, items: group.items.filter(item => !item.admin || principal?.admin)})).filter(group => group.items.length > 0);
+	const groups = NAV_GROUPS.map(group => ({...group, items: group.items.filter(item => visibleTo(item, principal))})).filter(group => group.items.length > 0);
 
 	return (
 		<div className={`layout${open ? ' nav-open' : ''}${collapsed ? ' collapsed' : ''}`}>
@@ -220,6 +220,9 @@ export function Layout({section, type, children}: { section: string; type?: stri
 								{label: 'Sign out', icon: 'logout', onSelect: logout, danger: true},
 							]}
 						/>
+					)}
+					{!principal && (
+						<Button variant="primary" small onClick={logout}><Icon name="account" size={15}/>Sign in</Button>
 					)}
 				</div>
 				<main className="content" ref={content}>{children}</main>

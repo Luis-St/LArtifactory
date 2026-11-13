@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {NAV_GROUPS} from '../nav';
+import {NAV_GROUPS, visibleTo} from '../nav';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {loadPackageIndex as loadIndex, type PackageIndex as Index} from '../inventory';
@@ -37,7 +37,7 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 		const needle = query.trim().toLowerCase();
 		const matches = (...values: (string | null | undefined)[]) => !needle || values.some(value => value?.toLowerCase().includes(needle));
 		const pages: Entry[] = NAV_GROUPS.flatMap(group => group.items)
-			.filter(item => !item.admin || principal?.admin)
+			.filter(item => visibleTo(item, principal))
 			.filter(item => matches(item.label))
 			.map(item => ({key: `page:${item.id}`, label: item.label, target: href(...(item.id ? [item.id] : [])), icon: item.icon, group: 'Pages'}));
 		const repositories: Entry[] = (index?.repositories ?? [])
@@ -56,7 +56,7 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 				group: 'Packages',
 			})) : [];
 		return [...(needle ? [...packages, ...repositories] : repositories), ...pages];
-	}, [query, index, principal?.admin]);
+	}, [query, index, principal]);
 
 	useEffect(() => setActive(0), [query]);
 	useEffect(() => {

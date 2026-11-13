@@ -3239,6 +3239,25 @@ input[aria-invalid='true'] {
 	min-height: 40px;
 }
 
+.login-divider {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	color: var(--muted);
+	font-size: 0.82rem;
+}
+
+.login-divider::before, .login-divider::after {
+	content: '';
+	flex: 1;
+	border-top: 1px solid var(--border);
+}
+
+.login-card .login-guest-hint {
+	margin: -8px 0 0;
+	text-align: center;
+}
+
 @media (max-width: 760px) {
 	.login-shell {
 		grid-template-columns: minmax(0, 1fr);
