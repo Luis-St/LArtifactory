@@ -2,7 +2,7 @@ import {type ReactNode, useEffect, useRef, useState} from 'react';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {useTheme} from '../theme';
-import {REPOSITORY_TYPES} from '../types';
+import {type Repository, visibleTypes} from '../types';
 import {CommandPalette} from './CommandPalette';
 import {loadPackageIndex, typeCounts} from '../inventory';
 import {NAV_GROUPS, visibleTo} from '../nav';
@@ -40,11 +40,11 @@ function useApiDocs(): boolean {
 /**
  * Packages per type for the sidebar, reloaded on every page change (the index itself is cached for a minute).
  */
-function useTypeCounts(section: string): Record<string, number> | null {
-	const [counts, setCounts] = useState<Record<string, number> | null>(null);
+function useTypeCounts(section: string): { counts: Record<string, number>; repositories: Repository[] } | null {
+	const [counts, setCounts] = useState<{ counts: Record<string, number>; repositories: Repository[] } | null>(null);
 	useEffect(() => {
 		let active = true;
-		loadPackageIndex().then(index => active && setCounts(typeCounts(index)), () => undefined);
+		loadPackageIndex().then(index => active && setCounts({counts: typeCounts(index), repositories: index.repositories}), () => undefined);
 		return () => {
 			active = false;
 		};
@@ -92,12 +92,14 @@ export function ThemeToggle() {
 }
 
 export function Layout({section, type, children}: { section: string; type?: string; children: ReactNode }) {
-	const {principal, logout} = useSession();
+	const {principal, guest, logout} = useSession();
 	const [open, setOpen] = useState(false);
 	const [collapsed, setCollapsed] = useState(readCollapsed);
 	const [searching, setSearching] = useState(false);
 	const apiDocs = useApiDocs();
-	const counts = useTypeCounts(section);
+	const index = useTypeCounts(section);
+	const counts = index?.counts;
+	const types = visibleTypes(index?.repositories, guest);
 	const content = useRef<HTMLElement>(null);
 	useTableLabels(content);
 
@@ -146,9 +148,9 @@ export function Layout({section, type, children}: { section: string; type?: stri
 											<Icon name={item.icon}/>
 											<span className="nav-label">{item.label}</span>
 										</a>
-										{item.id === 'artifacts' && (
+										{item.id === 'artifacts' && types.length > 0 && (
 											<div className="nav-sub">
-												{REPOSITORY_TYPES.map(repositoryType => (
+												{types.map(repositoryType => (
 													<a
 														key={repositoryType}
 														className={`nav-link nav-sub-link${section === 'artifacts' && type === repositoryType ? ' active' : ''}`}

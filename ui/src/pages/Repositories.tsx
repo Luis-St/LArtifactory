@@ -7,7 +7,7 @@ import {loadInventory, type RepositoryInventory} from '../inventory';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {IMMUTABLE_TYPES, type Repository, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
+import {IMMUTABLE_TYPES, type Repository, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType, visibleTypes} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
 import {Pagination, usePaging} from '../components/paging';
@@ -15,7 +15,7 @@ import {Pagination, usePaging} from '../components/paging';
 const PROXYABLE_TYPES: RepositoryType[] = ['maven', 'generic'];
 
 export function Repositories() {
-	const {principal} = useSession();
+	const {principal, guest} = useSession();
 	const repositories = useAsync(() => api.repositories(), []);
 	const [filter, setFilter] = useState<RepositoryType | ''>('');
 	const [search, setSearch] = useState('');
@@ -56,7 +56,7 @@ export function Repositories() {
 			<Tabs
 				tabs={[
 					{id: '' as RepositoryType | '', label: <>All <span className="tab-count">{repositories.data?.length ?? 0}</span></>},
-					...REPOSITORY_TYPES.map(type => ({id: type as RepositoryType | '', label: <>{TYPE_INFO[type].label} <span className="tab-count">{(repositories.data ?? []).filter(entry => entry.type === type).length}</span></>})),
+					...visibleTypes(repositories.data, guest).map(type => ({id: type as RepositoryType | '', label: <>{TYPE_INFO[type].label} <span className="tab-count">{(repositories.data ?? []).filter(entry => entry.type === type).length}</span></>})),
 				]}
 				active={filter}
 				onChange={setFilter}

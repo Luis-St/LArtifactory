@@ -37,6 +37,11 @@ export function setAuthorization(value: string | null, remember = false): void {
 	}
 }
 
+/** The current credentials, caches use it to never hand data loaded for one user to another. */
+export function currentAuthorization(): string | null {
+	return authorization;
+}
+
 export function hasAuthorization(): boolean {
 	return authorization !== null;
 }

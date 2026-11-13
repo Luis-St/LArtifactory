@@ -7,7 +7,7 @@ import {useAsync} from '../hooks';
 import {loadInventory, type PackageSummary, type RepositoryInventory, summarizePackages, summarizeTypes} from '../inventory';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {REPOSITORY_TYPES, type RepositoryType} from '../types';
+import {REPOSITORY_TYPES, type RepositoryType, visibleTypes} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
 import {Pagination, usePaging} from '../components/paging';
@@ -16,6 +16,7 @@ type Column = 'name' | 'latest' | 'repository' | 'versions' | 'size' | 'updated'
 type FileColumn = 'path' | 'repository' | 'size' | 'uploaded';
 
 export function Artifacts({type}: { type: RepositoryType | undefined }) {
+	const {guest} = useSession();
 	const inventory = useAsync(loadInventory, []);
 	const [search, setSearch] = useState('');
 	const [repository, setRepository] = useState('');
@@ -63,7 +64,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 	
 	const tabs = [
 		{id: 'all', label: <>All packages <span className="tab-count">{all.length}</span></>},
-		...REPOSITORY_TYPES.map(id => ({id, label: <>{TYPE_INFO[id].label} <span className="tab-count">{counts[id] ?? 0}</span></>})),
+		...visibleTypes(inventory.data?.map(entry => entry.repository), guest).map(id => ({id, label: <>{TYPE_INFO[id].label} <span className="tab-count">{counts[id] ?? 0}</span></>})),
 	];
 	
 	return (

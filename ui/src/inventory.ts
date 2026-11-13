@@ -1,4 +1,4 @@
-import {api} from './api';
+import {api, currentAuthorization} from './api';
 import {compareVersions, shortDigest} from './format';
 import {type FileEntry, type Package, type Repository, REPOSITORY_TYPES, type RepositoryType} from './types';
 
@@ -135,13 +135,14 @@ export interface PackageIndex {
 	genericFiles: Record<string, number>;
 }
 
-let cachedIndex: { at: number; index: Promise<PackageIndex> } | null = null;
+let cachedIndex: { at: number; authorization: string | null; index: Promise<PackageIndex> } | null = null;
 
 /**
  * Loads repositories and their packages for the search and the sidebar counts, kept for a minute so both stay instant.
  */
 export function loadPackageIndex(): Promise<PackageIndex> {
-	if (!cachedIndex || Date.now() - cachedIndex.at > 60_000) {
+	// Signing in or out changes what is visible, the cache only applies to the credentials it was loaded with
+	if (!cachedIndex || Date.now() - cachedIndex.at > 60_000 || cachedIndex.authorization !== currentAuthorization()) {
 		const index = api.repositories().then(async repositories => {
 			const [packages, files] = await Promise.all([
 				Promise.all(repositories.map(repository => api.packages(repository.name).then(list => list.map(pkg => ({repository, pkg})), () => []))),
@@ -149,7 +150,7 @@ export function loadPackageIndex(): Promise<PackageIndex> {
 			]);
 			return {repositories, packages: packages.flat(), genericFiles: Object.fromEntries(files)};
 		});
-		cachedIndex = {at: Date.now(), index};
+		cachedIndex = {at: Date.now(), authorization: currentAuthorization(), index};
 		index.catch(() => (cachedIndex = null));
 	}
 	return cachedIndex.index;

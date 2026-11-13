@@ -8,11 +8,13 @@ import {href, versionHref} from '../router';
 import {useSession} from '../session';
 
 export function Overview() {
-	const {principal} = useSession();
+	const {principal, guest} = useSession();
 	const health = useAsync(() => api.health(), []);
 	const inventory = useAsync(loadInventory, []);
 	
 	const types = inventory.data ? summarizeTypes(inventory.data) : [];
+	// A guest only sees the public repositories, empty types would only be noise
+	const shownTypes = guest ? types.filter(type => type.repositories > 0) : types;
 	const totals = types.reduce(
 		(sum, type) => ({
 			repositories: sum.repositories + type.repositories,
@@ -58,7 +60,7 @@ export function Overview() {
 					
 					<h2 className="section-title">Artifacts by type</h2>
 					<div className="type-grid">
-						{types.map(type => (
+						{shownTypes.map(type => (
 							<a key={type.type} className={`type-card${type.repositories === 0 ? ' type-card-empty' : ''}`} href={href('artifacts', type.type)} style={{'--badge': TYPE_INFO[type.type].color} as React.CSSProperties}>
 								<div className="type-card-head">
 									<TypeIcon type={type.type}/>

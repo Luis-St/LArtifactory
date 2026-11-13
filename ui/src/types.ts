@@ -3,6 +3,17 @@ export const REPOSITORY_TYPES = ['generic', 'maven', 'nuget', 'cargo', 'npm', 'p
 export type RepositoryType = (typeof REPOSITORY_TYPES)[number];
 
 /**
+ * The types shown in the navigation and the type tabs. Signed in users see every type, a guest only sees the types
+ * of the public repositories, the others would always be empty for them.
+ */
+export function visibleTypes(repositories: { type: RepositoryType }[] | undefined, guest: boolean): RepositoryType[] {
+	if (!guest) {
+		return [...REPOSITORY_TYPES];
+	}
+	return REPOSITORY_TYPES.filter(type => (repositories ?? []).some(repository => repository.type === type));
+}
+
+/**
  * Orders repositories by type (in the order of REPOSITORY_TYPES), then by name.
  */
 export function sortRepositories<T extends { name: string; type: RepositoryType }>(repositories: T[]): T[] {
