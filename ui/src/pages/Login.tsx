@@ -2,9 +2,14 @@ import {type FormEvent, useEffect, useState} from 'react';
 import {api, ApiError} from '../api';
 import {Icon} from '../components/icons';
 import {ThemeToggle} from '../components/Layout';
-import {Button, Field, TYPE_INFO} from '../components/ui';
+import {Button, Field, Tabs, TYPE_INFO} from '../components/ui';
 import {useSession} from '../session';
 import {REPOSITORY_TYPES} from '../types';
+
+type Method = 'password' | 'token';
+
+/** Access tokens are issued with this prefix, a pasted token is recognized even in the password tab. */
+const TOKEN_PREFIX = 'lat_';
 
 interface LoginError {
 	title: string;
@@ -18,8 +23,8 @@ function describeError(error: unknown, withToken: boolean): LoginError {
 	if (error instanceof ApiError) {
 		if (error.status === 401) {
 			return withToken
-				? {title: 'The token was not accepted', detail: 'It may be revoked or expired. To sign in with a password, enter your username as well.'}
-				: {title: 'Wrong username or password', detail: 'Check both and try again. To sign in with an access token, leave the username empty.'};
+				? {title: 'The token was not accepted', detail: 'It may be revoked or expired. Create a new one or sign in with your password.'}
+				: {title: 'Wrong username or password', detail: 'Check both and try again.'};
 		}
 		if (error.status === 403) {
 			return {title: 'Access denied', detail: error.message || 'The token is not allowed from this address.'};
@@ -38,13 +43,24 @@ function describeError(error: unknown, withToken: boolean): LoginError {
 export function Login() {
 	const {login, continueAsGuest} = useSession();
 	const [publicCount, setPublicCount] = useState(0);
+	const [method, setMethod] = useState<Method>('password');
 	const [username, setUsername] = useState('');
 	const [secret, setSecret] = useState('');
 	const [remember, setRemember] = useState(false);
 	const [showSecret, setShowSecret] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<LoginError>();
-	const withToken = username.trim() === '';
+	// A token pasted into the password field is used as a token, a password login with it would always be refused
+	const detectedToken = method === 'password' && secret.trim().startsWith(TOKEN_PREFIX);
+	const withToken = method === 'token' || detectedToken;
+	const canSubmit = withToken ? secret.trim() !== '' : username.trim() !== '' && secret !== '';
+	
+	const changeMethod = (value: Method) => {
+		setMethod(value);
+		setSecret('');
+		setShowSecret(false);
+		setError(undefined);
+	};
 	
 	useEffect(() => {
 		// Without credentials the server lists only the public repositories, guest access is offered when there are any
@@ -56,7 +72,7 @@ export function Login() {
 		setBusy(true);
 		setError(undefined);
 		try {
-			await login(username.trim(), secret, remember);
+			await login(withToken ? '' : username.trim(), withToken ? secret.trim() : secret, remember);
 		} catch (e) {
 			setError(describeError(e, withToken));
 			setBusy(false);
@@ -86,15 +102,23 @@ export function Login() {
 				<form className="login-card" onSubmit={submit} noValidate>
 					<div>
 						<h1>Sign in</h1>
-						<p className="muted">{withToken ? 'Enter an access token, or add your username to use a password.' : 'Enter your password to start a session.'}</p>
+						<p className="muted">{method === 'password' ? 'Enter your username and password to start a session.' : 'Enter one of your access tokens.'}</p>
 					</div>
-					<Field label="Username" hint="Leave empty to sign in with an access token">
-						<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus/>
-					</Field>
-					<Field label={withToken ? 'Access token' : 'Password'}>
+					<Tabs<Method>
+						tabs={[{id: 'password', label: 'Password'}, {id: 'token', label: 'Access token'}]}
+						active={method}
+						onChange={changeMethod}
+					/>
+					{method === 'password' && (
+						<Field label="Username">
+							<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus disabled={detectedToken}/>
+						</Field>
+					)}
+					<Field label={method === 'password' ? 'Password' : 'Access token'}
+						   hint={detectedToken ? 'This is an access token, it is used as one and the username is not needed' : method === 'token' ? `Starts with ${TOKEN_PREFIX}, the token identifies its owner` : undefined}>
 						<span className="password-field">
 							<input type={showSecret ? 'text' : 'password'} value={secret} onChange={event => setSecret(event.target.value)}
-								   autoComplete={withToken ? 'off' : 'current-password'} aria-invalid={error ? true : undefined}/>
+								   autoComplete={method === 'token' ? 'off' : 'current-password'} autoFocus={method === 'token'} aria-invalid={error ? true : undefined}/>
 							<button type="button" className="password-toggle" onClick={() => setShowSecret(value => !value)} aria-label={showSecret ? 'Hide' : 'Show'} title={showSecret ? 'Hide' : 'Show'}>
 								<Icon name={showSecret ? 'eye-off' : 'eye'} size={16}/>
 							</button>
@@ -110,7 +134,7 @@ export function Login() {
 							<span>{error.detail}</span>
 						</div>
 					)}
-					<Button variant="primary" type="submit" className="login-submit" disabled={busy || !secret}>{busy ? 'Signing in…' : withToken ? 'Sign in with token' : 'Sign in'}</Button>
+					<Button variant="primary" type="submit" className="login-submit" disabled={busy || !canSubmit}>{busy ? 'Signing in…' : withToken ? 'Sign in with token' : 'Sign in'}</Button>
 					{publicCount > 0 && (
 						<>
 							<div className="login-divider"><span>or</span></div>
