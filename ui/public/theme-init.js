@@ -1,11 +1,17 @@
-// Applies the stored theme before the first paint, an inline script would be blocked by the content security policy
+// Applies the stored theme, accent and density before the first paint, an inline script would be blocked by the content security policy
 (function () {
-	var preference = 'system';
-	try {
-		preference = localStorage.getItem('lartifactory.theme') || 'system';
-	} catch (e) {
-		// Storage unavailable, the system preference is used
-	}
+	var root = document.documentElement;
+	var read = function (key, fallback) {
+		try {
+			return localStorage.getItem(key) || fallback;
+		} catch (e) {
+			// Storage unavailable, the default is used
+			return fallback;
+		}
+	};
+	var preference = read('lartifactory.theme', 'system');
 	var dark = preference === 'dark' || (preference !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-	document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+	root.dataset.theme = dark ? 'dark' : 'light';
+	root.dataset.accent = read('lartifactory.accent', 'indigo');
+	root.dataset.density = read('lartifactory.density', 'comfortable');
 })();

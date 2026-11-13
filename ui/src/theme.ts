@@ -58,3 +58,53 @@ export function useTheme(): { preference: ThemePreference; theme: Theme; setPref
 	}, []);
 	return {preference, theme: resolve(preference), setPreference: setThemePreference};
 }
+
+export const ACCENTS = ['indigo', 'blue', 'teal', 'green', 'amber', 'rose', 'violet'] as const;
+export type Accent = (typeof ACCENTS)[number];
+export type Density = 'comfortable' | 'compact';
+
+/**
+ * A preference stored in localStorage and applied as a data attribute on the root element, theme-init.js applies it before the first paint.
+ */
+function storedAttribute<T extends string>(key: string, attribute: 'accent' | 'density', values: readonly T[], fallback: T) {
+	let value: T = fallback;
+	try {
+		const stored = localStorage.getItem(key) as T | null;
+		value = stored && values.includes(stored) ? stored : fallback;
+	} catch {
+		// Storage unavailable, the default is used
+	}
+	const subscribers = new Set<() => void>();
+	const applyValue = () => {
+		document.documentElement.dataset[attribute] = value;
+		subscribers.forEach(subscriber => subscriber());
+	};
+	applyValue();
+	const set = (next: T) => {
+		value = next;
+		try {
+			if (next === fallback) {
+				localStorage.removeItem(key);
+			} else {
+				localStorage.setItem(key, next);
+			}
+		} catch {
+			// Storage unavailable, the preference only applies to this page
+		}
+		applyValue();
+	};
+	return function usePreference(): [T, (next: T) => void] {
+		const [, setCounter] = useState(0);
+		useEffect(() => {
+			const subscriber = () => setCounter(count => count + 1);
+			subscribers.add(subscriber);
+			return () => {
+				subscribers.delete(subscriber);
+			};
+		}, []);
+		return [value, set];
+	};
+}
+
+export const useAccent = storedAttribute<Accent>('lartifactory.accent', 'accent', ACCENTS, 'indigo');
+export const useDensity = storedAttribute<Density>('lartifactory.density', 'density', ['comfortable', 'compact'], 'comfortable');

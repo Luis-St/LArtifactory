@@ -1,4 +1,5 @@
 import {api} from '../api';
+import {ActivityChart} from '../components/ActivityChart';
 import {Badge, Card, Empty, ErrorBox, PageHeader, Spinner, Stat, Stats, TYPE_INFO, TypeBadge, TypeIcon} from '../components/ui';
 import {formatBytes, formatNumber, formatRelative, shortDigest} from '../format';
 import {useAsync} from '../hooks';
@@ -50,6 +51,10 @@ export function Overview() {
 						<Stat label="Files" value={formatNumber(totals.files)}/>
 						<Stat label="Storage" value={formatBytes(totals.size)} hint="Before deduplication"/>
 					</Stats>
+					
+					<Card title="Activity" actions={<a className="link small" href={href('artifacts')}>Browse artifacts</a>}>
+						<ActivityChart inventory={inventory.data}/>
+					</Card>
 					
 					<h2 className="section-title">Artifacts by type</h2>
 					<div className="type-grid">

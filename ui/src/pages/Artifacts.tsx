@@ -10,6 +10,7 @@ import {useSession} from '../session';
 import {REPOSITORY_TYPES, type RepositoryType} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
+import {Pagination, usePaging} from '../components/paging';
 
 type Column = 'name' | 'latest' | 'repository' | 'versions' | 'size' | 'updated';
 type FileColumn = 'path' | 'repository' | 'size' | 'uploaded';
@@ -58,6 +59,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 		size: entry => entry.size,
 		updated: entry => entry.updatedAt,
 	}, {latest: (a, b) => compareVersions(a.latest ?? '', b.latest ?? '')});
+	const {visible, paging} = usePaging(sorted);
 	
 	const tabs = [
 		{id: 'all', label: <>All packages <span className="tab-count">{all.length}</span></>},
@@ -117,7 +119,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 								</tr>
 								</thead>
 								<tbody>
-								{sorted.map(entry => {
+								{visible.map(entry => {
 									const yanked = entry.pkg.versions.filter(version => version.yanked).length;
 									const target = href('repositories', entry.repository.name, 'packages', entry.pkg.name);
 									return (
@@ -143,6 +145,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 								})}
 								</tbody>
 							</table>
+							<Pagination paging={paging} noun="packages"/>
 						</div>
 					)}
 				</>
@@ -169,6 +172,7 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 		size: entry => entry.file.size,
 		uploaded: entry => entry.file.createdAt,
 	});
+	const {visible, paging} = usePaging(sorted);
 	
 	return (
 		<>
@@ -190,7 +194,7 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 						</tr>
 						</thead>
 						<tbody>
-						{sorted.slice(0, 500).map(({repository, file}) => (
+						{visible.map(({repository, file}) => (
 							<tr key={`${repository.name}/${file.path}`}>
 								<td className="name break">{file.path}</td>
 								<td className="nowrap"><a className="link" href={`${href('repositories', repository.name)}?tab=files`}>{repository.name}</a></td>
@@ -205,7 +209,7 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 						))}
 						</tbody>
 					</table>
-					{files.length > 500 && <p className="muted small table-note">Showing the newest 500 of {formatNumber(files.length)} files.</p>}
+					<Pagination paging={paging} noun="files"/>
 				</div>
 			)}
 		</>

@@ -1,8 +1,8 @@
 import type {ReactNode} from 'react';
 
 export type IconName = 'overview' | 'artifacts' | 'repositories' | 'users' | 'permissions' | 'tokens' | 'account' | 'audit' | 'webhooks' | 'docs' | 'collapse' | 'expand' | 'menu'
-	| 'sun' | 'moon' | 'monitor' | 'search' | 'chevron-down' | 'chevron-right' | 'more' | 'folder' | 'file' | 'logout' | 'external' | 'trash' | 'copy' | 'check' | 'plus' | 'close' | 'download' | 'arrow-left'
-	| 'arrow-up' | 'arrow-down' | 'sort' | 'package' | 'tag' | 'clock' | 'user';
+	| 'sun' | 'moon' | 'monitor' | 'search' | 'chevron-down' | 'chevron-right' | 'chevron-left' | 'more' | 'folder' | 'file' | 'logout' | 'external' | 'trash' | 'copy' | 'check' | 'plus' | 'close' | 'download' | 'arrow-left'
+	| 'arrow-up' | 'arrow-down' | 'sort' | 'package' | 'tag' | 'clock' | 'user' | 'list' | 'grid' | 'eye' | 'eye-off';
 
 const PATHS: Record<IconName, ReactNode> = {
 	overview: <>
@@ -83,6 +83,7 @@ const PATHS: Record<IconName, ReactNode> = {
 	</>,
 	'chevron-down': <path d="m6 9 6 6 6-6"/>,
 	'chevron-right': <path d="m9 6 6 6-6 6"/>,
+	'chevron-left': <path d="m15 6-6 6 6 6"/>,
 	more: <>
 		<circle cx="5" cy="12" r="1.2"/>
 		<circle cx="12" cy="12" r="1.2"/>
@@ -130,6 +131,21 @@ const PATHS: Record<IconName, ReactNode> = {
 	tag: <>
 		<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9z"/>
 		<circle cx="8" cy="8" r="1.5"/>
+	</>,
+	eye: <>
+		<path d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"/>
+		<circle cx="12" cy="12" r="3"/>
+	</>,
+	'eye-off': <>
+		<path d="M10.6 5.1A9.8 9.8 0 0 1 12 5c6 0 9.5 7 9.5 7a17 17 0 0 1-2.6 3.5M6.6 6.6C4 8.3 2.5 12 2.5 12S6 19 12 19c1.9 0 3.6-.7 5-1.6"/>
+		<path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18"/>
+	</>,
+	list: <path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>,
+	grid: <>
+		<rect x="4" y="4" width="7" height="7" rx="1.5"/>
+		<rect x="13" y="4" width="7" height="7" rx="1.5"/>
+		<rect x="4" y="13" width="7" height="7" rx="1.5"/>
+		<rect x="13" y="13" width="7" height="7" rx="1.5"/>
 	</>,
 	clock: <>
 		<circle cx="12" cy="12" r="9"/>

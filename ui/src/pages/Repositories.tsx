@@ -1,14 +1,16 @@
 import {type FormEvent, useState} from 'react';
 import {api} from '../api';
 import {Icon} from '../components/icons';
-import {Badge, Button, Empty, ErrorBox, errorText, Field, Modal, PageHeader, SearchField, Spinner, Tabs, Toggle, TYPE_INFO, TypeBadge} from '../components/ui';
-import {formatDate} from '../format';
+import {Badge, Button, Empty, ErrorBox, errorText, Field, Modal, PageHeader, SearchField, Segmented, Spinner, Tabs, Toggle, TYPE_INFO, TypeBadge, TypeIcon} from '../components/ui';
+import {formatBytes, formatDate, formatNumber, formatRelative} from '../format';
+import {loadInventory, type RepositoryInventory} from '../inventory';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {IMMUTABLE_TYPES, type Repository, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
+import {Pagination, usePaging} from '../components/paging';
 
 const PROXYABLE_TYPES: RepositoryType[] = ['maven', 'generic'];
 
@@ -18,6 +20,17 @@ export function Repositories() {
 	const [filter, setFilter] = useState<RepositoryType | ''>('');
 	const [search, setSearch] = useState('');
 	const [creating, setCreating] = useState(false);
+	const [view, setView] = useState<View>(readView);
+	// The cards show sizes and counts, the content is only loaded once the card view is used
+	const inventory = useAsync(() => (view === 'cards' ? loadInventory() : Promise.resolve(null)), [view]);
+	const changeView = (value: View) => {
+		setView(value);
+		try {
+			localStorage.setItem(VIEW_KEY, value);
+		} catch {
+			// Storage unavailable, the view only applies to this page
+		}
+	};
 	
 	const query = search.trim().toLowerCase();
 	const rows = (repositories.data ?? [])
@@ -30,6 +43,7 @@ export function Repositories() {
 		access: repository => (repository.publicRead ? 0 : 1),
 		created: repository => repository.createdAt,
 	});
+	const {visible, paging} = usePaging(sorted);
 	
 	return (
 		<>
@@ -49,6 +63,11 @@ export function Repositories() {
 			/>
 			<div className="toolbar">
 				<SearchField placeholder="Search repositories…" value={search} onChange={setSearch}/>
+				<div className="toolbar-spacer"/>
+				<Segmented<View> label="View" value={view} onChange={changeView} options={[
+					{id: 'table', label: 'Table', icon: 'list'},
+					{id: 'cards', label: 'Cards', icon: 'grid'},
+				]}/>
 			</div>
 			
 			{repositories.loading && !repositories.data && <Spinner/>}
@@ -58,6 +77,7 @@ export function Repositories() {
 					{principal?.admin && repositories.data.length === 0 && <Button variant="primary" onClick={() => setCreating(true)}>Create a repository</Button>}
 				</Empty>
 			) : (
+				view === 'cards' ? <RepositoryCards repositories={sorted} inventory={inventory.data ?? null}/> : (
 				<div className="table-wrap">
 					<table className="table">
 						<thead>
@@ -70,7 +90,7 @@ export function Repositories() {
 						</tr>
 						</thead>
 						<tbody>
-						{sorted.map(repository => (
+						{visible.map(repository => (
 							<tr key={repository.name} className="clickable" onClick={() => navigate(href('repositories', repository.name))}>
 								<td>
 									<span className="cell-inline">
@@ -91,11 +111,67 @@ export function Repositories() {
 						))}
 						</tbody>
 					</table>
+					<Pagination paging={paging} noun="repositories"/>
 				</div>
+				)
 			))}
 			
 			{creating && <CreateRepositoryDialog onClose={() => setCreating(false)}/>}
 		</>
+	);
+}
+
+type View = 'table' | 'cards';
+const VIEW_KEY = 'lartifactory.repositoryView';
+
+function readView(): View {
+	try {
+		return localStorage.getItem(VIEW_KEY) === 'cards' ? 'cards' : 'table';
+	} catch {
+		return 'table';
+	}
+}
+
+/**
+ * Repositories as cards with their type colour, content counts, size and last upload.
+ */
+function RepositoryCards({repositories, inventory}: { repositories: Repository[]; inventory: RepositoryInventory[] | null }) {
+	return (
+		<div className="repo-grid">
+			{repositories.map(repository => {
+				const content = inventory?.find(entry => entry.repository.name === repository.name);
+				const size = content?.files.reduce((sum, file) => sum + file.size, 0);
+				const lastUpload = content?.files.reduce<string | undefined>((result, file) => (!result || file.createdAt > result ? file.createdAt : result), undefined);
+				const count = repository.type === 'generic' ? content?.files.length : content?.packages.length;
+				return (
+					<a key={repository.name} className="repo-card" href={href('repositories', repository.name)} style={{'--badge': TYPE_INFO[repository.type].color} as React.CSSProperties}>
+						<div className="repo-card-head">
+							<TypeIcon type={repository.type} size={34}/>
+							<div className="repo-card-title">
+								<strong>{repository.name}</strong>
+								<span className="muted small">{TYPE_INFO[repository.type].label}{repository.kind !== 'LOCAL' ? ` · ${repository.kind.toLowerCase()}` : ''}</span>
+							</div>
+							{repository.publicRead ? <Badge tone="success">public</Badge> : <Badge>private</Badge>}
+						</div>
+						<p className="repo-card-description muted">{repository.description || 'No description'}</p>
+						<dl className="repo-card-stats">
+							<div>
+								<dt>{repository.type === 'generic' ? 'Files' : 'Packages'}</dt>
+								<dd>{count === undefined ? '…' : formatNumber(count)}</dd>
+							</div>
+							<div>
+								<dt>Storage</dt>
+								<dd>{size === undefined ? '…' : formatBytes(size)}</dd>
+							</div>
+							<div>
+								<dt>Last upload</dt>
+								<dd>{content ? (lastUpload ? formatRelative(lastUpload) : 'Never') : '…'}</dd>
+							</div>
+						</dl>
+					</a>
+				);
+			})}
+		</div>
 	);
 }
 

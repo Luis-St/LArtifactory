@@ -11,6 +11,7 @@ import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {installSnippets} from '../setup';
 import type {FileEntry, PackageVersion} from '../types';
+import {Pagination, usePaging} from '../components/paging';
 
 type Column = 'version' | 'published' | 'by' | 'files' | 'size';
 
@@ -46,15 +47,17 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 		files: version => filesByVersion[version.version]?.length ?? 0,
 		size: version => sizeOf(version.version),
 	}, {version: (a, b) => oci ? a.createdAt.localeCompare(b.createdAt) : compareVersions(a.version, b.version)});
+	const {visible, paging} = usePaging(sorted);
 
 	if ((repository.loading && !repo) || (packages.loading && !packages.data)) {
 		return <Spinner/>;
 	}
 	const back = {label: repositoryName, href: href('repositories', repositoryName)};
+	const crumbs = [{label: 'Repositories', href: href('repositories')}, back, {label: packageName}];
 	if (repository.error || packages.error || !repo) {
 		return (
 			<>
-				<PageHeader back={back} title={packageName}/>
+				<PageHeader crumbs={crumbs} title={packageName}/>
 				<ErrorBox error={repository.error ?? packages.error ?? 'Repository not found'} onRetry={() => {
 					repository.reload();
 					packages.reload();
@@ -65,7 +68,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 	if (!pkg) {
 		return (
 			<>
-				<PageHeader back={back} title={packageName}/>
+				<PageHeader crumbs={crumbs} title={packageName}/>
 				<Empty title="Package not found">There is no package {packageName} in {repositoryName}. <a className="link" href={back.href}>Back to the repository</a></Empty>
 			</>
 		);
@@ -89,7 +92,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 	return (
 		<>
 			<PageHeader
-				back={back}
+				crumbs={crumbs}
 				title={<span className="cell-inline package-title">{pkg.name} <TypeBadge type={repo.type}/></span>}
 				subtitle={<>Package in <a className="link" href={back.href}>{repositoryName}</a>{repo.description ? ` · ${repo.description}` : ''}</>}
 				actions={<Button variant="ghost" className="danger-text" onClick={() => setDeleting({})}><Icon name="trash" size={15}/>Delete package</Button>}
@@ -131,7 +134,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 								</tr>
 								</thead>
 								<tbody>
-								{sorted.map(version => (
+								{visible.map(version => (
 									<tr key={version.version} className={`clickable${version.version === selected?.version ? ' selected' : ''}`} onClick={() => selectVersion(version.version)}>
 										<td>
 											<span className="cell-inline">
@@ -158,6 +161,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 								))}
 								</tbody>
 							</table>
+							<Pagination paging={paging} noun="versions"/>
 						</div>
 					</Card>
 				</div>

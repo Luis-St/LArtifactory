@@ -1,9 +1,9 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {api} from '../api';
 import {NAV_GROUPS} from '../nav';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import type {Package, Repository} from '../types';
+import {loadPackageIndex as loadIndex, type PackageIndex as Index} from '../inventory';
+import type {Repository} from '../types';
 import {Icon, type IconName} from './icons';
 import {TypeBadge} from './ui';
 
@@ -15,31 +15,6 @@ interface Entry {
 	icon?: IconName;
 	repository?: Repository;
 	group: string;
-}
-
-interface Index {
-	repositories: Repository[];
-	packages: { repository: Repository; pkg: Package }[];
-}
-
-let cached: { at: number; index: Promise<Index> } | null = null;
-
-/**
- * Loads repositories and their packages for the search, kept for a minute so reopening the palette is instant.
- */
-function loadIndex(): Promise<Index> {
-	if (!cached || Date.now() - cached.at > 60_000) {
-		const index = api.repositories().then(async repositories => {
-			const packages = await Promise.all(repositories.map(repository => api.packages(repository.name).then(
-				list => list.map(pkg => ({repository, pkg})),
-				() => [],
-			)));
-			return {repositories, packages: packages.flat()};
-		});
-		cached = {at: Date.now(), index};
-		index.catch(() => (cached = null));
-	}
-	return cached.index;
 }
 
 const LIMIT = 8;

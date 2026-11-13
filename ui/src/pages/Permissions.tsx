@@ -8,6 +8,7 @@ import {ACCESS_LEVELS, type AccessLevel, type Permission, sortRepositories} from
 import {levelTone} from './Users';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
+import {Pagination, usePaging} from '../components/paging';
 
 export function Permissions({params}: { params: URLSearchParams }) {
 	const {notify} = useSession();
@@ -54,6 +55,7 @@ export function Permissions({params}: { params: URLSearchParams }) {
 		repository: permission => permission.repository,
 		level: permission => ACCESS_LEVELS.indexOf(permission.level),
 	});
+	const {visible, paging} = usePaging(sorted);
 	const nonAdmins = (users.data ?? []).filter(user => !user.admin);
 	
 	return (
@@ -106,7 +108,7 @@ export function Permissions({params}: { params: URLSearchParams }) {
 						</tr>
 						</thead>
 						<tbody>
-						{sorted.map(permission => {
+						{visible.map(permission => {
 							const type = typeOf(permission.repository);
 							return (
 								<tr key={`${permission.username}/${permission.repository}`}>
@@ -126,6 +128,7 @@ export function Permissions({params}: { params: URLSearchParams }) {
 						})}
 						</tbody>
 					</table>
+					<Pagination paging={paging} noun="permissions"/>
 				</div>
 			))}
 		</>

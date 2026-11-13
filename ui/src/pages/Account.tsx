@@ -6,12 +6,14 @@ import {formatDate, formatRelative} from '../format';
 import {useAsync} from '../hooks';
 import {href} from '../router';
 import {useSession} from '../session';
-import {type ThemePreference, useTheme} from '../theme';
+import {ACCENTS, type Density, type ThemePreference, useAccent, useDensity, useTheme} from '../theme';
 import {levelTone, PasswordDialog} from './Users';
 
 export function Account() {
 	const {principal, logout} = useSession();
 	const {preference, setPreference} = useTheme();
+	const [accent, setAccent] = useAccent();
+	const [density, setDensity] = useDensity();
 	const [changing, setChanging] = useState(false);
 	const signedInWithToken = principal?.tokenLevel != null;
 	// A token can not list tokens, the list is only loaded for password sessions
@@ -70,6 +72,35 @@ export function Account() {
 									{id: 'light', label: 'Light', icon: 'sun'},
 									{id: 'dark', label: 'Dark', icon: 'moon'},
 									{id: 'system', label: 'System', icon: 'monitor'},
+								]}
+							/>
+						</div>
+						<div className="setting-row">
+							<div>
+								<span>Accent colour</span>
+								<span className="muted small">Used for links, buttons and highlights.</span>
+							</div>
+							<div className="accent-picker" role="radiogroup" aria-label="Accent colour">
+								{ACCENTS.map(entry => (
+									<button key={entry} type="button" role="radio" aria-checked={accent === entry} aria-label={entry} title={entry[0].toUpperCase() + entry.substring(1)}
+											className={`accent-swatch${accent === entry ? ' accent-swatch-active' : ''}`} data-swatch={entry} onClick={() => setAccent(entry)}>
+										{accent === entry && <Icon name="check" size={14}/>}
+									</button>
+								))}
+							</div>
+						</div>
+						<div className="setting-row">
+							<div>
+								<span>Density</span>
+								<span className="muted small">Compact fits more rows in tables and lists.</span>
+							</div>
+							<Segmented<Density>
+								label="Density"
+								value={density}
+								onChange={setDensity}
+								options={[
+									{id: 'comfortable', label: 'Comfortable'},
+									{id: 'compact', label: 'Compact'},
 								]}
 							/>
 						</div>

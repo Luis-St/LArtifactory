@@ -17,6 +17,14 @@ export function Users() {
 	const [creating, setCreating] = useState(false);
 	const [editing, setEditing] = useState<User | null>(null);
 	const [deleting, setDeleting] = useState<User | null>(null);
+	const [expanded, setExpanded] = useState<Set<string>>(new Set());
+	const toggleExpanded = (username: string) => setExpanded(current => {
+		const next = new Set(current);
+		if (!next.delete(username)) {
+			next.add(username);
+		}
+		return next;
+	});
 	
 	const toggleAdmin = async (user: User) => {
 		try {
@@ -77,14 +85,20 @@ export function Users() {
 									<td className="shrink">{user.admin ? <Badge tone="accent">Administrator</Badge> : <Badge>User</Badge>}</td>
 									<td>
 										{user.admin ? <span className="muted">Full access</span> : granted.length === 0 ? <span className="faint">No access</span> : (
-											<a className="cell-inline" href={`${href('permissions')}?username=${encodeURIComponent(user.username)}`} title="Manage permissions">
-												{granted.slice(0, 3).map(permission => (
-													<Badge key={permission.repository} tone={levelTone(permission.level)}>
-														{permission.repository === '*' ? 'all repositories' : permission.repository} · {permission.level.toLowerCase()}
-													</Badge>
+											<span className="permission-badges">
+												{(expanded.has(user.username) ? granted : granted.slice(0, 3)).map(permission => (
+													<a key={permission.repository} href={`${href('permissions')}?username=${encodeURIComponent(user.username)}`} title="Manage permissions">
+														<Badge tone={levelTone(permission.level)}>
+															{permission.repository === '*' ? 'All repositories' : permission.repository} · {permission.level}
+														</Badge>
+													</a>
 												))}
-												{granted.length > 3 && <span className="muted small">+{granted.length - 3} more</span>}
-											</a>
+												{granted.length > 3 && (
+													<button type="button" className="link small" aria-expanded={expanded.has(user.username)} onClick={() => toggleExpanded(user.username)}>
+														{expanded.has(user.username) ? 'Show less' : `+${granted.length - 3} more`}
+													</button>
+												)}
+											</span>
 										)}
 									</td>
 									<td className="muted nowrap">{formatDate(user.createdAt)}</td>

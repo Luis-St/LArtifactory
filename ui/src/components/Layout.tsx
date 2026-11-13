@@ -1,9 +1,10 @@
-import {type ReactNode, useEffect, useState} from 'react';
+import {type ReactNode, useEffect, useRef, useState} from 'react';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {useTheme} from '../theme';
 import {REPOSITORY_TYPES} from '../types';
 import {CommandPalette} from './CommandPalette';
+import {loadPackageIndex, typeCounts} from '../inventory';
 import {NAV_GROUPS} from '../nav';
 import {Icon} from './icons';
 import {Avatar, Menu, TYPE_INFO} from './ui';
@@ -36,6 +37,50 @@ function useApiDocs(): boolean {
 	return available;
 }
 
+/**
+ * Packages per type for the sidebar, reloaded on every page change (the index itself is cached for a minute).
+ */
+function useTypeCounts(section: string): Record<string, number> | null {
+	const [counts, setCounts] = useState<Record<string, number> | null>(null);
+	useEffect(() => {
+		let active = true;
+		loadPackageIndex().then(index => active && setCounts(typeCounts(index)), () => undefined);
+		return () => {
+			active = false;
+		};
+	}, [section]);
+	return counts;
+}
+
+/**
+ * Copies each table header text onto the cells of its column as data-label, narrow screens show tables as stacked cards and use it as the label.
+ */
+function useTableLabels(root: React.RefObject<HTMLElement | null>): void {
+	useEffect(() => {
+		const element = root.current;
+		if (!element) {
+			return;
+		}
+		const label = () => {
+			element.querySelectorAll<HTMLTableElement>('table.table').forEach(table => {
+				const headers = [...table.querySelectorAll('thead th')].map(th => th.textContent?.trim() ?? '');
+				table.querySelectorAll('tbody tr').forEach(row => {
+					[...row.children].forEach((cell, index) => {
+						const text = cell.getAttribute('colspan') ? '' : headers[index] ?? '';
+						if (cell.getAttribute('data-label') !== text) {
+							cell.setAttribute('data-label', text);
+						}
+					});
+				});
+			});
+		};
+		label();
+		const observer = new MutationObserver(label);
+		observer.observe(element, {childList: true, subtree: true});
+		return () => observer.disconnect();
+	}, [root]);
+}
+
 export function ThemeToggle() {
 	const {theme, setPreference} = useTheme();
 	const next = theme === 'dark' ? 'light' : 'dark';
@@ -52,6 +97,9 @@ export function Layout({section, type, children}: { section: string; type?: stri
 	const [collapsed, setCollapsed] = useState(readCollapsed);
 	const [searching, setSearching] = useState(false);
 	const apiDocs = useApiDocs();
+	const counts = useTypeCounts(section);
+	const content = useRef<HTMLElement>(null);
+	useTableLabels(content);
 
 	useEffect(() => {
 		const listener = (event: KeyboardEvent) => {
@@ -109,6 +157,8 @@ export function Layout({section, type, children}: { section: string; type?: stri
 													>
 														<span className="dot" style={{background: TYPE_INFO[repositoryType].color}}/>
 														<span className="nav-label">{TYPE_INFO[repositoryType].label}</span>
+														{counts && <span className={`nav-label nav-count${counts[repositoryType] === 0 ? ' nav-count-zero' : ''}`}
+																		 title={repositoryType === 'generic' ? 'Files' : 'Packages'}>{counts[repositoryType]}</span>}
 													</a>
 												))}
 											</div>
@@ -172,7 +222,7 @@ export function Layout({section, type, children}: { section: string; type?: stri
 						/>
 					)}
 				</div>
-				<main className="content">{children}</main>
+				<main className="content" ref={content}>{children}</main>
 			</div>
 			{searching && <CommandPalette onClose={() => setSearching(false)}/>}
 		</div>

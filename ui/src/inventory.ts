@@ -127,3 +127,39 @@ export function recentUploads(inventories: RepositoryInventory[], limit: number)
 		.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
 		.slice(0, limit);
 }
+
+export interface PackageIndex {
+	repositories: Repository[];
+	packages: { repository: Repository; pkg: Package }[];
+	/** Number of files per generic repository, generic repositories have no packages */
+	genericFiles: Record<string, number>;
+}
+
+let cachedIndex: { at: number; index: Promise<PackageIndex> } | null = null;
+
+/**
+ * Loads repositories and their packages for the search and the sidebar counts, kept for a minute so both stay instant.
+ */
+export function loadPackageIndex(): Promise<PackageIndex> {
+	if (!cachedIndex || Date.now() - cachedIndex.at > 60_000) {
+		const index = api.repositories().then(async repositories => {
+			const [packages, files] = await Promise.all([
+				Promise.all(repositories.map(repository => api.packages(repository.name).then(list => list.map(pkg => ({repository, pkg})), () => []))),
+				Promise.all(repositories.filter(repository => repository.type === 'generic').map(repository => api.files(repository.name).then(list => [repository.name, list.length] as const, () => [repository.name, 0] as const))),
+			]);
+			return {repositories, packages: packages.flat(), genericFiles: Object.fromEntries(files)};
+		});
+		cachedIndex = {at: Date.now(), index};
+		index.catch(() => (cachedIndex = null));
+	}
+	return cachedIndex.index;
+}
+
+/**
+ * Packages per type (files for generic), undefined while loading.
+ */
+export function typeCounts(index: PackageIndex): Record<RepositoryType, number> {
+	return Object.fromEntries(REPOSITORY_TYPES.map(type => [type, type === 'generic'
+		? Object.values(index.genericFiles).reduce((sum, count) => sum + count, 0)
+		: index.packages.filter(entry => entry.repository.type === type).length])) as Record<RepositoryType, number>;
+}

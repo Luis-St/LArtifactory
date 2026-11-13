@@ -78,11 +78,30 @@ export function Empty({title, children}: { title: string; children?: ReactNode }
 	);
 }
 
-export function PageHeader({title, subtitle, actions, back}: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; back?: { label: string; href: string } }) {
+export interface Crumb {
+	label: ReactNode;
+	href?: string;
+}
+
+/**
+ * Page title with optional breadcrumbs above it, the last crumb is the current page and is not a link.
+ */
+export function PageHeader({title, subtitle, actions, crumbs}: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; crumbs?: Crumb[] }) {
 	return (
 		<header className="page-header">
 			<div className="page-title">
-				{back && <a className="back" href={back.href}><Icon name="arrow-left" size={14}/>{back.label}</a>}
+				{crumbs && crumbs.length > 0 && (
+					<nav className="page-crumbs" aria-label="Breadcrumb">
+						<ol>
+							{crumbs.map((crumb, index) => (
+								<li key={index}>
+									{index > 0 && <Icon name="chevron-right" size={13}/>}
+									{crumb.href && index < crumbs.length - 1 ? <a href={crumb.href}>{crumb.label}</a> : <span aria-current={index === crumbs.length - 1 ? 'page' : undefined}>{crumb.label}</span>}
+								</li>
+							))}
+						</ol>
+					</nav>
+				)}
 				<h1>{title}</h1>
 				{subtitle && <p className="muted">{subtitle}</p>}
 			</div>

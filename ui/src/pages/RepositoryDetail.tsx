@@ -11,6 +11,7 @@ import {ociRegistry, setupSnippets} from '../setup';
 import {ACCESS_LEVELS, type AccessLevel, type FileEntry, IMMUTABLE_TYPES, type Package, type Repository} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
+import {Pagination, usePaging} from '../components/paging';
 
 type Tab = 'packages' | 'files' | 'setup' | 'settings' | 'access';
 type BrowserColumn = 'name' | 'size' | 'uploaded';
@@ -48,7 +49,7 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 	if (repository.error || !repository.data) {
 		return (
 			<>
-				<PageHeader back={{label: 'Repositories', href: href('repositories')}} title={name}/>
+				<PageHeader crumbs={[{label: 'Repositories', href: href('repositories')}, {label: name}]} title={name}/>
 				<ErrorBox error={repository.error ?? 'Repository not found'} onRetry={repository.reload}/>
 			</>
 		);
@@ -68,7 +69,7 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 	return (
 		<>
 			<PageHeader
-				back={{label: 'Repositories', href: href('repositories')}}
+				crumbs={[{label: 'Repositories', href: href('repositories')}, {label: repo.name}]}
 				title={<span className="cell-inline">{repo.name} <TypeBadge type={repo.type}/>{repo.kind !== 'LOCAL' && <Badge tone="accent">{repo.kind.toLowerCase()}</Badge>}</span>}
 				subtitle={repo.description || `${TYPE_INFO[repo.type].label} repository`}
 				actions={
@@ -89,6 +90,7 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 
 			<Tabs tabs={tabs} active={tab} onChange={setTab}/>
 
+			<div className="fade-in" key={tab}>
 			{tab === 'packages' && (
 				packages.error ? <ErrorBox error={packages.error} onRetry={packages.reload}/>
 					: !packages.data ? <Spinner/>
@@ -105,6 +107,7 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 			{tab === 'setup' && <Setup repository={repo}/>}
 			{tab === 'settings' && principal?.admin && <Settings repository={repo} onSaved={repository.reload}/>}
 			{tab === 'access' && principal?.admin && <RepositoryAccess repository={repo}/>}
+			</div>
 		</>
 	);
 }
@@ -292,6 +295,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 		uploaded: file => file.createdAt,
 	});
 	const sort = fileSort.sort;
+	const {visible: visibleFiles, paging} = usePaging(fileSort.sorted);
 	const toggle = (key: BrowserColumn) => {
 		fileSort.toggle(key);
 		folderSort.toggle(key);
@@ -341,7 +345,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 							<td/>
 						</tr>
 					))}
-					{fileSort.sorted.map(file => (
+					{visibleFiles.map(file => (
 						<tr key={file.path} className={`clickable${selected?.path === file.path ? ' selected' : ''}`} onClick={() => setSelected(selected?.path === file.path ? null : file)}>
 							<td><span className="entry-name"><span className="entry-icon"><Icon name="file" size={16}/></span><span className="name break">{file.path.substring(prefix.length)}</span></span></td>
 							<td className="num">{formatBytes(file.size)}</td>
@@ -358,6 +362,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 					))}
 					</tbody>
 				</table>
+				<Pagination paging={paging} noun="files in this folder"/>
 			</div>
 			{selected && (
 				<Card title={<span className="name break">{fileName(selected.path)}</span>} actions={<button type="button" className="icon-btn" onClick={() => setSelected(null)} aria-label="Close details"><Icon name="close"/></button>}>

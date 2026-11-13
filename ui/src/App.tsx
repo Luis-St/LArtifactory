@@ -63,7 +63,10 @@ function Routes({principal}: { principal: Principal }) {
 	
 	return (
 		<Layout section={section} type={type}>
-			{page ?? <Empty title="Page not found"><a className="link" href={href()}>Back to the overview</a></Empty>}
+			{/* Keyed by the path so every page change fades in, query changes (tabs, filters) keep the page */}
+			<div className="page" key={segments.join('/')}>
+				{page ?? <Empty title="Page not found"><a className="link" href={href()}>Back to the overview</a></Empty>}
+			</div>
 		</Layout>
 	);
 }
