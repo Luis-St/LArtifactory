@@ -9,14 +9,15 @@ import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {REPOSITORY_TYPES, type RepositoryType} from '../types';
 import {Select} from '../components/Select';
+import {SortHeader, useSort} from '../components/sort';
 
-type Sort = 'name' | 'updated' | 'size' | 'versions';
+type Column = 'name' | 'latest' | 'repository' | 'versions' | 'size' | 'updated';
+type FileColumn = 'path' | 'repository' | 'size' | 'uploaded';
 
 export function Artifacts({type}: { type: RepositoryType | undefined }) {
 	const inventory = useAsync(loadInventory, []);
 	const [search, setSearch] = useState('');
 	const [repository, setRepository] = useState('');
-	const [sort, setSort] = useState<Sort>('updated');
 	
 	const all = useMemo(() => (inventory.data ?? []).flatMap(summarizePackages), [inventory.data]);
 	// Generic repositories have no packages, their tab counts files instead
@@ -46,14 +47,17 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 			&& (!repository || entry.repository.name === repository)
 			&& (!query || entry.pkg.name.toLowerCase().includes(query)),
 		);
-		const comparators: Record<Sort, (a: PackageSummary, b: PackageSummary) => number> = {
-			name: (a, b) => a.pkg.name.localeCompare(b.pkg.name),
-			updated: (a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''),
-			size: (a, b) => b.size - a.size,
-			versions: (a, b) => b.pkg.versions.length - a.pkg.versions.length,
-		};
-		return filtered.sort(comparators[sort]);
-	}, [all, type, repository, search, sort]);
+		// Default order: recently updated first
+		return filtered.sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''));
+	}, [all, type, repository, search]);
+	const {sorted, sort, toggle} = useSort<PackageSummary, Column>(rows, {
+		name: entry => entry.pkg.name,
+		latest: entry => entry.latest,
+		repository: entry => entry.repository.name,
+		versions: entry => entry.pkg.versions.length,
+		size: entry => entry.size,
+		updated: entry => entry.updatedAt,
+	}, {latest: (a, b) => compareVersions(a.latest ?? '', b.latest ?? '')});
 	
 	const tabs = [
 		{id: 'all', label: <>All packages <span className="tab-count">{all.length}</span></>},
@@ -93,12 +97,6 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 						]}/>
 						<div className="toolbar-spacer"/>
 						<span className="muted small">{rows.length} of {type ? counts[type] ?? 0 : all.length} packages</span>
-						<Select<Sort> label="Sort" value={sort} onChange={setSort} options={[
-							{value: 'updated', label: 'Recently updated'},
-							{value: 'name', label: 'Name'},
-							{value: 'versions', label: 'Most versions'},
-							{value: 'size', label: 'Largest'},
-						]}/>
 					</div>
 					
 					{rows.length === 0 ? (
@@ -110,18 +108,18 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 							<table className="table">
 								<thead>
 								<tr>
-									<th>Package</th>
-									<th>Latest</th>
-									<th>Repository</th>
-									<th className="num">Versions</th>
-									<th className="num">Size</th>
-									<th>Updated</th>
+									<SortHeader id="name" sort={sort} onSort={toggle}>Package</SortHeader>
+									<SortHeader id="latest" sort={sort} onSort={toggle}>Latest</SortHeader>
+									<SortHeader id="repository" sort={sort} onSort={toggle}>Repository</SortHeader>
+									<SortHeader id="versions" sort={sort} onSort={toggle} className="num">Versions</SortHeader>
+									<SortHeader id="size" sort={sort} onSort={toggle} className="num">Size</SortHeader>
+									<SortHeader id="updated" sort={sort} onSort={toggle}>Updated</SortHeader>
 								</tr>
 								</thead>
 								<tbody>
-								{rows.map(entry => {
+								{sorted.map(entry => {
 									const yanked = entry.pkg.versions.filter(version => version.yanked).length;
-									const target = `${href('repositories', entry.repository.name)}?package=${encodeURIComponent(entry.pkg.name)}`;
+									const target = href('repositories', entry.repository.name, 'packages', entry.pkg.name);
 									return (
 										<tr key={`${entry.repository.name}/${entry.pkg.name}`} className="clickable" onClick={() => navigate(target)}>
 											<td>
@@ -165,6 +163,12 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 		.flatMap(entry => entry.files.map(file => ({repository: entry.repository, file})))
 		.filter(entry => !query || entry.file.path.toLowerCase().includes(query))
 		.sort((a, b) => b.file.createdAt.localeCompare(a.file.createdAt));
+	const {sorted, sort, toggle} = useSort<(typeof files)[number], FileColumn>(files, {
+		path: entry => entry.file.path,
+		repository: entry => entry.repository.name,
+		size: entry => entry.file.size,
+		uploaded: entry => entry.file.createdAt,
+	});
 	
 	return (
 		<>
@@ -178,15 +182,15 @@ function GenericFiles({inventory}: { inventory: RepositoryInventory[] }) {
 					<table className="table">
 						<thead>
 						<tr>
-							<th>Path</th>
-							<th>Repository</th>
-							<th className="num">Size</th>
-							<th>Uploaded</th>
+							<SortHeader id="path" sort={sort} onSort={toggle}>Path</SortHeader>
+							<SortHeader id="repository" sort={sort} onSort={toggle}>Repository</SortHeader>
+							<SortHeader id="size" sort={sort} onSort={toggle} className="num">Size</SortHeader>
+							<SortHeader id="uploaded" sort={sort} onSort={toggle}>Uploaded</SortHeader>
 							<th/>
 						</tr>
 						</thead>
 						<tbody>
-						{files.slice(0, 500).map(({repository, file}) => (
+						{sorted.slice(0, 500).map(({repository, file}) => (
 							<tr key={`${repository.name}/${file.path}`}>
 								<td className="name break">{file.path}</td>
 								<td className="nowrap"><a className="link" href={`${href('repositories', repository.name)}?tab=files`}>{repository.name}</a></td>

@@ -76,7 +76,7 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 				key: `pkg:${repository.name}/${pkg.name}`,
 				label: pkg.name,
 				detail: repository.name,
-				target: `${href('repositories', repository.name)}?package=${encodeURIComponent(pkg.name)}`,
+				target: href('repositories', repository.name, 'packages', pkg.name),
 				repository,
 				group: 'Packages',
 			})) : [];

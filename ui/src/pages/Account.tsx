@@ -1,7 +1,7 @@
 import {useState} from 'react';
 import {api} from '../api';
 import {Icon} from '../components/icons';
-import {Badge, Button, Card, Empty, PageHeader, Segmented, Spinner} from '../components/ui';
+import {Avatar, Badge, Button, Card, Empty, PageHeader, Segmented, Spinner} from '../components/ui';
 import {formatDate, formatRelative} from '../format';
 import {useAsync} from '../hooks';
 import {href} from '../router';
@@ -29,7 +29,7 @@ export function Account() {
 			<PageHeader title="Account" subtitle="Your profile and preferences on this instance."/>
 
 			<section className="card account-hero">
-				<span className="avatar avatar-large" aria-hidden>{principal.username.substring(0, 1).toUpperCase()}</span>
+				<Avatar name={principal.username} size="large"/>
 				<div className="account-identity">
 					<div className="cell-inline">
 						<h2>{principal.username}</h2>
@@ -106,7 +106,10 @@ export function Account() {
 						</ul>
 					)}
 					{!signedInWithToken && (
-						<a className="btn btn-secondary account-token-action" href={href('tokens')}>Manage tokens</a>
+						<div className="account-token-actions">
+							<a className="btn btn-primary btn-small" href={`${href('tokens')}?new=1`}><Icon name="plus" size={15}/>New token</a>
+							<a className="btn btn-secondary btn-small" href={href('tokens')}>Manage tokens</a>
+						</div>
 					)}
 				</Card>
 			</div>

@@ -326,6 +326,12 @@ input:disabled {
 	overflow-wrap: anywhere;
 }
 
+.ellipsis {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
 .tabular {
 	font-variant-numeric: tabular-nums;
 }
@@ -696,13 +702,14 @@ input:disabled {
 }
 
 .avatar {
+	--avatar-hue: 240;
 	display: inline-grid;
 	place-items: center;
 	width: 30px;
 	height: 30px;
 	border-radius: 50%;
-	background: var(--accent-soft);
-	color: var(--accent);
+	background: hsl(var(--avatar-hue) 70% 92%);
+	color: hsl(var(--avatar-hue) 55% 38%);
 	font-weight: 700;
 	flex: none;
 }
@@ -738,6 +745,7 @@ input:disabled {
 }
 
 .page-title {
+	flex: 1 1 420px;
 	min-width: 0;
 }
 
@@ -836,6 +844,11 @@ input:disabled {
 .btn-danger {
 	background: var(--danger);
 	color: #fff;
+}
+
+:root[data-theme='dark'] .avatar {
+	background: hsl(var(--avatar-hue) 35% 22%);
+	color: hsl(var(--avatar-hue) 80% 78%);
 }
 
 :root[data-theme='dark'] .btn-danger {
@@ -1093,6 +1106,126 @@ input:disabled {
 	gap: 2px;
 }
 
+/* Package page */
+
+.detail-grid {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+	gap: 16px;
+	align-items: start;
+}
+
+.detail-side {
+	position: sticky;
+	top: calc(var(--topbar-height) + 16px);
+}
+
+.package-title {
+	overflow-wrap: anywhere;
+}
+
+.card-intro {
+	margin: -4px 0 12px;
+}
+
+.card-flush {
+	padding: 0;
+	overflow: clip;
+}
+
+.card-flush > .card-header {
+	padding: 14px 18px 0;
+}
+
+.card-flush .table thead th:first-child, .card-flush .table td:first-child {
+	padding-left: 18px;
+}
+
+.subsection-title {
+	margin: 18px 0 8px;
+	font-size: 0.78rem;
+	font-weight: 600;
+	color: var(--muted);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.file-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.file-list li {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 4px;
+	border-radius: var(--radius-small);
+}
+
+.file-list li:hover {
+	background: var(--surface-2);
+}
+
+.file-list-main {
+	display: flex;
+	overflow: hidden;
+	flex-direction: column;
+	flex: 1;
+	min-width: 0;
+	line-height: 1.35;
+}
+
+.select-compact {
+	min-height: 30px;
+	min-width: 0;
+	padding: 3px 7px 3px 10px;
+	font-size: 0.88rem;
+}
+
+/* Empty repository with inline setup */
+
+.empty-setup {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	padding: 20px;
+	border: 1px dashed var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--surface);
+}
+
+.empty-setup-head {
+	display: flex;
+	gap: 14px;
+	align-items: flex-start;
+}
+
+.empty-setup-head p {
+	margin: 2px 0 0;
+}
+
+.empty-setup-icon {
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	width: 42px;
+	height: 42px;
+	border-radius: 10px;
+	background: var(--accent-soft);
+	color: var(--accent);
+}
+
+.date-range {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
 /* Account */
 
 .account-hero {
@@ -1143,13 +1276,19 @@ input:disabled {
 	background: none;
 }
 
-.account-token-action {
-	margin-top: 12px;
+.account-token-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 14px;
 }
 
 @media (max-width: 1100px) {
-	.account-grid {
+	.account-grid, .detail-grid {
 		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.detail-side {
+		position: static;
 	}
 }
 
@@ -1388,7 +1527,8 @@ input:disabled {
 /* Tables */
 
 .table-wrap {
-	overflow-x: auto;
+	/* clip instead of auto keeps the wrapper from becoming a scroll container, so table headers can stick below the top bar */
+	overflow-x: clip;
 	background: var(--surface);
 	border: 1px solid var(--border);
 	border-radius: var(--radius);
@@ -1415,6 +1555,63 @@ input:disabled {
 	background: var(--surface-2);
 	border-bottom: 1px solid var(--border);
 	white-space: nowrap;
+}
+
+/* Sticky headers for page level tables, tables in modals and compact nested tables scroll normally */
+.table-wrap > .table thead th, .table-scroll > .table thead th {
+	position: sticky;
+	top: var(--topbar-height);
+	z-index: 2;
+}
+
+.modal .table thead th {
+	position: static;
+}
+
+.table-scroll {
+	overflow-x: clip;
+}
+
+.th-sort {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: -3px -6px;
+	padding: 3px 6px;
+	border: none;
+	border-radius: 5px;
+	background: none;
+	color: inherit;
+	font: inherit;
+	letter-spacing: inherit;
+	text-transform: inherit;
+	cursor: pointer;
+}
+
+.th-sort .icon {
+	opacity: 0;
+	transition: opacity 0.12s;
+}
+
+.th-sort:hover {
+	color: var(--text);
+	background: var(--surface-3);
+}
+
+.th-sort:hover .icon, .th-sort:focus-visible .icon {
+	opacity: 0.6;
+}
+
+.th-sort-active {
+	color: var(--accent);
+}
+
+.th-sort-active .icon, .th-sort-active:hover .icon {
+	opacity: 1;
+}
+
+.table th.num .th-sort {
+	flex-direction: row-reverse;
 }
 
 .table td {
@@ -1636,7 +1833,6 @@ input:disabled {
 .package-footer {
 	display: flex;
 	align-items: center;
-	justify-content: space-between;
 	gap: 12px;
 	padding: 8px 14px;
 	border-top: 1px solid var(--border);
@@ -2033,27 +2229,42 @@ input:disabled {
 
 /* Feedback */
 
-.spinner-wrap {
+.skeleton {
 	display: flex;
-	align-items: center;
-	gap: 10px;
-	color: var(--muted);
-	padding: 24px 0;
-	justify-content: center;
+	flex-direction: column;
+	gap: 12px;
+	padding: 18px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface);
 }
 
-.spinner {
-	width: 18px;
-	height: 18px;
-	border-radius: 50%;
-	border: 2px solid var(--border);
-	border-top-color: var(--accent);
-	animation: spin 0.8s linear infinite;
+.card .skeleton, .modal .skeleton, .login .skeleton {
+	border: none;
+	padding: 6px 0;
+	background: none;
 }
 
-@keyframes spin {
+.skeleton-bar {
+	height: 12px;
+	border-radius: 6px;
+	background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+	background-size: 200% 100%;
+	animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes shimmer {
+	from {
+		background-position: 100% 0;
+	}
 	to {
-		transform: rotate(360deg);
+		background-position: -100% 0;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.skeleton-bar {
+		animation: none;
 	}
 }
 
@@ -2334,6 +2545,11 @@ input:disabled {
 @media (max-width: 860px) {
 	.layout, .layout.collapsed {
 		grid-template-columns: minmax(0, 1fr);
+	}
+
+	/* Narrow screens need horizontal scrolling more than sticky headers */
+	.table-wrap, .table-scroll {
+		overflow-x: auto;
 	}
 
 	/* On small screens the sidebar is an overlay drawer and always shows its labels */

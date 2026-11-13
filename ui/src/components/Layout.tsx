@@ -6,7 +6,7 @@ import {REPOSITORY_TYPES} from '../types';
 import {CommandPalette} from './CommandPalette';
 import {NAV_GROUPS} from '../nav';
 import {Icon} from './icons';
-import {Menu, TYPE_INFO} from './ui';
+import {Avatar, Menu, TYPE_INFO} from './ui';
 
 const COLLAPSED_KEY = 'lartifactory.sidebarCollapsed';
 
@@ -149,7 +149,7 @@ export function Layout({section, type, children}: { section: string; type?: stri
 							label="Account menu"
 							trigger={
 								<span className="user-chip">
-									<span className="avatar" aria-hidden>{principal.username.substring(0, 1).toUpperCase()}</span>
+									<Avatar name={principal.username}/>
 									<span className="user-name">{principal.username}</span>
 									<Icon name="chevron-down" size={14}/>
 								</span>

@@ -178,8 +178,8 @@ export const api = {
 	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number; allowedIps?: string; rateLimitPerMinute?: number }) => request<Token>('POST', '/api/tokens', body),
 	deleteToken: (id: string) => request<void>('DELETE', `/api/tokens/${enc(id)}`),
 
-	audit: (filter: { repository?: string; actor?: string; action?: string; limit?: number; offset?: number } = {}) =>
-		request<AuditEntry[]>('GET', `/api/audit${query({ repository: filter.repository, actor: filter.actor, action: filter.action, limit: filter.limit?.toString(), offset: filter.offset?.toString() })}`),
+	audit: (filter: { repository?: string; actor?: string; action?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) =>
+		request<AuditEntry[]>('GET', `/api/audit${query({ repository: filter.repository, actor: filter.actor, action: filter.action, from: filter.from, to: filter.to, limit: filter.limit?.toString(), offset: filter.offset?.toString() })}`),
 
 	webhooks: (repository?: string) => request<Webhook[]>('GET', `/api/webhooks${query({ repository })}`),
 	createWebhook: (body: { repository?: string; url: string; secret?: string; events: string[]; active: boolean }) => request<Webhook>('POST', '/api/webhooks', body),

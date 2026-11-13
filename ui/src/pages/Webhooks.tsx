@@ -8,6 +8,7 @@ import { href } from '../router';
 import { useSession } from '../session';
 import { sortRepositories, WEBHOOK_EVENTS, type Webhook } from '../types';
 import {Select} from '../components/Select';
+import {SortHeader, useSort} from '../components/sort';
 
 export function Webhooks() {
 	const { notify } = useSession();
@@ -39,6 +40,15 @@ export function Webhooks() {
 		}
 	};
 
+	const {sorted, sort, toggle: toggleSort} = useSort<Webhook, 'url' | 'scope' | 'events' | 'signed' | 'status' | 'created'>(webhooks.data ?? [], {
+		url: webhook => webhook.url,
+		scope: webhook => webhook.repository ?? '',
+		events: webhook => (webhook.events.length === 0 ? Infinity : webhook.events.length),
+		signed: webhook => (webhook.hasSecret ? 0 : 1),
+		status: webhook => (webhook.active ? 0 : 1),
+		created: webhook => webhook.createdAt,
+	});
+
 	return (
 		<>
 			<PageHeader
@@ -51,9 +61,17 @@ export function Webhooks() {
 			{webhooks.data && (webhooks.data.length === 0 ? <Empty title="No webhooks">Create a webhook to receive event notifications.</Empty> : (
 				<div className="table-wrap">
 					<table className="table">
-						<thead><tr><th>URL</th><th>Scope</th><th>Events</th><th>Signed</th><th>Status</th><th>Created</th><th /></tr></thead>
+						<thead><tr>
+							<SortHeader id="url" sort={sort} onSort={toggleSort}>URL</SortHeader>
+							<SortHeader id="scope" sort={sort} onSort={toggleSort}>Scope</SortHeader>
+							<SortHeader id="events" sort={sort} onSort={toggleSort}>Events</SortHeader>
+							<SortHeader id="signed" sort={sort} onSort={toggleSort}>Signed</SortHeader>
+							<SortHeader id="status" sort={sort} onSort={toggleSort}>Status</SortHeader>
+							<SortHeader id="created" sort={sort} onSort={toggleSort}>Created</SortHeader>
+							<th />
+						</tr></thead>
 						<tbody>
-							{webhooks.data.map(webhook => (
+							{sorted.map(webhook => (
 								<tr key={webhook.id}>
 									<td className="break"><span className="url-text">{webhook.url}</span></td>
 									<td className="nowrap">{webhook.repository ? <a className="link" href={href('repositories', webhook.repository)}>{webhook.repository}</a> : <span className="muted">All repositories</span>}</td>

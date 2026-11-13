@@ -1,10 +1,11 @@
 import {Layout} from './components/Layout';
-import {Empty, Spinner} from './components/ui';
+import {Empty} from './components/ui';
 import {Account} from './pages/Account';
 import {Artifacts} from './pages/Artifacts';
 import {Audit} from './pages/Audit';
 import {Login} from './pages/Login';
 import {Overview} from './pages/Overview';
+import {PackageDetail} from './pages/PackageDetail';
 import {Permissions} from './pages/Permissions';
 import {Repositories} from './pages/Repositories';
 import {RepositoryDetail} from './pages/RepositoryDetail';
@@ -18,14 +19,14 @@ import {type Principal, REPOSITORY_TYPES, type RepositoryType} from './types';
 export function App() {
 	return (
 		<SessionProvider>
-			{({ready, principal}) => (!ready ? <div className="login"><Spinner/></div> : principal ? <Routes principal={principal}/> : <Login/>)}
+			{({ready, principal}) => (!ready ? <div className="login"/> : principal ? <Routes principal={principal}/> : <Login/>)}
 		</SessionProvider>
 	);
 }
 
 function Routes({principal}: { principal: Principal }) {
 	const {segments, params} = useRoute();
-	const [section = '', id] = segments;
+	const [section = '', id, sub, subId] = segments;
 	const type = REPOSITORY_TYPES.includes(id as RepositoryType) ? (id as RepositoryType) : undefined;
 	
 	let page;
@@ -37,7 +38,8 @@ function Routes({principal}: { principal: Principal }) {
 			page = <Artifacts type={type}/>;
 			break;
 		case 'repositories':
-			page = id ? <RepositoryDetail key={id} name={id} params={params}/> : <Repositories/>;
+			page = id && sub === 'packages' && subId ? <PackageDetail key={`${id}/${subId}`} repositoryName={id} packageName={subId} params={params}/>
+				: id ? <RepositoryDetail key={id} name={id} params={params}/> : <Repositories/>;
 			break;
 		case 'users':
 			page = principal.admin ? <Users/> : null;
@@ -46,7 +48,7 @@ function Routes({principal}: { principal: Principal }) {
 			page = principal.admin ? <Permissions params={params}/> : null;
 			break;
 		case 'tokens':
-			page = <Tokens/>;
+			page = <Tokens params={params}/>;
 			break;
 		case 'webhooks':
 			page = principal.admin ? <Webhooks /> : null;

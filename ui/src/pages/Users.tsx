@@ -1,12 +1,13 @@
 import {type FormEvent, useState} from 'react';
 import {api} from '../api';
 import {Icon} from '../components/icons';
-import {Badge, Button, ConfirmDialog, Empty, ErrorBox, errorText, Field, Menu, Modal, PageHeader, SearchField, Spinner, Toggle} from '../components/ui';
+import {Avatar, Badge, Button, ConfirmDialog, Empty, ErrorBox, errorText, Field, Menu, Modal, PageHeader, SearchField, Spinner, Toggle} from '../components/ui';
 import {formatDate} from '../format';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import type {AccessLevel, User} from '../types';
+import {SortHeader, useSort} from '../components/sort';
 
 export function Users() {
 	const {principal, notify} = useSession();
@@ -29,6 +30,12 @@ export function Users() {
 	
 	const query = search.trim().toLowerCase();
 	const rows = [...(users.data ?? [])].filter(user => !query || user.username.toLowerCase().includes(query)).sort((a, b) => a.username.localeCompare(b.username));
+	const {sorted, sort, toggle} = useSort<User, 'user' | 'role' | 'permissions' | 'created'>(rows, {
+		user: user => user.username,
+		role: user => (user.admin ? 0 : 1),
+		permissions: user => (user.admin ? Infinity : (permissions.data ?? []).filter(permission => permission.username === user.username).length),
+		created: user => user.createdAt,
+	});
 	
 	return (
 		<>
@@ -46,15 +53,15 @@ export function Users() {
 					<table className="table">
 						<thead>
 						<tr>
-							<th>User</th>
-							<th>Role</th>
-							<th>Permissions</th>
-							<th>Created</th>
+							<SortHeader id="user" sort={sort} onSort={toggle}>User</SortHeader>
+							<SortHeader id="role" sort={sort} onSort={toggle}>Role</SortHeader>
+							<SortHeader id="permissions" sort={sort} onSort={toggle}>Permissions</SortHeader>
+							<SortHeader id="created" sort={sort} onSort={toggle}>Created</SortHeader>
 							<th/>
 						</tr>
 						</thead>
 						<tbody>
-						{rows.map(user => {
+						{sorted.map(user => {
 							const granted = (permissions.data ?? []).filter(permission => permission.username === user.username)
 								.sort((a, b) => (a.repository === '*' ? -1 : b.repository === '*' ? 1 : a.repository.localeCompare(b.repository)));
 							const self = user.username === principal?.username;
@@ -62,7 +69,7 @@ export function Users() {
 								<tr key={user.username}>
 									<td>
 										<span className="cell-inline">
-											<span className="avatar avatar-small" aria-hidden>{user.username.substring(0, 1).toUpperCase()}</span>
+											<Avatar name={user.username} size="small"/>
 											<strong>{user.username}</strong>
 											{self && <Badge>you</Badge>}
 										</span>

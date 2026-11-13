@@ -1,4 +1,4 @@
-import {type FormEvent, useState} from 'react';
+import {type FormEvent, useEffect, useMemo, useState} from 'react';
 import {api} from '../api';
 import {Icon} from '../components/icons';
 import {Badge, Button, CodeBlock, ConfirmDialog, Empty, ErrorBox, errorText, Field, Modal, PageHeader, Spinner} from '../components/ui';
@@ -8,8 +8,10 @@ import {useAsync} from '../hooks';
 import {useSession} from '../session';
 import {ACCESS_LEVELS, type AccessLevel, type Token} from '../types';
 import {Select} from '../components/Select';
+import {SortHeader, useSort} from '../components/sort';
+import {href, navigate} from '../router';
 
-export function Tokens() {
+export function Tokens({params}: { params: URLSearchParams }) {
 	const {principal, notify} = useSession();
 	const [owner, setOwner] = useState(principal?.username ?? '');
 	const users = useAsync(() => (principal?.admin ? api.users() : Promise.resolve([])), [principal?.admin]);
@@ -20,7 +22,25 @@ export function Tokens() {
 	const [created, setCreated] = useState<Token | null>(null);
 	const [revoking, setRevoking] = useState<Token | null>(null);
 	
+	// ?new=1 opens the create dialog right away, e.g. from the account page
+	const openNew = params.get('new') === '1';
+	useEffect(() => {
+		if (openNew && !signedInWithToken) {
+			setCreating(true);
+			navigate(href('tokens'));
+		}
+	}, [openNew, signedInWithToken]);
+	
 	const now = new Date().toISOString();
+	const rows = useMemo(() => [...(tokens.data ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [tokens.data]);
+	const {sorted, sort, toggle} = useSort<Token, 'name' | 'level' | 'restrictions' | 'used' | 'created' | 'expires'>(rows, {
+		name: token => token.name,
+		level: token => ACCESS_LEVELS.indexOf(token.level),
+		restrictions: token => (token.allowedIps ? 1 : 0) + (token.rateLimit > 0 ? 1 : 0),
+		used: token => token.lastUsedAt,
+		created: token => token.createdAt,
+		expires: token => token.expiresAt,
+	});
 	if (signedInWithToken) {
 		return (
 			<>
@@ -51,28 +71,28 @@ export function Tokens() {
 					<table className="table">
 						<thead>
 						<tr>
-							<th>Name</th>
-							<th>Level</th>
-							<th>Restrictions</th>
-							<th>Last used</th>
-							<th>Created</th>
-							<th>Expires</th>
+							<SortHeader id="name" sort={sort} onSort={toggle}>Name</SortHeader>
+							<SortHeader id="level" sort={sort} onSort={toggle}>Level</SortHeader>
+							<SortHeader id="restrictions" sort={sort} onSort={toggle}>Restrictions</SortHeader>
+							<SortHeader id="used" sort={sort} onSort={toggle}>Last used</SortHeader>
+							<SortHeader id="created" sort={sort} onSort={toggle}>Created</SortHeader>
+							<SortHeader id="expires" sort={sort} onSort={toggle}>Expires</SortHeader>
 							<th/>
 						</tr>
 						</thead>
 						<tbody>
-						{tokens.data.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(token => {
+						{sorted.map(token => {
 							const expired = token.expiresAt !== null && token.expiresAt < now;
 							return (
 								<tr key={token.id}>
-									<td><strong>{token.name}</strong> <span className="muted small mono">{token.id.substring(0, 8)}</span></td>
+									<td><span className="cell-inline"><strong>{token.name}</strong><code className="id-chip" title={token.id}>{token.id.substring(0, 8)}</code></span></td>
 									<td><Badge tone={levelTone(token.level)}>{token.level}</Badge></td>
-									<td className="small">
+									<td>
 										{token.allowedIps && <div title={token.allowedIps}>IP allowlist</div>}
 										{token.rateLimit > 0 && <div className="muted">{token.rateLimit}/min</div>}
 										{!token.allowedIps && token.rateLimit === 0 && <span className="muted">None</span>}
 									</td>
-									<td className="muted small nowrap">
+									<td className="muted nowrap">
 										{token.lastUsedAt
 											? <span title={`${formatDate(token.lastUsedAt)}${token.lastUsedIp ? ` from ${token.lastUsedIp}` : ''}`}>{formatRelative(token.lastUsedAt)}</span>
 											: <span className="muted">Never</span>}

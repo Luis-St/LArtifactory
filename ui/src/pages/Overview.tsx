@@ -146,7 +146,7 @@ function RecentList({inventory}: { inventory: Parameters<typeof recentUploads>[0
 		<ul className="list list-grid list-recent">
 			{recent.map(entry => (
 				<li key={`${entry.repository.name}/${entry.packageName}/${entry.version}`}>
-					<a className="list-row" href={`${href('repositories', entry.repository.name)}?package=${encodeURIComponent(entry.packageName)}`} title={`${entry.packageName} in ${entry.repository.name}`}>
+					<a className="list-row" href={`${href('repositories', entry.repository.name, 'packages', entry.packageName)}?version=${encodeURIComponent(entry.version)}`} title={`${entry.packageName} in ${entry.repository.name}`}>
 						<span className="list-type"><TypeBadge type={entry.repository.type}/></span>
 						<span className="list-main">
 							<span className="list-title">{entry.packageName}</span>

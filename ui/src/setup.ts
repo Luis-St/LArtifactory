@@ -83,3 +83,53 @@ export function setupSnippets(repository: Repository, username: string): Snippet
 export function ociRegistry(url: string): string {
 	return url.replace(/^https?:\/\//, '').replace(/\/oci\/[^/]+$/, '');
 }
+
+/**
+ * Snippets that add one version of a package to a project, the repository itself has to be configured as shown by setupSnippets.
+ */
+export function installSnippets(repository: Repository, name: string, version: string, tag?: string): Snippet[] {
+	const url = repository.url;
+	const id = repository.name;
+	switch (repository.type) {
+		case 'maven': {
+			const [group = name, artifact = name] = name.split(':');
+			return [
+				{title: 'Gradle (Kotlin)', code: `implementation("${group}:${artifact}:${version}")`},
+				{title: 'Gradle (Groovy)', code: `implementation '${group}:${artifact}:${version}'`},
+				{title: 'Maven', code: `<dependency>\n\t<groupId>${group}</groupId>\n\t<artifactId>${artifact}</artifactId>\n\t<version>${version}</version>\n</dependency>`},
+			];
+		}
+		case 'npm':
+			return [
+				{title: 'npm', code: `npm install ${name}@${version}`},
+				{title: 'pnpm', code: `pnpm add ${name}@${version}`},
+				{title: 'yarn', code: `yarn add ${name}@${version}`},
+				{title: 'package.json', code: `"${name}": "${version}"`},
+			];
+		case 'pypi':
+			return [
+				{title: 'pip', code: `pip install ${name}==${version} --index-url ${url}/simple/`},
+				{title: 'requirements.txt', code: `--index-url ${url}/simple/\n${name}==${version}`},
+			];
+		case 'nuget':
+			return [
+				{title: '.NET CLI', code: `dotnet add package ${name} --version ${version} --source ${url}/v3/index.json`},
+				{title: 'PackageReference', code: `<PackageReference Include="${name}" Version="${version}" />`},
+			];
+		case 'cargo':
+			return [
+				{title: 'cargo add', code: `cargo add ${name}@${version} --registry ${id}`},
+				{title: 'Cargo.toml', code: `[dependencies]\n${name} = { version = "${version}", registry = "${id}" }`},
+			];
+		case 'oci': {
+			const image = `${ociRegistry(url)}/${id}/${name}`;
+			return [
+				{title: 'docker pull', code: tag ? `docker pull ${image}:${tag}` : `docker pull ${image}@${version}`},
+				{title: 'By digest', code: `docker pull ${image}@${version}`},
+				{title: 'Dockerfile', code: `FROM ${image}${tag ? `:${tag}` : `@${version}`}`},
+			];
+		}
+		case 'generic':
+			return [];
+	}
+}

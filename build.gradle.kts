@@ -122,6 +122,7 @@ tasks.register<JavaExec>("run") {
 	environment("ARTIFACTORY_DB_USERNAME", "artifactory")
 	environment("ARTIFACTORY_DB_PASSWORD", "artifactory")
 	environment("ARTIFACTORY_ADMIN_PASSWORD", "admin")
+	environment("ARTIFACTORY_ENABLE_API_DOCS", "true")
 	environment("ARTIFACTORY_STORAGE_PATH", layout.buildDirectory.dir("data").get().asFile.absolutePath)
 }
 

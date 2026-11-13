@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api } from '../api';
-import { Badge, Button, Empty, ErrorBox, PageHeader, Spinner, TypeBadge } from '../components/ui';
+import { Badge, Button, Empty, ErrorBox, PageHeader, Spinner, TYPE_INFO, TypeBadge } from '../components/ui';
 import { ACCESS_LEVELS, type AccessLevel, REPOSITORY_TYPES, type AuditEntry, type RepositoryType } from '../types';
 import { levelTone } from './Users';
 import { formatDate, formatIp, formatRelative } from '../format';
 import { useAsync } from '../hooks';
 import {Select} from '../components/Select';
+import { SortHeader, useSort } from '../components/sort';
 
 const PAGE_SIZE = 100;
 
@@ -23,6 +24,32 @@ const ACTIONS: { id: string; label: string }[] = [
 	{ id: 'token.create', label: 'Token created' },
 	{ id: 'token.delete', label: 'Token revoked' },
 ];
+
+type Range = '' | '24h' | '7d' | '30d' | 'custom';
+type Column = 'when' | 'action' | 'user' | 'repository' | 'target';
+
+const RANGES: { value: Range; label: string }[] = [
+	{ value: '', label: 'Any time' },
+	{ value: '24h', label: 'Last 24 hours' },
+	{ value: '7d', label: 'Last 7 days' },
+	{ value: '30d', label: 'Last 30 days' },
+	{ value: 'custom', label: 'Custom range…' },
+];
+
+const RANGE_HOURS: Record<string, number> = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 };
+
+/**
+ * The from/to instants of a range, a custom range uses whole local days with the end day included.
+ */
+function rangeBounds(range: Range, fromDay: string, toDay: string): { from?: string; to?: string } {
+	if (range === 'custom') {
+		const end = toDay ? new Date(`${toDay}T00:00:00`) : undefined;
+		end?.setDate(end.getDate() + 1);
+		return { from: fromDay ? new Date(`${fromDay}T00:00:00`).toISOString() : undefined, to: end?.toISOString() };
+	}
+	const hours = RANGE_HOURS[range];
+	return hours ? { from: new Date(Date.now() - hours * 3600_000).toISOString() } : {};
+}
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -88,23 +115,49 @@ export function Audit() {
 	const [repository, setRepository] = useState('');
 	const [actor, setActor] = useState('');
 	const [action, setAction] = useState('');
+	const [range, setRange] = useState<Range>('');
+	const [fromDay, setFromDay] = useState('');
+	const [toDay, setToDay] = useState('');
 	const [limit, setLimit] = useState(PAGE_SIZE);
+	const users = useAsync(() => api.users(), []);
+	const repositories = useAsync(() => api.repositories(), []);
 
 	const entries = useAsync(
-		() => api.audit({ repository: repository || undefined, actor: actor || undefined, action: action || undefined, limit: limit + 1 }),
-		[repository, actor, action, limit],
+		() => api.audit({ repository: repository || undefined, actor: actor || undefined, action: action || undefined, ...rangeBounds(range, fromDay, toDay), limit: limit + 1 }),
+		[repository, actor, action, range, fromDay, toDay, limit],
 	);
+	// Deleted users and repositories only appear in the log, they are offered as filters as well
+	const actorOptions = useMemo(() => [...new Set([...(users.data ?? []).map(user => user.username), ...(entries.data ?? []).flatMap(entry => entry.actor ? [entry.actor] : []), ...(actor ? [actor] : [])])].sort(), [users.data, entries.data, actor]);
+	const repositoryOptions = useMemo(() => {
+		const known = (repositories.data ?? []).map(entry => entry.name);
+		const logged = (entries.data ?? []).flatMap(entry => entry.repository && entry.repository !== '*' && !known.includes(entry.repository) ? [entry.repository] : []);
+		return [...known, ...new Set([...logged, ...(repository && !known.includes(repository) ? [repository] : [])])];
+	}, [repositories.data, entries.data, repository]);
+	const filter = (apply: () => void) => {
+		apply();
+		setLimit(PAGE_SIZE);
+	};
 
 	const data = entries.data;
 	const hasMore = data !== undefined && data.length > limit;
 	const rows = hasMore ? data!.slice(0, limit) : data;
-	const filtered = repository !== '' || actor !== '' || action !== '';
+	const filtered = repository !== '' || actor !== '' || action !== '' || range !== '';
 	const clear = () => {
 		setRepository('');
 		setActor('');
 		setAction('');
+		setRange('');
+		setFromDay('');
+		setToDay('');
 		setLimit(PAGE_SIZE);
 	};
+	const { sorted, sort, toggle } = useSort<AuditEntry, Column>(rows ?? [], {
+		when: entry => entry.timestamp,
+		action: entry => ACTIONS.find(candidate => candidate.id === entry.action)?.label ?? entry.action,
+		user: entry => entry.actor,
+		repository: entry => entry.repository,
+		target: entry => entry.target,
+	});
 
 	return (
 		<>
@@ -113,9 +166,24 @@ export function Audit() {
 				subtitle="Administrative actions on repositories, users, permissions and tokens, newest first."
 			/>
 			<div className="toolbar">
-				<Select label="Action" value={action} onChange={value => { setAction(value); setLimit(PAGE_SIZE); }} options={ACTIONS.map(entry => ({value: entry.id, label: entry.label}))}/>
-				<input placeholder="Repository" aria-label="Filter by repository" value={repository} onChange={event => { setRepository(event.target.value); setLimit(PAGE_SIZE); }} />
-				<input placeholder="User" aria-label="Filter by user" value={actor} onChange={event => { setActor(event.target.value); setLimit(PAGE_SIZE); }} />
+				<Select label="Action" value={action} onChange={value => filter(() => setAction(value))} options={ACTIONS.map(entry => ({ value: entry.id, label: entry.label }))} />
+				<Select label="User" value={actor} onChange={value => filter(() => setActor(value))} options={[{ value: '', label: 'All users' }, ...actorOptions.map(name => ({ value: name, label: name }))]} />
+				<Select label="Repository" value={repository} onChange={value => filter(() => setRepository(value))} options={[
+					{ value: '', label: 'All repositories' },
+					{ value: '*', label: 'Granted for all (*)' },
+					...repositoryOptions.map(name => {
+						const type = repositories.data?.find(entry => entry.name === name)?.type;
+						return { value: name, label: name, hint: type ? TYPE_INFO[type].label : 'deleted' };
+					}),
+				]} />
+				<Select<Range> label="Time range" value={range} onChange={value => filter(() => setRange(value))} options={RANGES} />
+				{range === 'custom' && (
+					<span className="date-range">
+						<input type="date" aria-label="From day" value={fromDay} max={toDay || undefined} onChange={event => filter(() => setFromDay(event.target.value))} />
+						<span className="muted">to</span>
+						<input type="date" aria-label="To day" value={toDay} min={fromDay || undefined} onChange={event => filter(() => setToDay(event.target.value))} />
+					</span>
+				)}
 				{filtered && <Button variant="ghost" onClick={clear}>Clear filters</Button>}
 			</div>
 
@@ -124,9 +192,17 @@ export function Audit() {
 			{rows && (rows.length === 0 ? <Empty title="No audit entries">No actions match the current filters.</Empty> : (
 				<div className="table-wrap">
 					<table className="table">
-						<thead><tr><th>When</th><th>Action</th><th>User</th><th>Repository</th><th>Target</th><th>Detail</th><th>IP</th></tr></thead>
+						<thead><tr>
+							<SortHeader id="when" sort={sort} onSort={toggle}>When</SortHeader>
+							<SortHeader id="action" sort={sort} onSort={toggle}>Action</SortHeader>
+							<SortHeader id="user" sort={sort} onSort={toggle}>User</SortHeader>
+							<SortHeader id="repository" sort={sort} onSort={toggle}>Repository</SortHeader>
+							<SortHeader id="target" sort={sort} onSort={toggle}>Target</SortHeader>
+							<th>Detail</th>
+							<th>IP</th>
+						</tr></thead>
 						<tbody>
-							{rows.map(entry => (
+							{sorted.map(entry => (
 								<tr key={entry.id}>
 									<td className="muted nowrap" title={formatDate(entry.timestamp)}>{formatRelative(entry.timestamp)}</td>
 									<td className="shrink"><Badge tone={actionTone(entry.action)} title={entry.action}>{ACTIONS.find(candidate => candidate.id === entry.action)?.label ?? entry.action}</Badge></td>

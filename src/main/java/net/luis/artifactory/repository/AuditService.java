@@ -69,7 +69,7 @@ public class AuditService {
 	 * Lists audit entries newest first, optionally filtered by repository, actor or action, with offset based paging.<br>
 	 */
 	@NonNull
-	public List<AuditEntity> list(@Nullable String repository, @Nullable String actor, @Nullable String action, int limit, int offset) throws SqlException {
+	public List<AuditEntity> list(@Nullable String repository, @Nullable String actor, @Nullable String action, @Nullable Instant from, @Nullable Instant to, int limit, int offset) throws SqlException {
 		List<SqlCondition> conditions = new ArrayList<>();
 		if (repository != null && !repository.isBlank()) {
 			conditions.add(Sql.equalTo(AUDIT_REPOSITORY, repository));
@@ -88,7 +88,11 @@ public class AuditService {
 		List<AuditEntity> ordered = new ArrayList<>(query.orderBy(AUDIT_TIMESTAMP.ascending()).fetch());
 		Collections.reverse(ordered);
 		int boundedLimit = Math.max(1, Math.min(limit, MAX_LIMIT));
-		return ordered.stream().skip(Math.max(0, offset)).limit(boundedLimit).toList();
+		// The time range is applied in memory as well, from is inclusive and to is exclusive
+		return ordered.stream()
+			.filter(entry -> from == null || !entry.timestamp().isBefore(from))
+			.filter(entry -> to == null || entry.timestamp().isBefore(to))
+			.skip(Math.max(0, offset)).limit(boundedLimit).toList();
 	}
 	
 	/**

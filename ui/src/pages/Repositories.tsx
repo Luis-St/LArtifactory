@@ -6,8 +6,9 @@ import {formatDate} from '../format';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {IMMUTABLE_TYPES, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
+import {IMMUTABLE_TYPES, type Repository, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType} from '../types';
 import {Select} from '../components/Select';
+import {SortHeader, useSort} from '../components/sort';
 
 const PROXYABLE_TYPES: RepositoryType[] = ['maven', 'generic'];
 
@@ -22,6 +23,13 @@ export function Repositories() {
 	const rows = (repositories.data ?? [])
 		.filter(repository => !filter || repository.type === filter)
 		.filter(repository => !query || repository.name.toLowerCase().includes(query) || (repository.description ?? '').toLowerCase().includes(query));
+	const {sorted, sort, toggle} = useSort<Repository, 'name' | 'type' | 'description' | 'access' | 'created'>(rows, {
+		name: repository => repository.name,
+		type: repository => REPOSITORY_TYPES.indexOf(repository.type),
+		description: repository => repository.description,
+		access: repository => (repository.publicRead ? 0 : 1),
+		created: repository => repository.createdAt,
+	});
 	
 	return (
 		<>
@@ -54,15 +62,15 @@ export function Repositories() {
 					<table className="table">
 						<thead>
 						<tr>
-							<th>Name</th>
-							<th>Type</th>
-							<th>Description</th>
-							<th>Access</th>
-							<th>Created</th>
+							<SortHeader id="name" sort={sort} onSort={toggle}>Name</SortHeader>
+							<SortHeader id="type" sort={sort} onSort={toggle}>Type</SortHeader>
+							<SortHeader id="description" sort={sort} onSort={toggle}>Description</SortHeader>
+							<SortHeader id="access" sort={sort} onSort={toggle}>Access</SortHeader>
+							<SortHeader id="created" sort={sort} onSort={toggle}>Created</SortHeader>
 						</tr>
 						</thead>
 						<tbody>
-						{rows.map(repository => (
+						{sorted.map(repository => (
 							<tr key={repository.name} className="clickable" onClick={() => navigate(href('repositories', repository.name))}>
 								<td>
 									<span className="cell-inline">

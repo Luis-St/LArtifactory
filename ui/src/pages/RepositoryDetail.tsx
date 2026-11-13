@@ -10,8 +10,10 @@ import {useSession} from '../session';
 import {ociRegistry, setupSnippets} from '../setup';
 import {ACCESS_LEVELS, type AccessLevel, type FileEntry, IMMUTABLE_TYPES, type Package, type Repository} from '../types';
 import {Select} from '../components/Select';
+import {SortHeader, useSort} from '../components/sort';
 
 type Tab = 'packages' | 'files' | 'setup' | 'settings' | 'access';
+type BrowserColumn = 'name' | 'size' | 'uploaded';
 
 /**
  * The url a client is configured with, it differs from the repository url for formats with an index document.
@@ -120,7 +122,7 @@ function PackageList({repository, packages, files, selected, onChanged}: { repos
 	const rows = packages.filter(pkg => !query || pkg.name.toLowerCase().includes(query)).sort((a, b) => a.name.localeCompare(b.name));
 
 	if (packages.length === 0) {
-		return <Empty title="No packages yet">See <a className="link" href={`${href('repositories', repository.name)}?tab=setup`}>client setup</a> to publish the first package.</Empty>;
+		return <EmptyWithSetup repository={repository} title="No packages yet" text="Configure your client with one of these snippets and publish the first package."/>;
 	}
 	return (
 		<>
@@ -223,7 +225,9 @@ function PackageRow({repository, pkg, files, open, onToggle, onChanged}: { repos
 						</tbody>
 					</table>
 					<div className="package-footer">
+						<a className="btn btn-secondary btn-small" href={href('repositories', repository.name, 'packages', pkg.name)}>Package details<Icon name="chevron-right" size={14}/></a>
 						<span className="muted small">Click a file to download it.</span>
+						<div className="toolbar-spacer"/>
 						<Button small variant="ghost" className="danger-text" onClick={() => setDeleting({})}><Icon name="trash" size={15}/>Delete package</Button>
 					</div>
 				</div>
@@ -277,6 +281,21 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 		};
 	}, [files, prefix]);
 
+	const folderSort = useSort<[string, { count: number; size: number }], BrowserColumn>(folders, {
+		name: ([folder]) => folder,
+		size: ([, stats]) => stats.size,
+		uploaded: () => null,
+	});
+	const fileSort = useSort<FileEntry, BrowserColumn>(entries, {
+		name: file => file.path,
+		size: file => file.size,
+		uploaded: file => file.createdAt,
+	});
+	const sort = fileSort.sort;
+	const toggle = (key: BrowserColumn) => {
+		fileSort.toggle(key);
+		folderSort.toggle(key);
+	};
 	const crumbs = prefix.split('/').filter(Boolean);
 	const download = (file: FileEntry) => downloadFile(repository, file).catch(error => notify(error.message, 'error'));
 	const openFolder = (value: string) => {
@@ -285,7 +304,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 	};
 
 	if (files.length === 0) {
-		return <Empty title="No files yet">See <a className="link" href={`${href('repositories', repository.name)}?tab=setup`}>client setup</a> to upload the first file.</Empty>;
+		return <EmptyWithSetup repository={repository} title="No files yet" text="Upload the first file with one of these commands."/>;
 	}
 	return (
 		<div className={`browser${selected ? ' with-details' : ''}`}>
@@ -302,9 +321,9 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 				<table className="table table-compact">
 					<thead>
 					<tr>
-						<th>Name</th>
-						<th className="num">Size</th>
-						<th>Uploaded</th>
+						<SortHeader id="name" sort={sort} onSort={toggle}>Name</SortHeader>
+						<SortHeader id="size" sort={sort} onSort={toggle} className="num">Size</SortHeader>
+						<SortHeader id="uploaded" sort={sort} onSort={toggle}>Uploaded</SortHeader>
 						<th/>
 					</tr>
 					</thead>
@@ -314,7 +333,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 							<td colSpan={4}><span className="entry-name muted"><span className="entry-icon"><Icon name="arrow-left" size={16}/></span>Parent folder</span></td>
 						</tr>
 					)}
-					{folders.map(([folder, stats]) => (
+					{folderSort.sorted.map(([folder, stats]) => (
 						<tr key={folder} className="clickable" onClick={() => openFolder(prefix + folder + '/')}>
 							<td><span className="entry-name"><span className="entry-icon entry-icon-folder"><Icon name="folder" size={16}/></span><span className="name">{folder}</span></span></td>
 							<td className="num muted">{formatBytes(stats.size)}</td>
@@ -322,7 +341,7 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 							<td/>
 						</tr>
 					))}
-					{entries.map(file => (
+					{fileSort.sorted.map(file => (
 						<tr key={file.path} className={`clickable${selected?.path === file.path ? ' selected' : ''}`} onClick={() => setSelected(selected?.path === file.path ? null : file)}>
 							<td><span className="entry-name"><span className="entry-icon"><Icon name="file" size={16}/></span><span className="name break">{file.path.substring(prefix.length)}</span></span></td>
 							<td className="num">{formatBytes(file.size)}</td>
@@ -365,6 +384,25 @@ function FileBrowser({repository, files}: { repository: Repository; files: FileE
 					<Button variant="primary" onClick={() => download(selected)}><Icon name="download" size={16}/>Download</Button>
 				</Card>
 			)}
+		</div>
+	);
+}
+
+/**
+ * Empty state of a repository without content, shows the client setup right away instead of only linking to it.
+ */
+function EmptyWithSetup({repository, title, text}: { repository: Repository; title: string; text: string }) {
+	const {principal} = useSession();
+	return (
+		<div className="empty-setup">
+			<div className="empty-setup-head">
+				<span className="empty-setup-icon"><Icon name={repository.type === 'generic' ? 'folder' : 'package'} size={22}/></span>
+				<div>
+					<strong>{title}</strong>
+					<p className="muted">{text} Replace <code>&lt;token&gt;</code> with an <a className="link" href={`${href('tokens')}?new=1`}>access token</a>.</p>
+				</div>
+			</div>
+			<SnippetTabs key={repository.name} snippets={setupSnippets(repository, principal?.username ?? 'user')}/>
 		</div>
 	);
 }

@@ -34,12 +34,29 @@ export function Button({variant = 'secondary', small, className, ...props}: Butt
 	return <button type="button" className={`btn btn-${variant}${small ? ' btn-small' : ''}${className ? ' ' + className : ''}`} {...props} />;
 }
 
-export function Spinner({label = 'Loading'}: { label?: string }) {
+/**
+ * Placeholder while content loads, shimmering bars instead of a spinner so the page does not jump when the content arrives.
+ */
+export function Spinner({label = 'Loading', rows = 4}: { label?: string; rows?: number }) {
 	return (
-		<div className="spinner-wrap" role="status">
-			<span className="spinner" aria-hidden/>
-			<span>{label}…</span>
+		<div className="skeleton" role="status" aria-label={label}>
+			{Array.from({length: rows}, (_, index) => <span key={index} className="skeleton-bar" style={{width: `${92 - ((index * 17) % 35)}%`}}/>)}
 		</div>
+	);
+}
+
+/**
+ * Round avatar with the initial of a user, the hue is derived from the name so every user keeps the same colour.
+ */
+export function Avatar({name, size}: { name: string; size?: 'small' | 'large' }) {
+	let hash = 0;
+	for (const char of name) {
+		hash = (hash * 31 + char.charCodeAt(0)) | 0;
+	}
+	return (
+		<span className={`avatar${size ? ` avatar-${size}` : ''}`} style={{'--avatar-hue': Math.abs(hash) % 360} as React.CSSProperties} aria-hidden>
+			{name.substring(0, 1).toUpperCase()}
+		</span>
 	);
 }
 

@@ -4,9 +4,10 @@ import {Badge, Button, Card, Empty, ErrorBox, errorText, PageHeader, Spinner, TY
 import {useAsync} from '../hooks';
 import {href} from '../router';
 import {useSession} from '../session';
-import {ACCESS_LEVELS, type AccessLevel, sortRepositories} from '../types';
+import {ACCESS_LEVELS, type AccessLevel, type Permission, sortRepositories} from '../types';
 import {levelTone} from './Users';
 import {Select} from '../components/Select';
+import {SortHeader, useSort} from '../components/sort';
 
 export function Permissions({params}: { params: URLSearchParams }) {
 	const {notify} = useSession();
@@ -48,6 +49,11 @@ export function Permissions({params}: { params: URLSearchParams }) {
 	const rows = (permissions.data ?? [])
 		.filter(permission => (!userFilter || permission.username === userFilter) && (!repositoryFilter || permission.repository === repositoryFilter))
 		.sort((a, b) => a.username.localeCompare(b.username) || a.repository.localeCompare(b.repository));
+	const {sorted, sort, toggle} = useSort<Permission, 'user' | 'repository' | 'level'>(rows, {
+		user: permission => permission.username,
+		repository: permission => permission.repository,
+		level: permission => ACCESS_LEVELS.indexOf(permission.level),
+	});
 	const nonAdmins = (users.data ?? []).filter(user => !user.admin);
 	
 	return (
@@ -93,14 +99,14 @@ export function Permissions({params}: { params: URLSearchParams }) {
 					<table className="table">
 						<thead>
 						<tr>
-							<th>User</th>
-							<th>Repository</th>
-							<th>Level</th>
+							<SortHeader id="user" sort={sort} onSort={toggle}>User</SortHeader>
+							<SortHeader id="repository" sort={sort} onSort={toggle}>Repository</SortHeader>
+							<SortHeader id="level" sort={sort} onSort={toggle}>Level</SortHeader>
 							<th/>
 						</tr>
 						</thead>
 						<tbody>
-						{rows.map(permission => {
+						{sorted.map(permission => {
 							const type = typeOf(permission.repository);
 							return (
 								<tr key={`${permission.username}/${permission.repository}`}>
