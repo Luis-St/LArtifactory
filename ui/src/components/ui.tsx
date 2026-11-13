@@ -1,5 +1,6 @@
 import {type ButtonHTMLAttributes, type ReactNode, useEffect, useLayoutEffect, useRef, useState} from 'react';
 import type {RepositoryType} from '../types';
+import {highlight} from './highlight';
 import {Icon, type IconName} from './icons';
 
 export const TYPE_INFO: Record<RepositoryType, { label: string; ecosystem: string; color: string }> = {
@@ -233,7 +234,7 @@ export function SnippetTabs({snippets}: { snippets: { title: string; code: strin
 				</div>
 				<CopyButton value={snippet.code}/>
 			</div>
-			<pre><code>{snippet.code}</code></pre>
+			<pre><code>{highlight(snippet.code)}</code></pre>
 		</div>
 	);
 }
@@ -245,7 +246,7 @@ export function CodeBlock({title, code}: { title?: string; code: string }) {
 				<span>{title}</span>
 				<CopyButton value={code}/>
 			</div>
-			<pre><code>{code}</code></pre>
+			<pre><code>{highlight(code)}</code></pre>
 		</div>
 	);
 }

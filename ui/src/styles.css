@@ -27,6 +27,12 @@
 	--radius: 10px;
 	--radius-small: 7px;
 	--topbar-height: 56px;
+	--code-bg: #f7f8fa;
+	--code-text: #2b3140;
+	--code-string: #0a7a45;
+	--code-tag: #8a3ffc;
+	--code-flag: #0b6bcb;
+	--code-comment: #8a919d;
 	--type-maven: #c2410c;
 	--type-generic: #5b6779;
 	--type-pypi: #2563eb;
@@ -35,7 +41,7 @@
 	--type-cargo: #a85a07;
 	--type-oci: #0e7490;
 	--font: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
-	--mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', 'Fira Code', 'SF Mono', 'Source Code Pro', 'Ubuntu Mono', Menlo, Consolas, monospace;
+	--mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', 'SF Mono', 'Source Code Pro', 'Ubuntu Mono', Menlo, Consolas, monospace;
 	color-scheme: light;
 }
 
@@ -63,6 +69,12 @@
 	--shadow: 0 1px 2px rgb(0 0 0 / 35%);
 	--shadow-popup: 0 12px 36px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 40%);
 	--backdrop: rgb(0 0 0 / 55%);
+	--code-bg: #0f1216;
+	--code-text: #c9d1dc;
+	--code-string: #7ee2a8;
+	--code-tag: #c4a7ff;
+	--code-flag: #7cc4ff;
+	--code-comment: #6d7480;
 	--type-maven: #fb923c;
 	--type-generic: #9aa6b8;
 	--type-pypi: #60a5fa;
@@ -227,7 +239,8 @@ a {
 
 code, .mono, kbd {
 	font-family: var(--mono);
-	font-size: 0.92em;
+	font-size: 0.88em;
+	font-variant-ligatures: none;
 }
 
 kbd {
@@ -2536,11 +2549,46 @@ input:disabled {
 
 .code-block pre {
 	margin: 0;
-	padding: 14px 16px;
+	padding: 14px 18px;
 	overflow-x: auto;
-	tab-size: 2;
-	font-size: 0.85rem;
-	line-height: 1.6;
+	tab-size: 4;
+	background: var(--code-bg);
+	color: var(--code-text);
+	font-family: var(--mono);
+	font-size: 13px;
+	line-height: 1.7;
+	font-variant-ligatures: none;
+}
+
+/* The code inherits the size of the pre, the generic code rule would shrink it a second time */
+.code-block pre code {
+	font-size: inherit;
+}
+
+.tok-string {
+	color: var(--code-string);
+}
+
+.tok-tag, .tok-section {
+	color: var(--code-tag);
+}
+
+.tok-flag {
+	color: var(--code-flag);
+}
+
+.tok-comment {
+	color: var(--code-comment);
+	font-style: italic;
+}
+
+/* The value the user has to replace stands out as a chip */
+.tok-placeholder {
+	padding: 1px 4px;
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--warning) 16%, transparent);
+	color: var(--warning);
+	font-weight: 600;
 }
 
 .snippet-tabs {

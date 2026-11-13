@@ -116,7 +116,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 							<p className="muted small card-intro">
 								Requires the repository to be configured, see <a className="link" href={`${back.href}?tab=setup`}>client setup</a>.
 							</p>
-							<SnippetTabs key={`${selected.version}`} snippets={snippets}/>
+							<SnippetTabs snippets={snippets}/>
 						</Card>
 					)}
 

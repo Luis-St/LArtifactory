@@ -10,6 +10,8 @@ export default defineConfig({
 	build: {
 		outDir: 'dist',
 		emptyOutDir: true,
+		// Fonts stay separate files, the content security policy only allows fonts from the server itself (no data: urls)
+		assetsInlineLimit: (file: string) => (file.endsWith('.woff2') || file.endsWith('.woff') ? false : undefined),
 	},
 	server: {
 		proxy: {
