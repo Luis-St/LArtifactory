@@ -33,7 +33,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 	const [search, setSearch] = useState('');
 	const [repository, setRepository] = useState('');
 	const query = useDebounced(search.trim());
-
+	
 	const counts = summary.data ? typeCounts(summary.data) : undefined;
 	const total = summary.data ? summarizeTypes(summary.data).filter(entry => entry.type !== 'generic').reduce((sum, entry) => sum + entry.packages, 0) : 0;
 	// The all tab sums up every type, the type tabs show their own numbers
@@ -50,12 +50,12 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 		}), {repositories: 0, packages: 0, versions: 0, files: 0, size: 0});
 	}, [summary.data, type]);
 	const repositories = (summary.data?.repositories ?? []).filter(entry => (!type || entry.type === type) && entry.kind !== 'VIRTUAL');
-
+	
 	const tabs = [
 		{id: 'all', label: <>All packages <span className="tab-count">{total}</span></>},
 		...visibleTypes(summary.data?.repositories, guest).map(id => ({id, label: <>{TYPE_INFO[id].label} <span className="tab-count">{counts?.[id] ?? 0}</span></>})),
 	];
-
+	
 	return (
 		<>
 			<PageHeader
@@ -63,9 +63,9 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 				subtitle={type ? `All ${TYPE_INFO[type].ecosystem} packages across your ${TYPE_INFO[type].label} repositories.` : 'All packages across every repository you can read.'}
 			/>
 			<Tabs tabs={tabs} active={type ?? 'all'} onChange={id => navigate(id === 'all' ? href('artifacts') : href('artifacts', id))}/>
-
+			
 			{summary.error && <ErrorBox error={summary.error} onRetry={summary.reload}/>}
-
+			
 			{stats && (
 				<Stats>
 					<Stat label="Repositories" value={stats.repositories}/>
@@ -75,7 +75,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 					<Stat label="Storage" value={formatBytes(stats.size)}/>
 				</Stats>
 			)}
-
+			
 			<div className="toolbar">
 				<SearchField placeholder={type === 'generic' ? 'Search files…' : 'Search packages…'} value={search} onChange={setSearch}/>
 				<Select label="Repository" value={repository} onChange={setRepository} options={[
@@ -83,7 +83,7 @@ export function Artifacts({type}: { type: RepositoryType | undefined }) {
 					...repositories.map(entry => ({value: entry.name, label: entry.name, hint: type ? undefined : TYPE_INFO[entry.type].label})),
 				]}/>
 			</div>
-
+			
 			{type === 'generic'
 				? <GenericFiles query={query} repository={repository}/>
 				: <PackageTable type={type} query={query} repository={repository} empty={type && summary.data && repositories.length === 0
@@ -96,7 +96,7 @@ function PackageTable({type, query, repository, empty}: { type: RepositoryType |
 	const {sort, toggle, params} = useServerSort<Column>();
 	const {offset, limit, paging} = useServerPaging([type, query, repository, sort?.key, sort?.direction]);
 	const page = useAsync(() => api.allPackages({type, repository, q: query}, {offset, limit, ...params}), [type, query, repository, offset, limit, params.sort, params.dir]);
-
+	
 	if (page.error) {
 		return <ErrorBox error={page.error} onRetry={page.reload}/>;
 	}
@@ -160,7 +160,7 @@ function GenericFiles({query, repository}: { query: string; repository: string }
 	const {sort, toggle, params} = useServerSort<FileColumn>();
 	const {offset, limit, paging} = useServerPaging([query, repository, sort?.key, sort?.direction]);
 	const page = useAsync(() => api.allFiles({type: 'generic', repository, q: query}, {offset, limit, ...params}), [query, repository, offset, limit, params.sort, params.dir]);
-
+	
 	if (page.error) {
 		return <ErrorBox error={page.error} onRetry={page.reload}/>;
 	}

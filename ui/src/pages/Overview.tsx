@@ -106,7 +106,8 @@ export function Overview() {
 						</Card>
 						<Card title="Repositories" actions={<a className="link small" href={href('repositories')}>Manage</a>}>
 							{inventory.data.repositories.length === 0 ? (
-								<Empty title="No repositories yet">{canAdminister(principal) ? <a className="link" href={href('repositories')}>Create the first repository</a> : principal ? 'Ask an administrator for access.' : 'No public repositories, sign in to see more.'}</Empty>
+								<Empty title="No repositories yet">{canAdminister(principal) ?
+									<a className="link" href={href('repositories')}>Create the first repository</a> : principal ? 'Ask an administrator for access.' : 'No public repositories, sign in to see more.'}</Empty>
 							) : (
 								<ul className="list list-grid list-repositories">
 									{inventory.data.repositories.map(entry => (

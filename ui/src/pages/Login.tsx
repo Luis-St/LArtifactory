@@ -66,7 +66,7 @@ export function Login() {
 		// Without credentials the server lists only the public repositories, guest access is offered when there are any
 		api.repositories().then(repositories => setPublicCount(repositories.length), () => setPublicCount(0));
 	}, []);
-
+	
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		setBusy(true);
@@ -78,7 +78,7 @@ export function Login() {
 			setBusy(false);
 		}
 	};
-
+	
 	return (
 		<div className="login">
 			<div className="login-theme"><ThemeToggle/></div>

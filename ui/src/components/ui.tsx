@@ -183,11 +183,11 @@ export function ConfirmDialog({title, message, confirmLabel = 'Delete', onConfir
 	};
 	return (
 		<Modal title={title} onClose={onClose} footer={
-			<>
-				<Button onClick={onClose} disabled={busy}>Cancel</Button>
-				<Button variant="danger" onClick={confirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</Button>
-			</>
-		}>
+												   <>
+													   <Button onClick={onClose} disabled={busy}>Cancel</Button>
+													   <Button variant="danger" onClick={confirm} disabled={busy}>{busy ? 'Working…' : confirmLabel}</Button>
+												   </>
+											   }>
 			<div className="confirm-message">{message}</div>
 			{error && <ErrorBox error={error}/>}
 		</Modal>

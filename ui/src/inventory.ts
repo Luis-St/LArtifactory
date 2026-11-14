@@ -1,6 +1,6 @@
 import {api, currentAuthorization} from './api';
 import {compareVersions, shortDigest} from './format';
-import {type RepositoryType, REPOSITORY_TYPES, type Summary} from './types';
+import {REPOSITORY_TYPES, type RepositoryType, type Summary} from './types';
 
 /** The parts of a package the latest version is derived from. */
 interface Versioned {

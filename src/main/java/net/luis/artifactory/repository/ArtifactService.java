@@ -49,16 +49,6 @@ public class ArtifactService {
 		this.audit = Objects.requireNonNull(audit, "Audit service must not be null");
 	}
 	
-	/**
-	 * Notifies the webhooks and records the change in the audit log once the transaction was committed.<br>
-	 */
-	private void changed(@NonNull UnitOfWork work, @NonNull String event, @NonNull String action, @NonNull String repository, @NonNull String target, @Nullable String actor) {
-		work.afterCommit(() -> {
-			this.webhooks.dispatch(event, repository, target);
-			this.audit.record(actor, action, repository, target, null, null);
-		});
-	}
-	
 	@Nullable
 	private static FileEntity get(@NonNull SqlProvider sql, @NonNull String repository, @NonNull String path) throws SqlException {
 		return sql.from(FILES).select().where(fileCondition(repository, path)).fetchOneOrNull();
@@ -162,6 +152,16 @@ public class ArtifactService {
 		}
 		String encoded = java.net.URLEncoder.encode(name, java.nio.charset.StandardCharsets.UTF_8).replace("+", "%20");
 		return "; filename=\"" + ascii + "\"; filename*=UTF-8''" + encoded;
+	}
+	
+	/**
+	 * Notifies the webhooks and records the change in the audit log once the transaction was committed.<br>
+	 */
+	private void changed(@NonNull UnitOfWork work, @NonNull String event, @NonNull String action, @NonNull String repository, @NonNull String target, @Nullable String actor) {
+		work.afterCommit(() -> {
+			this.webhooks.dispatch(event, repository, target);
+			this.audit.record(actor, action, repository, target, null, null);
+		});
 	}
 	
 	@NonNull

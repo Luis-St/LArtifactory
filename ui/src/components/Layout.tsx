@@ -104,7 +104,7 @@ export function Layout({section, type, children}: { section: string; type?: stri
 	const types = visibleTypes(index?.repositories, guest);
 	const content = useRef<HTMLElement>(null);
 	useTableLabels(content);
-
+	
 	useEffect(() => {
 		const listener = (event: KeyboardEvent) => {
 			const target = event.target as HTMLElement;
@@ -117,7 +117,7 @@ export function Layout({section, type, children}: { section: string; type?: stri
 		document.addEventListener('keydown', listener);
 		return () => document.removeEventListener('keydown', listener);
 	}, []);
-
+	
 	const toggleCollapsed = () => {
 		setCollapsed(value => {
 			try {
@@ -128,9 +128,9 @@ export function Layout({section, type, children}: { section: string; type?: stri
 			return !value;
 		});
 	};
-
+	
 	const groups = NAV_GROUPS.map(group => ({...group, items: group.items.filter(item => visibleTo(item, principal))})).filter(group => group.items.length > 0);
-
+	
 	return (
 		<div className={`layout${open ? ' nav-open' : ''}${collapsed ? ' collapsed' : ''}`}>
 			<aside className="sidebar">

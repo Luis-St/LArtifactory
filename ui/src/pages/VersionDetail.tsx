@@ -46,7 +46,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 	}), [repositoryName, packageName]);
 	const files = {data: packages.data?.files, error: packages.error, reload: packages.reload};
 	const [deleting, setDeleting] = useState(false);
-
+	
 	const repo = repository.data;
 	const pkg = packages.data ?? undefined;
 	const oci = repo?.type === 'oci';
@@ -54,7 +54,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 	const versionFiles = useMemo(() => (files.data ?? []).filter(file => file.version === version), [files.data, version]);
 	const canDelete = includesLevel(repo?.access, 'DELETE') && repo?.kind === 'LOCAL';
 	const versions = useMemo(() => [...(pkg?.versions ?? [])].sort((a, b) => oci ? b.createdAt.localeCompare(a.createdAt) : compareVersions(b.version, a.version)), [pkg, oci]);
-
+	
 	if ((repository.loading && !repo) || (packages.loading && packages.data === undefined)) {
 		return <Spinner/>;
 	}
@@ -85,7 +85,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 			</>
 		);
 	}
-
+	
 	const tags = Object.entries(pkg.tags).filter(([, target]) => target === version).map(([tag]) => tag);
 	const latestTag = oci ? latestLabel(repo.type, pkg) : undefined;
 	const latest = (latestTag && pkg.tags[latestTag]) || latestVersion(pkg);
@@ -97,7 +97,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 	const newer = index > 0 ? versions[index - 1] : undefined;
 	const older = index < versions.length - 1 ? versions[index + 1] : undefined;
 	const root = commonFolder(versionFiles);
-
+	
 	return (
 		<>
 			<PageHeader
@@ -118,7 +118,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 					</>
 				}
 			/>
-
+			
 			<Stats>
 				<Stat label="Published" value={formatRelative(entry.createdAt)} hint={formatDate(entry.createdAt)}/>
 				<Stat label="Published by" value={entry.createdBy ?? '—'}/>
@@ -127,7 +127,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 				<Stat label="Status" value={entry.yanked ? yankedLabel : isLatest ? 'Latest' : 'Available'}
 					  hint={entry.yanked ? 'Not resolved for new installs' : isLatest ? (pkg.versions.length === 1 ? 'Only version' : `Newest of ${pkg.versions.length} versions`) : `${index} newer ${index === 1 ? 'version' : 'versions'}`}/>
 			</Stats>
-
+			
 			<div className="detail-grid">
 				<div className="stack">
 					{snippets.length > 0 && (
@@ -144,7 +144,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 								: <FileBrowser key={version} repository={repo} files={versionFiles} root={root} rootLabel={versionLabel(version)}/>}
 					</Card>
 				</div>
-
+				
 				<Card title="Details" className="detail-side">
 					<dl className="details">
 						<dt>{oci ? 'Digest' : 'Version'}</dt>
@@ -176,7 +176,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 					)}
 				</Card>
 			</div>
-
+			
 			{deleting && (
 				<ConfirmDialog
 					title={`Delete ${oci ? 'manifest' : 'version'}`}

@@ -7,9 +7,7 @@ import net.luis.utils.io.database.condition.SqlCondition;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
+import org.slf4j.*;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -69,21 +67,6 @@ public class AuditService {
 		return value.length() > max ? value.substring(0, max) : value;
 	}
 	
-	/**
-	 * Records an audit entry. Any failure is logged and swallowed so auditing never breaks the audited action.<br>
-	 */
-	public void record(@Nullable String actor, @NonNull String action, @Nullable String repository, @Nullable String target, @Nullable String ip, @Nullable String detail) {
-		// Without an explicit value the user and address of the current request are used, they are set by the request handling
-		actor = actor != null ? actor : MDC.get(USER_KEY);
-		ip = ip != null ? ip : MDC.get(IP_KEY);
-		try {
-			AuditEntity entry = new AuditEntity(UUID.randomUUID().toString(), Instant.now(), actor, action, repository, truncate(target, 1024), ip, detail);
-			this.database.from(AUDIT_LOG).insert(entry).execute();
-		} catch (Exception e) {
-			LOGGER.warn("Failed to record audit event {} (actor={}, repository={}, target={})", action, actor, repository, target, e);
-		}
-	}
-	
 	@NonNull
 	private static SqlCondition condition(@Nullable String repository, @Nullable String actor, @Nullable String action, @Nullable Instant from, @Nullable Instant to) throws SqlException {
 		List<SqlCondition> conditions = new ArrayList<>();
@@ -104,6 +87,21 @@ public class AuditService {
 			conditions.add(Sql.before(AUDIT_TIMESTAMP, to));
 		}
 		return conditions.isEmpty() ? Sql.isNull(AUDIT_ID).not() : SqlCondition.allOf(conditions);
+	}
+	
+	/**
+	 * Records an audit entry. Any failure is logged and swallowed so auditing never breaks the audited action.<br>
+	 */
+	public void record(@Nullable String actor, @NonNull String action, @Nullable String repository, @Nullable String target, @Nullable String ip, @Nullable String detail) {
+		// Without an explicit value the user and address of the current request are used, they are set by the request handling
+		actor = actor != null ? actor : MDC.get(USER_KEY);
+		ip = ip != null ? ip : MDC.get(IP_KEY);
+		try {
+			AuditEntity entry = new AuditEntity(UUID.randomUUID().toString(), Instant.now(), actor, action, repository, truncate(target, 1024), ip, detail);
+			this.database.from(AUDIT_LOG).insert(entry).execute();
+		} catch (Exception e) {
+			LOGGER.warn("Failed to record audit event {} (actor={}, repository={}, target={})", action, actor, repository, target, e);
+		}
 	}
 	
 	/**

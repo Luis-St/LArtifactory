@@ -67,7 +67,7 @@ export function ActivityChart({activity}: { activity: ActivityBucket[] }) {
 	const days = useMemo(() => collectDays(activity), [activity]);
 	const total = days.reduce((sum, day) => sum + day.total, 0);
 	const {max, ticks} = niceMax(Math.max(...days.map(day => day.total)));
-
+	
 	useLayoutEffect(() => {
 		const element = container.current;
 		if (!element) {
@@ -77,14 +77,14 @@ export function ActivityChart({activity}: { activity: ActivityBucket[] }) {
 		observer.observe(element);
 		return () => observer.disconnect();
 	}, []);
-
+	
 	const plotWidth = Math.max(0, width - AXIS);
 	const slot = plotWidth / DAYS;
 	// 2px surface gap between neighbouring bars
 	const barWidth = Math.max(2, slot - 2);
 	const y = (value: number) => (HEIGHT - BOTTOM) * (1 - value / max);
 	const hovered = hover !== null ? days[hover] : null;
-
+	
 	return (
 		<div className="activity">
 			<div className="activity-head">
@@ -143,23 +143,23 @@ export function ActivityChart({activity}: { activity: ActivityBucket[] }) {
 			</div>
 			{/* Hidden through a wrapper, browsers do not clip a table caption with overflow on the table itself */}
 			<div className="sr-only">
-			<table>
-				<caption>Publications per day</caption>
-				<thead>
-				<tr>
-					<th>Day</th>
-					<th>Publications</th>
-				</tr>
-				</thead>
-				<tbody>
-				{days.map(day => (
-					<tr key={dayKey(day.date)}>
-						<td>{weekdayFormat.format(day.date)}</td>
-						<td>{day.total}</td>
+				<table>
+					<caption>Publications per day</caption>
+					<thead>
+					<tr>
+						<th>Day</th>
+						<th>Publications</th>
 					</tr>
-				))}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+					{days.map(day => (
+						<tr key={dayKey(day.date)}>
+							<td>{weekdayFormat.format(day.date)}</td>
+							<td>{day.total}</td>
+						</tr>
+					))}
+					</tbody>
+				</table>
 			</div>
 		</div>
 	);

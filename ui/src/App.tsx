@@ -58,7 +58,7 @@ function Routes({principal}: { principal: Principal | null }) {
 		case 'repositories':
 			page = id && sub === 'packages' && subId && detail === 'versions' && detailId ? <VersionDetail key={`${id}/${subId}/${detailId}`} repositoryName={id} packageName={subId} version={detailId}/>
 				: id && sub === 'packages' && subId ? <PackageDetail key={`${id}/${subId}`} repositoryName={id} packageName={subId} params={params}/>
-				: id ? <RepositoryDetail key={id} name={id} params={params}/> : <Repositories/>;
+					: id ? <RepositoryDetail key={id} name={id} params={params}/> : <Repositories/>;
 			break;
 		case 'users':
 			page = admin ? <Users/> : null;
@@ -70,10 +70,10 @@ function Routes({principal}: { principal: Principal | null }) {
 			page = principal ? <Tokens params={params}/> : null;
 			break;
 		case 'webhooks':
-			page = admin ? <Webhooks /> : null;
+			page = admin ? <Webhooks/> : null;
 			break;
 		case 'audit':
-			page = admin ? <Audit /> : null;
+			page = admin ? <Audit/> : null;
 			break;
 		case 'account':
 			page = principal ? <Account/> : null;

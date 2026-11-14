@@ -57,7 +57,9 @@ export function Repositories() {
 			<Tabs
 				tabs={[
 					{id: '' as RepositoryType | '', label: <>All <span className="tab-count">{repositories.data?.length ?? 0}</span></>},
-					...visibleTypes(repositories.data, guest).map(type => ({id: type as RepositoryType | '', label: <>{TYPE_INFO[type].label} <span className="tab-count">{(repositories.data ?? []).filter(entry => entry.type === type).length}</span></>})),
+					...visibleTypes(repositories.data, guest).map(type => ({
+						id: type as RepositoryType | '', label: <>{TYPE_INFO[type].label} <span className="tab-count">{(repositories.data ?? []).filter(entry => entry.type === type).length}</span></>
+					})),
 				]}
 				active={filter}
 				onChange={setFilter}
@@ -79,41 +81,41 @@ export function Repositories() {
 				</Empty>
 			) : (
 				view === 'cards' ? <RepositoryCards repositories={sorted} inventory={inventory.data ?? null}/> : (
-				<div className="table-wrap">
-					<table className="table">
-						<thead>
-						<tr>
-							<SortHeader id="name" sort={sort} onSort={toggle}>Name</SortHeader>
-							<SortHeader id="type" sort={sort} onSort={toggle}>Type</SortHeader>
-							<SortHeader id="description" sort={sort} onSort={toggle}>Description</SortHeader>
-							<SortHeader id="access" sort={sort} onSort={toggle}>Access</SortHeader>
-							<SortHeader id="created" sort={sort} onSort={toggle}>Created</SortHeader>
-						</tr>
-						</thead>
-						<tbody>
-						{visible.map(repository => (
-							<tr key={repository.name} className="clickable" onClick={() => navigate(href('repositories', repository.name))}>
-								<td>
+					<div className="table-wrap">
+						<table className="table">
+							<thead>
+							<tr>
+								<SortHeader id="name" sort={sort} onSort={toggle}>Name</SortHeader>
+								<SortHeader id="type" sort={sort} onSort={toggle}>Type</SortHeader>
+								<SortHeader id="description" sort={sort} onSort={toggle}>Description</SortHeader>
+								<SortHeader id="access" sort={sort} onSort={toggle}>Access</SortHeader>
+								<SortHeader id="created" sort={sort} onSort={toggle}>Created</SortHeader>
+							</tr>
+							</thead>
+							<tbody>
+							{visible.map(repository => (
+								<tr key={repository.name} className="clickable" onClick={() => navigate(href('repositories', repository.name))}>
+									<td>
 									<span className="cell-inline">
 										<a className="strong nowrap" href={href('repositories', repository.name)} onClick={event => event.stopPropagation()}>{repository.name}</a>
 										{repository.kind !== 'LOCAL' && <Badge tone="accent">{repository.kind.toLowerCase()}</Badge>}
 									</span>
-								</td>
-								<td className="shrink"><TypeBadge type={repository.type}/></td>
-								<td className="muted">{repository.description || <span className="faint">—</span>}</td>
-								<td className="shrink">
+									</td>
+									<td className="shrink"><TypeBadge type={repository.type}/></td>
+									<td className="muted">{repository.description || <span className="faint">—</span>}</td>
+									<td className="shrink">
 									<span className="cell-inline">
 										{repository.publicRead ? <Badge tone="success">public</Badge> : <Badge>private</Badge>}
 										{repository.allowRedeploy && <Badge tone="warning">redeploy</Badge>}
 									</span>
-								</td>
-								<td className="muted nowrap">{formatDate(repository.createdAt)}</td>
-							</tr>
-						))}
-						</tbody>
-					</table>
-					<Pagination paging={paging} noun="repositories"/>
-				</div>
+									</td>
+									<td className="muted nowrap">{formatDate(repository.createdAt)}</td>
+								</tr>
+							))}
+							</tbody>
+						</table>
+						<Pagination paging={paging} noun="repositories"/>
+					</div>
 				)
 			))}
 			
@@ -253,7 +255,7 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 				<Field label="Description">
 					<input value={description} onChange={event => setDescription(event.target.value)}/>
 				</Field>
-	
+				
 				{kind === 'REMOTE' && (
 					<>
 						<Field label="Upstream URL" hint="Base url of the remote repository to proxy, e.g. https://repo1.maven.org/maven2">
@@ -283,7 +285,7 @@ function CreateRepositoryDialog({onClose}: { onClose: () => void }) {
 							</div>}
 					</Field>
 				)}
-	
+				
 				{kind === 'LOCAL' && !IMMUTABLE_TYPES.includes(type) && <Toggle checked={allowRedeploy} onChange={setAllowRedeploy} label="Allow redeploy" description="Released versions can be overwritten (not recommended)"/>}
 				<Toggle checked={publicRead} onChange={setPublicRead} label="Public read" description="Anyone can download without credentials"/>
 				{error && <ErrorBox error={error}/>}

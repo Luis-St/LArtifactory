@@ -38,12 +38,12 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 	// Counts and sizes are aggregated by the server, the page only loads the packages and folders it shows
 	const summary = useAsync(() => api.summary(name).then(result => result.repositories[0]), [name]);
 	const admin = canAdminister(principal);
-
+	
 	const isGeneric = repository.data?.type === 'generic';
 	const requested = params.get('tab') as Tab | null;
 	const tab: Tab = requested ?? (isGeneric ? 'files' : 'packages');
 	const setTab = (id: Tab) => navigate(`${href('repositories', name)}?tab=${id}`);
-
+	
 	if (repository.loading && !repository.data) {
 		return <Spinner/>;
 	}
@@ -59,14 +59,14 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 	const url = clientUrl(repo);
 	const stats = summary.data;
 	const changed = () => summary.reload();
-
+	
 	const tabs: { id: Tab; label: ReactNode }[] = [
 		...(isGeneric ? [] : [{id: 'packages' as Tab, label: <>Packages {stats && <span className="tab-count">{stats.packages}</span>}</>}]),
 		{id: 'files', label: <>Files {stats && <span className="tab-count">{stats.files}</span>}</>},
 		{id: 'setup', label: 'Client setup'},
 		...(admin ? [{id: 'access' as Tab, label: 'Access'}, {id: 'settings' as Tab, label: 'Settings'}] : []),
 	];
-
+	
 	return (
 		<>
 			<PageHeader
@@ -80,7 +80,7 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 					</div>
 				}
 			/>
-
+			
 			<Stats>
 				{!isGeneric && <Stat label="Packages" value={stats ? formatNumber(stats.packages) : '…'}/>}
 				{!isGeneric && <Stat label="Versions" value={stats ? formatNumber(stats.versions) : '…'}/>}
@@ -88,15 +88,15 @@ export function RepositoryDetail({name, params}: { name: string; params: URLSear
 				<Stat label="Storage" value={stats ? formatBytes(stats.size) : '…'}/>
 				<Stat label="Access" value={repo.publicRead ? 'Public' : 'Private'} hint={repo.allowRedeploy ? 'Redeploy allowed' : 'Releases immutable'}/>
 			</Stats>
-
+			
 			<Tabs tabs={tabs} active={tab} onChange={setTab}/>
-
+			
 			<div className="fade-in" key={tab}>
-			{tab === 'packages' && <PackageList repository={repo} selected={params.get('package')} onChanged={changed}/>}
-			{tab === 'files' && <FileBrowser repository={repo} onChanged={changed}/>}
-			{tab === 'setup' && <Setup repository={repo}/>}
-			{tab === 'settings' && admin && <Settings repository={repo} onSaved={repository.reload}/>}
-			{tab === 'access' && admin && <RepositoryAccess repository={repo}/>}
+				{tab === 'packages' && <PackageList repository={repo} selected={params.get('package')} onChanged={changed}/>}
+				{tab === 'files' && <FileBrowser repository={repo} onChanged={changed}/>}
+				{tab === 'setup' && <Setup repository={repo}/>}
+				{tab === 'settings' && admin && <Settings repository={repo} onSaved={repository.reload}/>}
+				{tab === 'access' && admin && <RepositoryAccess repository={repo}/>}
 			</div>
 		</>
 	);
@@ -122,7 +122,7 @@ function PackageList({repository, selected, onChanged}: { repository: Repository
 		setReload(value => value + 1);
 		onChanged();
 	};
-
+	
 	if (packages.error) {
 		return <ErrorBox error={packages.error} onRetry={packages.reload}/>;
 	}
@@ -178,7 +178,7 @@ function PackageRow({repository, pkg, open, onToggle, onChanged}: { repository: 
 	}, {});
 	const yankedLabel = repository.type === 'nuget' ? 'unlisted' : 'yanked';
 	const versionLabel = (version: string) => isDigest(version) ? shortDigest(version) : version;
-
+	
 	return (
 		<div className={`package${open ? ' open' : ''}`}>
 			<button type="button" className="package-head" onClick={onToggle} aria-expanded={open}>
@@ -319,14 +319,14 @@ export function FileBrowser({repository, files, root = '', rootLabel, onChanged}
 	const tree = useAsync(() => (files ? Promise.resolve(null) : api.tree(repository.name, prefix)), [files, repository.name, prefix, reload]);
 	// Files of a generic repository and cached files of a remote repository are deleted one by one, packages are deleted as a whole
 	const canDelete = includesLevel(repository.access, 'DELETE') && (repository.kind === 'REMOTE' || (repository.kind === 'LOCAL' && repository.type === 'generic'));
-
+	
 	const {folders, entries} = useMemo(() => {
 		if (files) {
 			return listFolder(files, prefix);
 		}
 		return {folders: (tree.data?.folders ?? []).map(name => ({name})), entries: tree.data?.files ?? []};
 	}, [files, prefix, tree.data]);
-
+	
 	const folderSort = useSort<Folder, BrowserColumn>(folders, {
 		name: folder => folder.name,
 		size: folder => folder.stats?.size,
@@ -349,7 +349,7 @@ export function FileBrowser({repository, files, root = '', rootLabel, onChanged}
 		setPrefix(value);
 		setSelected(null);
 	};
-
+	
 	if (files && files.length === 0) {
 		return <Empty title="No files">This version has no files.</Empty>;
 	}
@@ -578,7 +578,7 @@ function RemoteSettings({repository, remote, onSaved}: { repository: Repository;
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 	const dirty = url !== remote.url || cacheEnabled !== remote.cacheEnabled || username !== (remote.username ?? '') || password !== '';
-
+	
 	const save = async (event: FormEvent) => {
 		event.preventDefault();
 		setBusy(true);
@@ -595,7 +595,7 @@ function RemoteSettings({repository, remote, onSaved}: { repository: Repository;
 			setBusy(false);
 		}
 	};
-
+	
 	return (
 		<Card title="Remote (proxy)">
 			<form className="form" onSubmit={save}>
@@ -626,7 +626,7 @@ function MemberSettings({repository, onSaved}: { repository: Repository; onSaved
 		[next[index], next[index + delta]] = [next[index + delta], next[index]];
 		return next;
 	});
-
+	
 	const save = async () => {
 		setBusy(true);
 		setError(undefined);
@@ -640,7 +640,7 @@ function MemberSettings({repository, onSaved}: { repository: Repository; onSaved
 			setBusy(false);
 		}
 	};
-
+	
 	return (
 		<Card title="Virtual (group)">
 			<div className="form">
@@ -654,7 +654,8 @@ function MemberSettings({repository, onSaved}: { repository: Repository; onSaved
 								<td><a className="link" href={href('repositories', member)}>{member}</a></td>
 								<td className="actions">
 									<Button small variant="ghost" className="btn-icon" title="Move up" aria-label={`Move ${member} up`} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="arrow-up" size={15}/></Button>
-									<Button small variant="ghost" className="btn-icon" title="Move down" aria-label={`Move ${member} down`} disabled={index === members.length - 1} onClick={() => move(index, 1)}><Icon name="arrow-down" size={15}/></Button>
+									<Button small variant="ghost" className="btn-icon" title="Move down" aria-label={`Move ${member} down`} disabled={index === members.length - 1} onClick={() => move(index, 1)}><Icon name="arrow-down"
+									                                                                                                                                                                                     size={15}/></Button>
 									<Button small variant="ghost" className="danger-text" onClick={() => setMembers(current => current.filter(entry => entry !== member))}>Remove</Button>
 								</td>
 							</tr>

@@ -26,11 +26,11 @@ export function Account() {
 	const now = new Date().toISOString();
 	const activeTokens = (tokens.data ?? []).filter(token => !token.expiresAt || token.expiresAt > now);
 	const recentTokens = [...activeTokens].sort((a, b) => (b.lastUsedAt ?? b.createdAt).localeCompare(a.lastUsedAt ?? a.createdAt)).slice(0, 4);
-
+	
 	return (
 		<>
 			<PageHeader title="Account" subtitle="Your profile and preferences on this instance."/>
-
+			
 			<section className="card account-hero">
 				<Avatar name={principal.username} size="large"/>
 				<div className="account-identity">
@@ -56,7 +56,7 @@ export function Account() {
 				</dl>
 				<Button onClick={logout}><Icon name="logout" size={15}/>Sign out</Button>
 			</section>
-
+			
 			<div className="account-grid">
 				<div className="stack">
 					<Card title="Appearance">
@@ -116,7 +116,7 @@ export function Account() {
 						</div>
 					</Card>
 				</div>
-
+				
 				<Card title="Access tokens">
 					{signedInWithToken ? (
 						<Empty title="Password required">Sign in with your password to see your tokens.</Empty>

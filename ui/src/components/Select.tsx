@@ -32,7 +32,7 @@ export function Select<T extends string>({value, onChange, options, label, place
 	const typed = useRef({text: '', time: 0});
 	const id = useId();
 	const selected = options.find(option => option.value === value);
-
+	
 	const textOf = (option: SelectOption<T>) => option.text ?? (typeof option.label === 'string' ? option.label : String(option.value));
 	const enabledIndex = (start: number, step: number) => {
 		for (let i = start; i >= 0 && i < options.length; i += step) {
@@ -42,7 +42,7 @@ export function Select<T extends string>({value, onChange, options, label, place
 		}
 		return -1;
 	};
-
+	
 	const show = () => {
 		if (disabled) {
 			return;
@@ -59,7 +59,7 @@ export function Select<T extends string>({value, onChange, options, label, place
 			button.current?.focus();
 		}
 	};
-
+	
 	useLayoutEffect(() => {
 		if (!open || !button.current || !popup.current) {
 			return;
@@ -77,13 +77,13 @@ export function Select<T extends string>({value, onChange, options, label, place
 			maxHeight,
 		});
 	}, [open, options.length]);
-
+	
 	useEffect(() => {
 		if (open && active >= 0) {
 			popup.current?.querySelector(`[data-index="${active}"]`)?.scrollIntoView({block: 'nearest'});
 		}
 	}, [open, active]);
-
+	
 	useEffect(() => {
 		if (!open) {
 			return;
@@ -106,7 +106,7 @@ export function Select<T extends string>({value, onChange, options, label, place
 			window.removeEventListener('scroll', close, true);
 		};
 	}, [open]);
-
+	
 	const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
 		const key = event.key;
 		if (!open) {
@@ -145,7 +145,7 @@ export function Select<T extends string>({value, onChange, options, label, place
 			}
 		}
 	};
-
+	
 	return (
 		<>
 			<button ref={button} type="button" className={`select${open ? ' select-open' : ''}${className ? ' ' + className : ''}`} disabled={disabled}

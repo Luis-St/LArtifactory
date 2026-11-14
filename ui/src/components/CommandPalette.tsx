@@ -28,7 +28,7 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 	const [repositoryList, setRepositoryList] = useState<Repository[] | null>(null);
 	const [packageHits, setPackageHits] = useState<SearchResult[]>([]);
 	const [error, setError] = useState(false);
-
+	
 	useEffect(() => {
 		dialog.current?.showModal();
 		api.repositories().then(setRepositoryList, () => setError(true));
@@ -48,7 +48,7 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 			clearTimeout(timer);
 		};
 	}, [query]);
-
+	
 	const entries = useMemo(() => {
 		const needle = query.trim().toLowerCase();
 		const matches = (...values: (string | null | undefined)[]) => !needle || values.some(value => value?.toLowerCase().includes(needle));
@@ -70,19 +70,19 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 		})) : [];
 		return [...(needle ? [...packages, ...repositories] : repositories), ...pages];
 	}, [query, repositoryList, packageHits, principal]);
-
+	
 	useEffect(() => setActive(0), [query]);
 	useEffect(() => {
 		list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({block: 'nearest'});
 	}, [active]);
-
+	
 	const open = (entry: Entry | undefined) => {
 		if (entry) {
 			onClose();
 			navigate(entry.target);
 		}
 	};
-
+	
 	return (
 		<dialog ref={dialog} className="modal palette" onCancel={event => {
 			event.preventDefault();

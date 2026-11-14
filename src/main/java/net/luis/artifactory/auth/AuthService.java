@@ -40,10 +40,16 @@ public class AuthService {
 	private static final Semaphore HASH_SLOTS = new Semaphore(Math.max(2, Runtime.getRuntime().availableProcessors()));
 	private static final long HASH_WAIT_MILLIS = 5_000;
 	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
+	private static final Duration TICKET_LIFETIME = Duration.ofSeconds(60);
+	private static final int MAX_TICKETS = 10_000;
 	/**
 	 * Bearer token handed out by the registry token endpoint to anonymous clients, it authenticates as anonymous.<br>
 	 */
 	public static final String ANONYMOUS_TOKEN = "anonymous";
+	/**
+	 * Query parameter of a download ticket, see {@link #createTicket}.<br>
+	 */
+	public static final String TICKET_PARAMETER = "ticket";
 	private final UserService userService;
 	private final TokenUsageService tokenUsage;
 	private final ServerConfig config;
@@ -51,12 +57,6 @@ public class AuthService {
 	private final AuditService audit;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 	private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
-	/**
-	 * Query parameter of a download ticket, see {@link #createTicket}.<br>
-	 */
-	public static final String TICKET_PARAMETER = "ticket";
-	private static final Duration TICKET_LIFETIME = Duration.ofSeconds(60);
-	private static final int MAX_TICKETS = 10_000;
 	
 	public AuthService(@NonNull UserService userService, @NonNull TokenUsageService tokenUsage, @NonNull ServerConfig config, @NonNull AuditService audit) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");

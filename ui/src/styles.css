@@ -1645,7 +1645,6 @@ input:disabled {
 	color: #0e1014;
 }
 
-
 .account-hero {
 	display: flex;
 	flex-direction: row;
@@ -1704,7 +1703,7 @@ input:disabled {
 	.account-grid, .detail-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
-
+	
 	.detail-side {
 		position: static;
 	}
@@ -3135,10 +3134,9 @@ input:disabled {
 	flex-direction: column;
 	gap: 18px;
 	padding: 36px;
-	background:
-		radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 60%),
-		radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
-		var(--surface-2);
+	background: radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--accent) 26%, transparent), transparent 60%),
+	radial-gradient(90% 80% at 100% 100%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+	var(--surface-2);
 	border-right: 1px solid var(--border);
 }
 
@@ -3270,13 +3268,13 @@ input[aria-invalid='true'] {
 		grid-template-columns: minmax(0, 1fr);
 		max-width: 420px;
 	}
-
+	
 	.login-brand {
 		padding: 24px 28px;
 		border-right: none;
 		border-bottom: 1px solid var(--border);
 	}
-
+	
 	.login-formats {
 		display: none;
 	}
@@ -3294,12 +3292,12 @@ input[aria-invalid='true'] {
 	.layout, .layout.collapsed {
 		grid-template-columns: minmax(0, 1fr);
 	}
-
+	
 	/* Narrow screens need horizontal scrolling more than sticky headers */
 	.table-wrap, .table-scroll {
 		overflow-x: auto;
 	}
-
+	
 	/* On small screens the sidebar is an overlay drawer and always shows its labels */
 	.sidebar {
 		position: fixed;
@@ -3309,12 +3307,12 @@ input[aria-invalid='true'] {
 		transform: translateX(-100%);
 		transition: transform 0.2s;
 	}
-
+	
 	.nav-open .sidebar {
 		transform: none;
 		box-shadow: var(--shadow-popup);
 	}
-
+	
 	.nav-open .nav-backdrop {
 		display: block;
 		position: fixed;
@@ -3322,53 +3320,53 @@ input[aria-invalid='true'] {
 		z-index: 15;
 		background: var(--backdrop);
 	}
-
+	
 	.collapsed .nav-label {
 		display: inline;
 	}
-
+	
 	.collapsed .nav-group-label {
 		height: auto;
 		margin: 0;
 		padding: 0 10px 4px;
 		background: none;
 	}
-
+	
 	.collapsed .nav-link, .collapsed .brand {
 		justify-content: flex-start;
 		padding: 6px 10px;
 	}
-
+	
 	.collapsed .nav-sub {
 		margin: 1px 0 3px 19px;
 		padding-left: 8px;
 		border-left: 1px solid var(--border);
 	}
-
+	
 	.collapse-btn {
 		display: none;
 	}
-
+	
 	.icon-btn.menu-btn {
 		display: inline-grid;
 	}
-
+	
 	.topbar {
 		padding: 0 12px;
 	}
-
+	
 	.search-trigger kbd, .user-name {
 		display: none;
 	}
-
+	
 	.content {
 		padding: 20px 16px 40px;
 	}
-
+	
 	.two-columns {
 		grid-template-columns: minmax(0, 1fr);
 	}
-
+	
 	.search-trigger span {
 		display: none;
 	}
@@ -3384,19 +3382,19 @@ input[aria-invalid='true'] {
 	.table-wrap, .table-scroll {
 		overflow-x: clip;
 	}
-
+	
 	.table-wrap > .table, .table-scroll > .table, .package-body .table {
 		display: block;
 	}
-
+	
 	.table-wrap > .table thead, .table-scroll > .table thead, .package-body .table thead {
 		display: none;
 	}
-
+	
 	.table-wrap > .table tbody, .table-scroll > .table tbody, .package-body .table tbody {
 		display: block;
 	}
-
+	
 	.table-wrap > .table tr, .table-scroll > .table tr, .package-body .table tr {
 		display: flex;
 		flex-direction: column;
@@ -3404,11 +3402,11 @@ input[aria-invalid='true'] {
 		padding: 10px 14px;
 		border-bottom: 1px solid var(--border);
 	}
-
+	
 	.table-wrap > .table tbody tr:last-child, .table-scroll > .table tbody tr:last-child {
 		border-bottom: none;
 	}
-
+	
 	.table-wrap > .table td, .table-scroll > .table td, .package-body .table td {
 		display: flex;
 		align-items: center;
@@ -3420,7 +3418,7 @@ input[aria-invalid='true'] {
 		white-space: normal;
 		min-width: 0;
 	}
-
+	
 	.table-wrap > .table td::before, .table-scroll > .table td::before, .package-body .table td::before {
 		content: attr(data-label);
 		flex: none;
@@ -3431,116 +3429,116 @@ input[aria-invalid='true'] {
 		text-transform: uppercase;
 		text-align: left;
 	}
-
+	
 	/* The first column names the row, it reads as the card title */
 	.table-wrap > .table td:first-child, .table-scroll > .table td:first-child, .package-body .table td:first-child {
 		justify-content: flex-start;
 		text-align: left;
 		font-size: 1rem;
 	}
-
+	
 	.table-wrap > .table td:first-child::before, .table-scroll > .table td:first-child::before, .package-body .table td:first-child::before,
 	.table td[data-label='']::before {
 		display: none;
 	}
-
+	
 	.table td:empty, .table td.actions:empty {
 		display: none;
 	}
-
+	
 	.table td.actions {
 		justify-content: flex-end;
 		width: auto;
 	}
-
+	
 	.table td.actions > :first-child {
 		margin-left: auto;
 	}
-
+	
 	.table td .cell-inline {
 		justify-content: flex-end;
 	}
-
+	
 	.table td:first-child .cell-inline {
 		justify-content: flex-start;
 	}
-
+	
 	.toolbar {
 		flex-wrap: wrap;
 	}
-
+	
 	.toolbar .search-field, .toolbar .select {
 		flex: 1 1 100%;
 	}
-
+	
 	.toolbar-spacer {
 		display: none;
 	}
-
+	
 	.page-actions {
 		width: 100%;
 	}
-
+	
 	.page-actions .url-chip {
 		max-width: 100%;
 	}
-
+	
 	.stats-row {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
 	}
-
+	
 	.tabs {
 		overflow-x: auto;
 		scrollbar-width: none;
 	}
-
+	
 	.tab {
 		flex: none;
 	}
-
+	
 	.type-grid, .repo-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}
-
+	
 	.list-recent, .list-repositories {
 		grid-template-columns: max-content minmax(0, 1fr) max-content;
 	}
-
+	
 	.list-grid .list-row > .list-meta:not(.list-num) {
 		display: none;
 	}
-
+	
 	.account-hero {
 		align-items: flex-start;
 	}
-
+	
 	.account-facts {
 		width: 100%;
 		margin: 0;
 		justify-content: space-between;
 	}
-
+	
 	.setting-row > :last-child {
 		max-width: 100%;
 	}
-
+	
 	.segmented {
 		flex-wrap: wrap;
 	}
-
+	
 	.pagination {
 		justify-content: center;
 	}
-
+	
 	.date-range {
 		flex: 1 1 100%;
 	}
-
+	
 	.date-range input {
 		flex: 1;
 		min-width: 0;
 	}
-
+	
 	.modal-footer {
 		flex-wrap: wrap;
 	}

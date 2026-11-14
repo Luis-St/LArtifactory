@@ -30,7 +30,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 	}), [repositoryName, packageName]);
 	const files = {data: packages.data?.files, error: packages.error, reload: packages.reload};
 	const [deleting, setDeleting] = useState<{ version?: string } | null>(null);
-
+	
 	const repo = repository.data;
 	const pkg = packages.data ?? undefined;
 	const oci = repo?.type === 'oci';
@@ -55,7 +55,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 		size: version => sizeOf(version.version),
 	}, {version: (a, b) => oci ? a.createdAt.localeCompare(b.createdAt) : compareVersions(a.version, b.version)});
 	const {visible, paging} = usePaging(sorted);
-
+	
 	if ((repository.loading && !repo) || (packages.loading && packages.data === undefined)) {
 		return <Spinner/>;
 	}
@@ -80,7 +80,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 			</>
 		);
 	}
-
+	
 	const requested = params.get('version');
 	// OCI versions are digests, the manifest the newest tag points at is the latest one
 	const latestTag = oci ? latestLabel(repo.type, pkg) : undefined;
@@ -95,7 +95,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 	const lastPublished = versions.reduce<string | undefined>((result, version) => (!result || version.createdAt > result ? version.createdAt : result), undefined);
 	const yankedLabel = repo.type === 'nuget' ? 'unlisted' : 'yanked';
 	const download = (file: FileEntry) => downloadFile(repo, file).catch(error => notify(error.message, 'error'));
-
+	
 	return (
 		<>
 			<PageHeader
@@ -104,7 +104,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 				subtitle={<>Package in <a className="link" href={back.href}>{repositoryName}</a>{repo.description ? ` · ${repo.description}` : ''}</>}
 				actions={canDelete && <Button variant="ghost" className="danger-text" onClick={() => setDeleting({})}><Icon name="trash" size={15}/>Delete package</Button>}
 			/>
-
+			
 			<Stats>
 				<Stat label={oci ? 'Latest tag' : 'Latest version'} value={latestLabel(repo.type, pkg) ?? '—'}/>
 				<Stat label="Versions" value={formatNumber(pkg.versions.length)}/>
@@ -112,7 +112,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 				<Stat label="Storage" value={files.data ? formatBytes(totalSize) : '…'}/>
 				<Stat label="Last published" value={formatRelative(lastPublished)} hint={formatDate(lastPublished)}/>
 			</Stats>
-
+			
 			<div className="detail-grid">
 				<div className="stack">
 					{selected && snippets.length > 0 && (
@@ -126,7 +126,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 							<SnippetTabs snippets={snippets}/>
 						</Card>
 					)}
-
+					
 					<Card title={<>Versions <span className="tab-count">{versions.length}</span></>} className="card-flush">
 						<div className="table-scroll">
 							<table className="table">
@@ -175,7 +175,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 						</div>
 					</Card>
 				</div>
-
+				
 				{selected && (
 					<Card title={<span className="cell-inline">{oci ? 'Manifest' : 'Version'} <span className="name">{versionLabel(selected.version)}</span></span>} className="detail-side">
 						<dl className="details">
@@ -220,7 +220,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 					</Card>
 				)}
 			</div>
-
+			
 			{deleting && (
 				<ConfirmDialog
 					title={deleting.version ? `Delete ${oci ? 'manifest' : 'version'}` : 'Delete package'}

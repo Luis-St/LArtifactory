@@ -37,6 +37,12 @@ public class RepositoryService {
 	}
 	
 	@NonNull
+	private static RemoteConfigEntity normalize(@NonNull RemoteConfigEntity remote) {
+		String url = remote.url().endsWith("/") ? remote.url().substring(0, remote.url().length() - 1) : remote.url();
+		return new RemoteConfigEntity(remote.repository(), url, remote.cacheEnabled(), remote.username(), remote.password());
+	}
+	
+	@NonNull
 	public List<RepositoryEntity> list() throws SqlException {
 		return this.database.from(REPOSITORIES).select().orderBy(REPOSITORY_NAME.ascending()).fetch();
 	}
@@ -79,12 +85,6 @@ public class RepositoryService {
 	@NonNull
 	public RepositoryEntity create(@NonNull String name, @NonNull RepositoryType type, @Nullable String description, boolean publicRead, boolean allowRedeploy) throws SqlException {
 		return this.create(name, type, RepositoryClass.LOCAL, description, publicRead, allowRedeploy, null, List.of());
-	}
-	
-	@NonNull
-	private static RemoteConfigEntity normalize(@NonNull RemoteConfigEntity remote) {
-		String url = remote.url().endsWith("/") ? remote.url().substring(0, remote.url().length() - 1) : remote.url();
-		return new RemoteConfigEntity(remote.repository(), url, remote.cacheEnabled(), remote.username(), remote.password());
 	}
 	
 	/**
