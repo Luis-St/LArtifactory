@@ -1,4 +1,4 @@
-import {type AccessLevel, type AccountSecurity, type AuditEntry, type MfaChallenge, type MfaMethod, type PasswordResetInfo, type FileEntry, type Health, type Package, type PackageDetail, type PackageSummary, type Page, type Permission, type Principal, type Repository, type SearchResult, sortRepositories, type Summary, type Token, type Tree, type User, type Webhook, type WebhookDelivery} from './types';
+import {type AccessLevel, type AccountSecurity, type AuditEntry, type FileEntry, type Health, type MfaChallenge, type MfaMethod, type Package, type PackageDetail, type PackageSummary, type Page, type PasswordResetInfo, type Permission, type Principal, type Repository, type SearchResult, sortRepositories, type Summary, type Token, type Tree, type User, type Webhook, type WebhookDelivery} from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -157,19 +157,20 @@ export const api = {
 	sendMfaEmail: (challenge: string) => request<void>('POST', '/api/session/mfa/email', {challenge}, true),
 	
 	accountSecurity: () => request<AccountSecurity>('GET', '/api/account/security'),
-	requestEmailChange: (email: string, password: string) => request<void>('POST', '/api/account/email', {email, password}),
+	requestEmailChange: (email: string, password: string, code?: string) => request<void>('POST', '/api/account/email', {email, password, code}),
 	verifyEmail: (code: string) => request<AccountSecurity>('POST', '/api/account/email/verify', {code}),
-	removeEmail: (password: string) => request<AccountSecurity>('POST', '/api/account/email/remove', {password}),
-	setupTotp: (password: string) => request<{ secret: string; uri: string }>('POST', '/api/account/mfa/totp/setup', {password}),
+	removeEmail: (password: string, code?: string) => request<AccountSecurity>('POST', '/api/account/email/remove', {password, code}),
+	setupTotp: (password: string, code?: string) => request<{ secret: string; uri: string }>('POST', '/api/account/mfa/totp/setup', {password, code}),
 	enableTotp: (code: string) => request<{ recoveryCodes: string[] | null }>('POST', '/api/account/mfa/totp/enable', {code}),
-	enableEmailMfa: (password: string) => request<{ recoveryCodes: string[] | null }>('POST', '/api/account/mfa/email/enable', {password}),
-	disableMfa: (method: 'totp' | 'email', password: string) => request<AccountSecurity>('POST', `/api/account/mfa/${method}/disable`, {password}),
-	regenerateRecoveryCodes: (password: string) => request<{ recoveryCodes: string[] }>('POST', '/api/account/mfa/recovery-codes', {password}),
+	enableEmailMfa: (password: string, code?: string) => request<{ recoveryCodes: string[] | null }>('POST', '/api/account/mfa/email/enable', {password, code}),
+	sendConfirmationCode: () => request<void>('POST', '/api/account/mfa/email/code'),
+	disableMfa: (method: 'totp' | 'email', password: string, code?: string) => request<AccountSecurity>('POST', `/api/account/mfa/${method}/disable`, {password, code}),
+	regenerateRecoveryCodes: (password: string, code?: string) => request<{ recoveryCodes: string[] }>('POST', '/api/account/mfa/recovery-codes', {password, code}),
 	
 	passwordResetAvailable: () => request<PasswordResetInfo>('GET', '/api/password-reset', undefined, true),
 	requestPasswordReset: (login: string) => request<void>('POST', '/api/password-reset', {login}, true),
 	checkPasswordReset: (token: string) => request<PasswordResetInfo>('POST', '/api/password-reset/check', {token}, true),
-	completePasswordReset: (token: string, password: string, code?: string) => request<void>('POST', '/api/password-reset/complete', {token, password, code}, true),
+	completePasswordReset: (token: string, password: string, code: string | undefined, revokeTokens: boolean) => request<void>('POST', '/api/password-reset/complete', {token, password, code, revokeTokens}, true),
 	deleteSession: () => request<void>('DELETE', '/api/session', undefined, true),
 	
 	// Sorted by type in the order of REPOSITORY_TYPES, then by name, so every page lists them the same way

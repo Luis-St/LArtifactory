@@ -103,7 +103,7 @@ public class Application {
 			serverConfig,
 			userService,
 			authService,
-			new AccountSecurityService(userService, authService, pepper, mail, serverConfig, auditService),
+			new AccountSecurityService(userService, authService, pepper, mail, serverConfig, auditService, tokenUsageService),
 			tokenUsageService,
 			repositoryService,
 			artifactService,
@@ -309,6 +309,7 @@ public class Application {
 			config.routes.post("/api/account/mfa/totp/setup", accountHandler::setupTotp);
 			config.routes.post("/api/account/mfa/totp/enable", accountHandler::enableTotp);
 			config.routes.post("/api/account/mfa/email/enable", accountHandler::enableEmail);
+			config.routes.post("/api/account/mfa/email/code", accountHandler::sendConfirmationCode);
 			config.routes.post("/api/account/mfa/recovery-codes", accountHandler::regenerateRecoveryCodes);
 			config.routes.post("/api/account/mfa/{method}/disable", accountHandler::disable);
 			config.routes.get("/api/password-reset", accountHandler::resetAvailable);

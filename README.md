@@ -286,6 +286,8 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
   so a database dump alone is not enough to guess passwords offline.
   Without `ARTIFACTORY_PASSWORD_PEPPER` the server generates one into `pepper` in `ARTIFACTORY_STORAGE_PATH` on the first start.
   Back the pepper up separately from the database, because without it no password, recovery code or authenticator secret verifies.
+  To move a generated pepper into the environment, set `ARTIFACTORY_PASSWORD_PEPPER` to the content of that file.
+  Any other value while the file exists stops the start, because it would silently invalidate every stored hash.
   Hashes from before the pepper still verify and are replaced with peppered ones on the next successful login,
   so existing installations need no migration step.
 - Users add an email address on the account page.
@@ -295,17 +297,25 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
   Enabling the first factor creates 8 recovery codes of the format `ABCD-EFGH`, they are shown once and only their hashes are stored.
   Each recovery code works once and new ones can be generated, which invalidates the old ones.
   Setting up, turning off and regenerating require the current password, so a stolen session alone can not change the second factors.
+  With two-factor authentication these changes and a change of the email address also need a code of the authenticator app,
+  a confirmation code by email (`POST /api/account/mfa/email/code`) or a recovery code,
+  because the password alone must not be enough to turn off or redirect the second factors.
 - With a second factor, `POST /api/session` answers the password with a challenge instead of a session,
   and `POST /api/session/mfa` completes it with a code.
   The password alone is then rejected for basic auth and `npm login`,
   because both would otherwise skip the second factor, so clients use access tokens instead.
   Wrong codes count towards the same login lockout as wrong passwords, and a challenge ends after 5 wrong codes.
+  For these users the correct password does not reset the lockout counter, only a completed sign in does,
+  because signing in again with the password would otherwise allow guessing codes without limit.
+  If codes by email are the only factor, the server can not send mails and no recovery code is left,
+  the sign in fails with a clear error, and an administrator has to reset the two-factor authentication.
 - "Forgot password" on the sign in page sends a reset mail to the verified email address.
   The answer is the same whether the account exists or not, so the form does not reveal accounts or addresses.
   With `ARTIFACTORY_BASE_URL` the mail contains a link, otherwise a reset code to enter on the sign in page,
   because a link built from the request `Host` header could point to an attacker host.
   A user with an authenticator app also needs a code of it or a recovery code, the mail alone is not enough for that account.
-  A reset ends all sessions of the user.
+  A reset ends all sessions of the user and optionally revokes all access tokens,
+  which is not the default because CI jobs then need new tokens after an ordinary forgotten password.
 - An administrator can turn off two-factor authentication of a user that lost every factor (`DELETE /api/users/{username}/mfa`).
 - Sign in challenges, setups in progress, mail codes and reset links only live in memory,
   because they are short lived and a restart only means starting over.
@@ -322,6 +332,7 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | `POST`                 | `/api/account/email`                          | Send a verification code to a new email address (`/verify`, `/remove`)                    |
 | `POST`                 | `/api/account/mfa/totp/setup`                 | Start setting up an authenticator app, `/enable` confirms it with a code                  |
 | `POST`                 | `/api/account/mfa/email/enable`               | Turn on codes by email                                                                    |
+| `POST`                 | `/api/account/mfa/email/code`                 | Send a code by email that confirms a change of the account security                       |
 | `POST`                 | `/api/account/mfa/{method}/disable`           | Turn off `totp` or `email`                                                                |
 | `POST`                 | `/api/account/mfa/recovery-codes`             | Replace the recovery codes                                                                |
 | `GET` `POST`           | `/api/password-reset`                         | Whether recovery is available / request a reset mail (`/check`, `/complete`)              |

@@ -1,6 +1,6 @@
 import {type FormEvent, useEffect, useState} from 'react';
 import {api, ApiError} from '../api';
-import {Button, Field} from '../components/ui';
+import {Button, Field, Toggle} from '../components/ui';
 import {navigate, useRoute} from '../router';
 import {type LoginError, LoginErrorBox, LoginShell} from './Login';
 import type {PasswordResetInfo} from '../types';
@@ -19,6 +19,7 @@ export function PasswordReset() {
 	const [password, setPassword] = useState('');
 	const [confirm, setConfirm] = useState('');
 	const [code, setCode] = useState('');
+	const [revokeTokens, setRevokeTokens] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [done, setDone] = useState(false);
 	const [error, setError] = useState<LoginError>();
@@ -56,7 +57,7 @@ export function PasswordReset() {
 		setBusy(true);
 		setError(undefined);
 		try {
-			await api.completePasswordReset(token.trim(), password, info.totpRequired ? code.trim() : undefined);
+			await api.completePasswordReset(token.trim(), password, info.totpRequired ? code.trim() : undefined, revokeTokens);
 			setDone(true);
 		} catch (e) {
 			setError(describe(e));
@@ -69,7 +70,7 @@ export function PasswordReset() {
 			<form className="login-card" onSubmit={submit} noValidate>
 				<div>
 					<h1>Choose a new password</h1>
-					<p className="muted">{done ? 'Your password was changed and all sessions were signed out. Sign in with the new password.'
+					<p className="muted">{done ? `Your password was changed and all sessions${revokeTokens ? ' and access tokens' : ''} were signed out. Sign in with the new password.`
 						: info ? `For the account ${info.username}.` : 'Enter the reset code from the mail.'}</p>
 				</div>
 				{!done && !info && (
@@ -90,6 +91,8 @@ export function PasswordReset() {
 								<input value={code} onChange={event => setCode(event.target.value)} autoComplete="one-time-code" className="mono" placeholder="123456 or ABCD-EFGH" maxLength={9}/>
 							</Field>
 						)}
+						<Toggle checked={revokeTokens} onChange={setRevokeTokens} label="Also revoke all access tokens"
+								description="All sessions always end. Revoke the tokens as well if someone else may have used your account, CI jobs then need new tokens."/>
 					</>
 				)}
 				<LoginErrorBox error={error}/>

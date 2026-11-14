@@ -29,16 +29,16 @@ import java.util.*;
  * </p>
  */
 public final class Pepper {
-
+	
 	private static final Logger LOGGER = LoggerFactory.getLogger(Pepper.class);
 	private static final String FILE_NAME = "pepper";
 	private static final String ENCRYPTED_PREFIX = "v1:";
 	private static final int IV_LENGTH = 12;
 	private static final int TAG_BITS = 128;
 	private static final SecureRandom RANDOM = new SecureRandom();
-
+	
 	private final byte[] secret;
-
+	
 	public Pepper(byte @NonNull [] secret) {
 		Objects.requireNonNull(secret, "Secret must not be null");
 		if (secret.length < 16) {
@@ -46,36 +46,55 @@ public final class Pepper {
 		}
 		this.secret = secret.clone();
 	}
-
+	
 	/**
 	 * Returns the configured pepper, or the pepper stored in the storage directory, which is generated on the first start.<br>
+	 * <p>
+	 *     A configured pepper is used as its UTF-8 bytes. If the storage directory already holds a generated pepper, the configured
+	 *     value must be the content of that file (it is then decoded like the file), any other value would silently invalidate every
+	 *     stored hash, so the server refuses to start instead.
+	 * </p>
+	 *
+	 * @throws IllegalStateException If a pepper is configured that differs from the generated one
 	 */
 	@NonNull
 	public static Pepper load(@Nullable String configured, @NonNull Path storagePath) {
-		if (configured != null) {
-			return new Pepper(configured.getBytes(StandardCharsets.UTF_8));
-		}
 		Path file = storagePath.resolve(FILE_NAME);
 		try {
 			if (Files.exists(file)) {
-				return new Pepper(Base64.getDecoder().decode(Files.readString(file, StandardCharsets.US_ASCII).strip()));
+				String stored = Files.readString(file, StandardCharsets.US_ASCII).strip();
+				if (configured != null && !configured.strip().equals(stored)) {
+					throw new IllegalStateException("The configured password pepper differs from the generated one in " + file + ", every password, recovery code and two-factor secret would stop verifying. " +
+						"Configure the content of that file as the pepper, or delete the file if the pepper is meant to change");
+				}
+				return new Pepper(Base64.getDecoder().decode(stored));
+			}
+			if (configured != null) {
+				return new Pepper(configured.getBytes(StandardCharsets.UTF_8));
 			}
 			byte[] secret = new byte[32];
 			RANDOM.nextBytes(secret);
 			Files.createDirectories(storagePath);
-			Files.writeString(file, Base64.getEncoder().encodeToString(secret) + "\n", StandardCharsets.US_ASCII, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
-			try {
-				Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
-			} catch (UnsupportedOperationException ignored) {
-				// Not a posix file system, the file keeps the default permissions
-			}
+			write(file, Base64.getEncoder().encodeToString(secret) + "\n");
 			LOGGER.warn("No password pepper configured, generated one in {}. Back it up separately from the database, without it no password, recovery code or two-factor secret can be verified", file);
 			return new Pepper(secret);
 		} catch (IOException e) {
 			throw new UncheckedIOException("Failed to load the password pepper from " + file, e);
 		}
 	}
-
+	
+	/**
+	 * Creates the file readable only by the owner from the start, on file systems with posix permissions.<br>
+	 */
+	private static void write(@NonNull Path file, @NonNull String content) throws IOException {
+		if (file.getFileSystem().supportedFileAttributeViews().contains("posix")) {
+			Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+			Files.writeString(file, content, StandardCharsets.US_ASCII, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+		} else {
+			Files.writeString(file, content, StandardCharsets.US_ASCII, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+		}
+	}
+	
 	/**
 	 * Computes the keyed hash of the data for the given purpose.<br>
 	 */
@@ -88,12 +107,12 @@ public final class Pepper {
 			throw new IllegalStateException("Failed to compute hmac", e);
 		}
 	}
-
+	
 	@NonNull
 	public String hmacHex(@NonNull String purpose, @NonNull String data) {
 		return HexFormat.of().formatHex(this.hmac(purpose, data.getBytes(StandardCharsets.UTF_8)));
 	}
-
+	
 	/**
 	 * Encrypts the value with AES-GCM using a key derived for the given purpose.<br>
 	 */
@@ -114,7 +133,7 @@ public final class Pepper {
 			throw new IllegalStateException("Failed to encrypt", e);
 		}
 	}
-
+	
 	/**
 	 * Decrypts a value of {@link #encrypt}.<br>
 	 *
@@ -140,7 +159,7 @@ public final class Pepper {
 			throw new IllegalStateException("Failed to decrypt", e);
 		}
 	}
-
+	
 	/**
 	 * Derives the 256 bit key of a purpose from the pepper.<br>
 	 */

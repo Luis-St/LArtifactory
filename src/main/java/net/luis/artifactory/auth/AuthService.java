@@ -90,11 +90,6 @@ public class AuthService {
 		}
 	}
 	
-	@NonNull
-	LoginThrottle throttle() {
-		return this.throttle;
-	}
-	
 	/**
 	 * Returns the session secret of the request, null if the request is not authenticated with a session.<br>
 	 */
@@ -154,6 +149,11 @@ public class AuthService {
 			case WRITE -> "publish to";
 			case DELETE -> "delete from";
 		};
+	}
+	
+	@NonNull
+	LoginThrottle throttle() {
+		return this.throttle;
 	}
 	
 	public void invalidateCache() {
@@ -221,7 +221,11 @@ public class AuthService {
 			}
 			return null;
 		}
-		this.throttle.success(address, username);
+		if (!this.userService.security(user.username()).mfaEnabled()) {
+			// With two-factor authentication the password is only the first step, the counter is reset once a code completes
+			// the sign in, otherwise signing in again with the password would allow guessing codes without limit
+			this.throttle.success(address, username);
+		}
 		if (this.userService.hasher().needsRehash(user.passwordHash())) {
 			// Hashes created before the pepper was introduced are replaced while the plain password is at hand
 			this.userService.rehash(user.username(), password, user.passwordHash());

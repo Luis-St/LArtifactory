@@ -9,7 +9,7 @@
     "/api/account/email" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Send a verification code to a new email address, requires the current password",
+        "summary" : "Send a verification code to a new email address, requires the current password and, with two-factor authentication, a second factor",
         "operationId" : "requestEmailChange",
         "requestBody" : {
           "content" : {
@@ -50,7 +50,7 @@
     "/api/account/email/remove" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Remove the email address, requires the current password",
+        "summary" : "Remove the email address, requires the current password and, with two-factor authentication, a second factor",
         "operationId" : "removeEmail",
         "requestBody" : {
           "content" : {
@@ -103,10 +103,36 @@
         }
       }
     },
+    "/api/account/mfa/email/code" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Send a code to the verified email address that confirms one change of the account security",
+        "description" : "Only for users with codes by email, the code is accepted as the second factor of the other account endpoints",
+        "operationId" : "sendConfirmationCode",
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "429" : {
+            "description" : "A code was sent moments ago"
+          },
+          "503" : {
+            "description" : "Mail is not configured",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/account/mfa/email/enable" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Enable sign in codes by email, requires a verified email address and the current password",
+        "summary" : "Enable sign in codes by email, requires a verified email address, the current password and, with two-factor authentication, a second factor",
         "operationId" : "enableEmailMfa",
         "requestBody" : {
           "content" : {
@@ -134,7 +160,7 @@
     "/api/account/mfa/recovery-codes" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Replace the recovery codes with 8 new ones, requires the current password",
+        "summary" : "Replace the recovery codes with 8 new ones, requires the current password and, with two-factor authentication, a second factor",
         "operationId" : "regenerateRecoveryCodes",
         "requestBody" : {
           "content" : {
@@ -190,7 +216,7 @@
     "/api/account/mfa/totp/setup" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Start setting up an authenticator app, requires the current password",
+        "summary" : "Start setting up an authenticator app, requires the current password and, with two-factor authentication, a second factor",
         "description" : "Returns the secret and the otpauth uri for the qr code, POST /api/account/mfa/totp/enable confirms the setup with a code of the app",
         "operationId" : "setupTotp",
         "requestBody" : {
@@ -219,7 +245,7 @@
     "/api/account/mfa/{method}/disable" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Disable a second factor (totp or email), requires the current password",
+        "summary" : "Disable a second factor (totp or email), requires the current password and, with two-factor authentication, a second factor",
         "operationId" : "disableMfa",
         "parameters" : [ {
           "name" : "method",
@@ -673,7 +699,7 @@
     "/api/password-reset/complete" : {
       "post" : {
         "tags" : [ "Account" ],
-        "summary" : "Set a new password with a reset token, ends all sessions of the user",
+        "summary" : "Set a new password with a reset token, ends all sessions of the user and revokes its access tokens if asked to",
         "operationId" : "completePasswordReset",
         "requestBody" : {
           "content" : {
@@ -2029,6 +2055,9 @@
           },
           "password" : {
             "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
           }
         }
       },
@@ -2051,6 +2080,9 @@
         "properties" : {
           "password" : {
             "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
           }
         }
       },
@@ -2065,6 +2097,9 @@
           },
           "code" : {
             "type" : "string"
+          },
+          "revokeTokens" : {
+            "type" : "boolean"
           }
         }
       },

@@ -125,6 +125,7 @@ class ApplicationIntegrationTest {
 		HttpResponse<String> created = this.send("POST", "/api/session", basic("mfa", password), "{}");
 		assertEquals(201, created.statusCode(), created.body());
 		String session = "Bearer " + Json.parse(created.body()).get("token").asString();
+		String accessToken = this.createToken(session);
 		
 		// Email address, verified with a code
 		assertEquals(403, this.send("POST", "/api/account/email", session, "{\"email\":\"mfa@example.com\",\"password\":\"wrong-password\"}").statusCode());
@@ -146,9 +147,24 @@ class ApplicationIntegrationTest {
 		Json.parse(enabled.body()).get("recoveryCodes").forEach(code -> codes.add(code.asString()));
 		assertEquals(8, codes.size());
 		codes.forEach(code -> assertTrue(code.matches("[A-Z]{4}-[A-Z]{4}"), code));
-		HttpResponse<String> emailEnabled = this.send("POST", "/api/account/mfa/email/enable", session, this.password(password));
+		// With two-factor authentication a change of the account security needs a second factor besides the password
+		assertEquals(403, this.send("POST", "/api/account/mfa/email/enable", session, this.password(password)).statusCode());
+		String nextCode = Totp.code(secret, Totp.step(java.time.Instant.now()) + 1);
+		HttpResponse<String> emailEnabled = this.send("POST", "/api/account/mfa/email/enable", session, "{\"password\":\"" + password + "\",\"code\":\"" + nextCode + "\"}");
 		assertEquals(200, emailEnabled.statusCode(), emailEnabled.body());
 		assertTrue(Json.parse(emailEnabled.body()).get("recoveryCodes").isNull(), "the existing recovery codes stay valid");
+		
+		// A confirmation code by email is accepted as the second factor of a change
+		assertEquals(204, this.send("POST", "/api/account/mfa/email/code", session, null).statusCode());
+		String confirmation = this.mailMatching("mfa@example.com", "is: (\\d{6})");
+		String wrong = confirmation.equals("000000") ? "111111" : "000000";
+		assertEquals(403, this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + wrong + "\"}").statusCode());
+		HttpResponse<String> regenerated = this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + confirmation + "\"}");
+		assertEquals(200, regenerated.statusCode(), regenerated.body());
+		codes.clear();
+		Json.parse(regenerated.body()).get("recoveryCodes").forEach(code -> codes.add(code.asString()));
+		assertEquals(8, codes.size());
+		assertEquals(403, this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + confirmation + "\"}").statusCode(), "a confirmation code is used once");
 		
 		// The password alone no longer authenticates
 		assertEquals(401, this.send("GET", "/api/me", basic("mfa", password), null).statusCode());
@@ -180,8 +196,9 @@ class ApplicationIntegrationTest {
 		assertTrue(Json.parse(check.body()).get("totpRequired").asBoolean());
 		String newPassword = "mfa-password-new";
 		assertEquals(400, this.send("POST", "/api/password-reset/complete", null, "{\"token\":\"" + token + "\",\"password\":\"" + newPassword + "\"}").statusCode());
-		assertEquals(204, this.send("POST", "/api/password-reset/complete", null, "{\"token\":\"" + token + "\",\"password\":\"" + newPassword + "\",\"code\":\"" + codes.get(2) + "\"}").statusCode());
+		assertEquals(204, this.send("POST", "/api/password-reset/complete", null, "{\"token\":\"" + token + "\",\"password\":\"" + newPassword + "\",\"code\":\"" + codes.get(2) + "\",\"revokeTokens\":true}").statusCode());
 		assertEquals(401, this.send("GET", "/api/me", session, null).statusCode(), "the reset ends all sessions");
+		assertEquals(401, this.send("GET", "/api/me", basic("__token__", accessToken), null).statusCode(), "the reset revoked the access tokens");
 		assertEquals(400, this.send("POST", "/api/password-reset/check", null, "{\"token\":\"" + token + "\"}").statusCode(), "a reset token is used once");
 		assertEquals(200, this.send("POST", "/api/session", basic("mfa", newPassword), "{}").statusCode());
 		
@@ -748,8 +765,6 @@ class ApplicationIntegrationTest {
 		return Json.parse(response.body()).get("token").asString();
 	}
 	
-	private record Mail(String to, String subject, String text) {}
-	
 	private HttpResponse<String> send(String method, String path, String authorization, String body) throws IOException, InterruptedException {
 		HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path))
 			.method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofString(body));
@@ -761,4 +776,6 @@ class ApplicationIntegrationTest {
 		}
 		return this.client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
 	}
+	
+	private record Mail(String to, String subject, String text) {}
 }

@@ -6,11 +6,14 @@ import {useAsync} from '../hooks';
 import {useSession} from '../session';
 import {PasswordDialog} from './Users';
 
+/** The enabled second factors, a change of the account security then needs a code of one of them. Null without two-factor authentication. */
+type SecondFactors = { totp: boolean; email: boolean } | null;
+
 type Dialog =
 	| { kind: 'password' }
 	| { kind: 'email' }
 	| { kind: 'totp' }
-	| { kind: 'confirm'; title: string; message: string; label: string; danger?: boolean; action: (password: string) => Promise<string[] | null | void> }
+	| { kind: 'confirm'; title: string; message: string; label: string; danger?: boolean; action: (password: string, code?: string) => Promise<string[] | null | void> }
 	| { kind: 'codes'; codes: string[] };
 
 /**
@@ -21,6 +24,7 @@ export function SecurityCard({username, signedInWithToken}: { username: string; 
 	const security = useAsync(() => (signedInWithToken ? Promise.resolve(null) : api.accountSecurity()), [signedInWithToken]);
 	const [dialog, setDialog] = useState<Dialog | null>(null);
 	const data = security.data;
+	const factors: SecondFactors = data && (data.totpEnabled || data.emailMfaEnabled) ? {totp: data.totpEnabled, email: data.emailMfaEnabled} : null;
 	
 	// Enabling the first factor returns the recovery codes, they are shown once
 	const finish = (codes: string[] | null | void, message: string) => {
@@ -29,8 +33,8 @@ export function SecurityCard({username, signedInWithToken}: { username: string; 
 		setDialog(codes ? {kind: 'codes', codes} : null);
 	};
 	
-	const confirm = (title: string, message: string, label: string, action: (password: string) => Promise<string[] | null | void>, done: string, danger = false) =>
-		setDialog({kind: 'confirm', title, message, label, danger, action: async password => finish(await action(password), done)});
+	const confirm = (title: string, message: string, label: string, action: (password: string, code?: string) => Promise<string[] | null | void>, done: string, danger = false) =>
+		setDialog({kind: 'confirm', title, message, label, danger, action: async (password, code) => finish(await action(password, code), done)});
 	
 	return (
 		<Card title="Security">
@@ -54,7 +58,7 @@ export function SecurityCard({username, signedInWithToken}: { username: string; 
 						<span className="cell-inline">
 							{data.email && !data.emailMfaEnabled && (
 								<Button variant="ghost" onClick={() => confirm('Remove email address', `Remove ${data.email}? The password can then no longer be reset by email.`, 'Remove',
-									password => api.removeEmail(password).then(() => undefined), 'Email address removed', true)}>Remove</Button>
+									(password, code) => api.removeEmail(password, code).then(() => undefined), 'Email address removed', true)}>Remove</Button>
 							)}
 							<Button onClick={() => setDialog({kind: 'email'})} disabled={!data.mailAvailable}>{data.email ? 'Change' : 'Add email'}</Button>
 						</span>
@@ -66,7 +70,7 @@ export function SecurityCard({username, signedInWithToken}: { username: string; 
 						</div>
 						{data.totpEnabled
 							? <Button onClick={() => confirm('Turn off the authenticator app', 'Sign in no longer asks for a code of the app.', 'Turn off',
-								password => api.disableMfa('totp', password).then(() => undefined), 'Authenticator app turned off', true)}>Turn off</Button>
+								(password, code) => api.disableMfa('totp', password, code).then(() => undefined), 'Authenticator app turned off', true)}>Turn off</Button>
 							: <Button onClick={() => setDialog({kind: 'totp'})}>Set up</Button>}
 					</div>
 					<div className="setting-row">
@@ -76,9 +80,9 @@ export function SecurityCard({username, signedInWithToken}: { username: string; 
 						</div>
 						{data.emailMfaEnabled
 							? <Button onClick={() => confirm('Turn off codes by email', 'Sign in no longer accepts a code sent by email.', 'Turn off',
-								password => api.disableMfa('email', password).then(() => undefined), 'Codes by email turned off', true)}>Turn off</Button>
+								(password, code) => api.disableMfa('email', password, code).then(() => undefined), 'Codes by email turned off', true)}>Turn off</Button>
 							: <Button disabled={!data.email || !data.mailAvailable} onClick={() => confirm('Turn on codes by email', `Sign in will ask for a code sent to ${data.email}.`, 'Turn on',
-								password => api.enableEmailMfa(password).then(result => result.recoveryCodes), 'Codes by email turned on')}>Turn on</Button>}
+								(password, code) => api.enableEmailMfa(password, code).then(result => result.recoveryCodes), 'Codes by email turned on')}>Turn on</Button>}
 					</div>
 					{(data.totpEnabled || data.emailMfaEnabled) && (
 						<div className="setting-row">
@@ -90,15 +94,15 @@ export function SecurityCard({username, signedInWithToken}: { username: string; 
 								</span>
 							</div>
 							<Button onClick={() => confirm('Generate new recovery codes', 'All previous recovery codes stop working.', 'Generate',
-								password => api.regenerateRecoveryCodes(password).then(result => result.recoveryCodes), 'New recovery codes generated')}>Generate new</Button>
+								(password, code) => api.regenerateRecoveryCodes(password, code).then(result => result.recoveryCodes), 'New recovery codes generated')}>Generate new</Button>
 						</div>
 					)}
 				</>
 			)}
 			{dialog?.kind === 'password' && <PasswordDialog username={username} onClose={() => setDialog(null)}/>}
-			{dialog?.kind === 'email' && <EmailDialog onClose={() => setDialog(null)} onDone={() => finish(null, 'Email address verified')}/>}
-			{dialog?.kind === 'totp' && <TotpDialog onClose={() => setDialog(null)} onDone={codes => finish(codes, 'Authenticator app turned on')}/>}
-			{dialog?.kind === 'confirm' && <ConfirmPasswordDialog {...dialog} onClose={() => setDialog(null)}/>}
+			{dialog?.kind === 'email' && <EmailDialog factors={factors} onClose={() => setDialog(null)} onDone={() => finish(null, 'Email address verified')}/>}
+			{dialog?.kind === 'totp' && <TotpDialog factors={factors} onClose={() => setDialog(null)} onDone={codes => finish(codes, 'Authenticator app turned on')}/>}
+			{dialog?.kind === 'confirm' && <ConfirmPasswordDialog {...dialog} factors={factors} onClose={() => setDialog(null)}/>}
 			{dialog?.kind === 'codes' && <RecoveryCodesDialog codes={dialog.codes} username={username} onClose={() => setDialog(null)}/>}
 		</Card>
 	);
@@ -112,8 +116,42 @@ function PasswordInput({value, onChange, autoFocus}: { value: string; onChange: 
 	);
 }
 
-function ConfirmPasswordDialog({title, message, label, danger, action, onClose}: { title: string; message: string; label: string; danger?: boolean; action: (password: string) => Promise<unknown>; onClose: () => void }) {
+/**
+ * The code of a second factor that confirms a change, shown only with two-factor authentication.
+ */
+function SecondFactorInput({factors, value, onChange}: { factors: SecondFactors; value: string; onChange: (value: string) => void }) {
+	const {notify} = useSession();
+	const [sending, setSending] = useState(false);
+	const [error, setError] = useState<string>();
+	if (!factors) {
+		return null;
+	}
+	const send = async () => {
+		setSending(true);
+		setError(undefined);
+		try {
+			await api.sendConfirmationCode();
+			notify('A code was sent to your email address');
+		} catch (e) {
+			setError(errorText(e));
+		}
+		setSending(false);
+	};
+	const sources = [factors.totp && 'your authenticator app', factors.email && 'an email'].filter(Boolean).join(' or ');
+	return (
+		<>
+			<Field label="Two-factor code" hint={`A code of ${sources}, or a recovery code`}>
+				<input value={value} onChange={event => onChange(event.target.value)} required autoComplete="one-time-code" className="mono" placeholder="123456 or ABCD-EFGH" maxLength={9}/>
+			</Field>
+			{factors.email && <Button small variant="ghost" onClick={send} disabled={sending}>{sending ? 'Sending…' : 'Send a code by email'}</Button>}
+			{error && <ErrorBox error={error}/>}
+		</>
+	);
+}
+
+function ConfirmPasswordDialog({title, message, label, danger, action, factors, onClose}: { title: string; message: string; label: string; danger?: boolean; action: (password: string, code?: string) => Promise<unknown>; factors: SecondFactors; onClose: () => void }) {
 	const [password, setPassword] = useState('');
+	const [code, setCode] = useState('');
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 	const submit = async (event: FormEvent) => {
@@ -121,7 +159,7 @@ function ConfirmPasswordDialog({title, message, label, danger, action, onClose}:
 		setBusy(true);
 		setError(undefined);
 		try {
-			await action(password);
+			await action(password, factors ? code.trim() : undefined);
 		} catch (e) {
 			setError(errorText(e));
 			setBusy(false);
@@ -132,19 +170,21 @@ function ConfirmPasswordDialog({title, message, label, danger, action, onClose}:
 			<form className="form" onSubmit={submit}>
 				<p className="muted">{message}</p>
 				<PasswordInput value={password} onChange={setPassword} autoFocus/>
+				<SecondFactorInput factors={factors} value={code} onChange={setCode}/>
 				{error && <ErrorBox error={error}/>}
 				<div className="modal-footer">
 					<Button onClick={onClose} disabled={busy}>Cancel</Button>
-					<Button variant={danger ? 'danger' : 'primary'} type="submit" disabled={busy || password === ''}>{busy ? 'Working…' : label}</Button>
+					<Button variant={danger ? 'danger' : 'primary'} type="submit" disabled={busy || password === '' || (factors !== null && code.trim() === '')}>{busy ? 'Working…' : label}</Button>
 				</div>
 			</form>
 		</Modal>
 	);
 }
 
-function EmailDialog({onClose, onDone}: { onClose: () => void; onDone: () => void }) {
+function EmailDialog({factors, onClose, onDone}: { factors: SecondFactors; onClose: () => void; onDone: () => void }) {
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
+	const [factorCode, setFactorCode] = useState('');
 	const [code, setCode] = useState('');
 	const [sent, setSent] = useState(false);
 	const [busy, setBusy] = useState(false);
@@ -159,7 +199,7 @@ function EmailDialog({onClose, onDone}: { onClose: () => void; onDone: () => voi
 				onDone();
 				return;
 			}
-			await api.requestEmailChange(email.trim(), password);
+			await api.requestEmailChange(email.trim(), password, factors ? factorCode.trim() : undefined);
 			setSent(true);
 		} catch (e) {
 			setError(errorText(e));
@@ -175,6 +215,7 @@ function EmailDialog({onClose, onDone}: { onClose: () => void; onDone: () => voi
 							<input type="email" value={email} onChange={event => setEmail(event.target.value)} required autoFocus autoComplete="email"/>
 						</Field>
 						<PasswordInput value={password} onChange={setPassword}/>
+						<SecondFactorInput factors={factors} value={factorCode} onChange={setFactorCode}/>
 					</>
 				) : (
 					<Field label="Verification code" hint={`Sent to ${email.trim()}`}>
@@ -188,7 +229,7 @@ function EmailDialog({onClose, onDone}: { onClose: () => void; onDone: () => voi
 						setCode('');
 					}} disabled={busy}>Back</Button>}
 					<Button onClick={onClose} disabled={busy}>Cancel</Button>
-					<Button variant="primary" type="submit" disabled={busy || (sent ? code.trim().length !== 6 : email.trim() === '' || password === '')}>
+					<Button variant="primary" type="submit" disabled={busy || (sent ? code.trim().length !== 6 : email.trim() === '' || password === '' || (factors !== null && factorCode.trim() === ''))}>
 						{busy ? 'Working…' : sent ? 'Verify' : 'Send code'}
 					</Button>
 				</div>
@@ -197,8 +238,9 @@ function EmailDialog({onClose, onDone}: { onClose: () => void; onDone: () => voi
 	);
 }
 
-function TotpDialog({onClose, onDone}: { onClose: () => void; onDone: (codes: string[] | null) => void }) {
+function TotpDialog({factors, onClose, onDone}: { factors: SecondFactors; onClose: () => void; onDone: (codes: string[] | null) => void }) {
 	const [password, setPassword] = useState('');
+	const [factorCode, setFactorCode] = useState('');
 	const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null);
 	const [code, setCode] = useState('');
 	const [busy, setBusy] = useState(false);
@@ -212,7 +254,7 @@ function TotpDialog({onClose, onDone}: { onClose: () => void; onDone: (codes: st
 				onDone((await api.enableTotp(code.trim())).recoveryCodes);
 				return;
 			}
-			setSetup(await api.setupTotp(password));
+			setSetup(await api.setupTotp(password, factors ? factorCode.trim() : undefined));
 		} catch (e) {
 			setError(errorText(e));
 		}
@@ -227,6 +269,7 @@ function TotpDialog({onClose, onDone}: { onClose: () => void; onDone: (codes: st
 					<>
 						<p className="muted">After the password, sign in will ask for a 6 digit code of the app.</p>
 						<PasswordInput value={password} onChange={setPassword} autoFocus/>
+						<SecondFactorInput factors={factors} value={factorCode} onChange={setFactorCode}/>
 					</>
 				) : (
 					<>
@@ -247,7 +290,7 @@ function TotpDialog({onClose, onDone}: { onClose: () => void; onDone: (codes: st
 				{error && <ErrorBox error={error}/>}
 				<div className="modal-footer">
 					<Button onClick={onClose} disabled={busy}>Cancel</Button>
-					<Button variant="primary" type="submit" disabled={busy || (setup ? code.trim().length !== 6 : password === '')}>{busy ? 'Working…' : setup ? 'Turn on' : 'Continue'}</Button>
+					<Button variant="primary" type="submit" disabled={busy || (setup ? code.trim().length !== 6 : password === '' || (factors !== null && factorCode.trim() === ''))}>{busy ? 'Working…' : setup ? 'Turn on' : 'Continue'}</Button>
 				</div>
 			</form>
 		</Modal>
