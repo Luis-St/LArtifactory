@@ -28,13 +28,29 @@ export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 
 export interface Principal {
 	username: string;
+	/** Whether the user is an administrator, also true when signed in with a token, which does not grant administration. */
 	admin: boolean;
 	tokenLevel: AccessLevel | null;
+}
+
+/**
+ * Whether the principal may use the administration. The server denies it to tokens and token sessions, even of an administrator,
+ * so the ui only offers it when signed in with a password.
+ */
+export function canAdminister(principal: Principal | null | undefined): boolean {
+	return principal?.admin === true && principal.tokenLevel === null;
+}
+
+/** Whether an access level includes another one, each level includes the lower ones. */
+export function includesLevel(level: AccessLevel | null | undefined, required: AccessLevel): boolean {
+	return level != null && ACCESS_LEVELS.indexOf(level) >= ACCESS_LEVELS.indexOf(required);
 }
 
 export interface Health {
 	status: string;
 	database: string;
+	/** Whether the server serves the OpenAPI spec and the Swagger ui. */
+	apiDocs: boolean;
 }
 
 export const REPOSITORY_CLASSES = ['LOCAL', 'REMOTE', 'VIRTUAL'] as const;
@@ -44,6 +60,7 @@ export interface RemoteInfo {
 	url: string;
 	cacheEnabled: boolean;
 	username: string | null;
+	hasPassword: boolean;
 }
 
 export interface Repository {
@@ -57,6 +74,8 @@ export interface Repository {
 	kind: RepositoryClass;
 	remote: RemoteInfo | null;
 	members: string[];
+	/** The effective access level of the caller, null for an anonymous reader of a public repository. */
+	access: AccessLevel | null;
 }
 
 export interface PackageVersion {
@@ -73,6 +92,7 @@ export interface Package {
 }
 
 export interface FileEntry {
+	repository: string;
 	path: string;
 	packageName: string | null;
 	version: string | null;
@@ -144,4 +164,76 @@ export interface Token {
 	lastUsedAt: string | null;
 	lastUsedIp: string | null;
 	token: string | null;
+}
+
+export interface PackageDetail {
+	name: string;
+	versions: PackageVersion[];
+	tags: Record<string, string>;
+	files: FileEntry[];
+}
+
+/** A package of the cross repository package list, sorted and paged by the server. */
+export interface PackageSummary {
+	repository: string;
+	type: RepositoryType;
+	name: string;
+	versions: PackageVersion[];
+	tags: Record<string, string>;
+	files: number;
+	size: number;
+	updatedAt: string | null;
+}
+
+export interface Tree {
+	prefix: string;
+	folders: string[];
+	files: FileEntry[];
+}
+
+export interface SearchResult {
+	repository: string;
+	type: RepositoryType;
+	name: string;
+}
+
+export interface RepositorySummary {
+	name: string;
+	type: RepositoryType;
+	kind: RepositoryClass;
+	description: string | null;
+	publicRead: boolean;
+	packages: number;
+	versions: number;
+	files: number;
+	size: number;
+	lastUpload: string | null;
+}
+
+export interface RecentVersion {
+	repository: string;
+	type: RepositoryType;
+	packageName: string;
+	version: string;
+	createdAt: string;
+	createdBy: string | null;
+	tags: string[];
+}
+
+export interface ActivityBucket {
+	/** Start of the hour (UTC) */
+	hour: string;
+	counts: Partial<Record<RepositoryType, number>>;
+}
+
+export interface Summary {
+	repositories: RepositorySummary[];
+	recent: RecentVersion[];
+	activity: ActivityBucket[];
+}
+
+/** One page of a list the server sorts and pages, total is the number of all matching rows. */
+export interface Page<T> {
+	rows: T[];
+	total: number;
 }

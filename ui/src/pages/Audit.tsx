@@ -7,8 +7,7 @@ import { formatDate, formatIp, formatRelative } from '../format';
 import { useAsync } from '../hooks';
 import {Select} from '../components/Select';
 import { SortHeader, useSort } from '../components/sort';
-
-const PAGE_SIZE = 100;
+import { Pagination, useServerPaging } from '../components/paging';
 
 const ACTIONS: { id: string; label: string }[] = [
 	{ id: '', label: 'All actions' },
@@ -23,6 +22,13 @@ const ACTIONS: { id: string; label: string }[] = [
 	{ id: 'permission.delete', label: 'Permission revoked' },
 	{ id: 'token.create', label: 'Token created' },
 	{ id: 'token.delete', label: 'Token revoked' },
+	{ id: 'webhook.create', label: 'Webhook created' },
+	{ id: 'webhook.update', label: 'Webhook updated' },
+	{ id: 'webhook.delete', label: 'Webhook deleted' },
+	{ id: 'artifact.publish', label: 'Artifact published' },
+	{ id: 'artifact.delete', label: 'Artifact deleted' },
+	{ id: 'login.failed', label: 'Failed login' },
+	{ id: 'login.locked', label: 'Login locked' },
 ];
 
 type Range = '' | '24h' | '7d' | '30d' | 'custom';
@@ -102,10 +108,10 @@ function AuditDetail({ detail }: { detail: string | null }) {
 const REPOSITORY_KINDS: Record<string, string> = { local: 'Local', remote: 'Remote (proxy)', virtual: 'Virtual (group)' };
 
 function actionTone(action: string): 'neutral' | 'success' | 'warning' | 'danger' | 'accent' {
-	if (action.endsWith('.delete')) {
+	if (action.endsWith('.delete') || action.startsWith('login.')) {
 		return 'danger';
 	}
-	if (action.endsWith('.create') || action.endsWith('.set')) {
+	if (action.endsWith('.create') || action.endsWith('.set') || action.endsWith('.publish')) {
 		return 'success';
 	}
 	return 'neutral';
@@ -118,14 +124,16 @@ export function Audit() {
 	const [range, setRange] = useState<Range>('');
 	const [fromDay, setFromDay] = useState('');
 	const [toDay, setToDay] = useState('');
-	const [limit, setLimit] = useState(PAGE_SIZE);
 	const users = useAsync(() => api.users(), []);
 	const repositories = useAsync(() => api.repositories(), []);
+	// Paged with offsets on the server, so every entry is reachable however old it is
+	const { offset, limit, paging } = useServerPaging([repository, actor, action, range, fromDay, toDay]);
 
-	const entries = useAsync(
-		() => api.audit({ repository: repository || undefined, actor: actor || undefined, action: action || undefined, ...rangeBounds(range, fromDay, toDay), limit: limit + 1 }),
-		[repository, actor, action, range, fromDay, toDay, limit],
+	const page = useAsync(
+		() => api.audit({ repository: repository || undefined, actor: actor || undefined, action: action || undefined, ...rangeBounds(range, fromDay, toDay) }, { offset, limit }),
+		[repository, actor, action, range, fromDay, toDay, offset, limit],
 	);
+	const entries = { ...page, data: page.data?.rows };
 	// Deleted users and repositories only appear in the log, they are offered as filters as well
 	const actorOptions = useMemo(() => [...new Set([...(users.data ?? []).map(user => user.username), ...(entries.data ?? []).flatMap(entry => entry.actor ? [entry.actor] : []), ...(actor ? [actor] : [])])].sort(), [users.data, entries.data, actor]);
 	const repositoryOptions = useMemo(() => {
@@ -133,14 +141,10 @@ export function Audit() {
 		const logged = (entries.data ?? []).flatMap(entry => entry.repository && entry.repository !== '*' && !known.includes(entry.repository) ? [entry.repository] : []);
 		return [...known, ...new Set([...logged, ...(repository && !known.includes(repository) ? [repository] : [])])];
 	}, [repositories.data, entries.data, repository]);
-	const filter = (apply: () => void) => {
-		apply();
-		setLimit(PAGE_SIZE);
-	};
+	const filter = (apply: () => void) => apply();
 
 	const data = entries.data;
-	const hasMore = data !== undefined && data.length > limit;
-	const rows = hasMore ? data!.slice(0, limit) : data;
+	const rows = data;
 	const filtered = repository !== '' || actor !== '' || action !== '' || range !== '';
 	const clear = () => {
 		setRepository('');
@@ -149,7 +153,6 @@ export function Audit() {
 		setRange('');
 		setFromDay('');
 		setToDay('');
-		setLimit(PAGE_SIZE);
 	};
 	const { sorted, sort, toggle } = useSort<AuditEntry, Column>(rows ?? [], {
 		when: entry => entry.timestamp,
@@ -163,7 +166,7 @@ export function Audit() {
 		<>
 			<PageHeader
 				title="Audit log"
-				subtitle="Administrative actions on repositories, users, permissions and tokens, newest first."
+				subtitle="Administrative actions, failed logins and lockouts, and artifacts published or deleted, newest first."
 			/>
 			<div className="toolbar">
 				<Select label="Action" value={action} onChange={value => filter(() => setAction(value))} options={ACTIONS.map(entry => ({ value: entry.id, label: entry.label }))} />
@@ -206,8 +209,8 @@ export function Audit() {
 								<tr key={entry.id}>
 									<td className="muted nowrap" title={formatDate(entry.timestamp)}>{formatRelative(entry.timestamp)}</td>
 									<td className="shrink"><Badge tone={actionTone(entry.action)} title={entry.action}>{ACTIONS.find(candidate => candidate.id === entry.action)?.label ?? entry.action}</Badge></td>
-									<td className="nowrap">{entry.actor ? <button type="button" className="link" onClick={() => { setActor(entry.actor!); setLimit(PAGE_SIZE); }}>{entry.actor}</button> : <span className="muted">anonymous</span>}</td>
-									<td className="nowrap">{entry.repository && entry.repository !== '*' ? <button type="button" className="link" onClick={() => { setRepository(entry.repository!); setLimit(PAGE_SIZE); }}>{entry.repository}</button> : <span className="faint">{entry.repository ?? '—'}</span>}</td>
+									<td className="nowrap">{entry.actor ? <button type="button" className="link" onClick={() => setActor(entry.actor!)}>{entry.actor}</button> : <span className="muted">anonymous</span>}</td>
+									<td className="nowrap">{entry.repository && entry.repository !== '*' ? <button type="button" className="link" onClick={() => setRepository(entry.repository!)}>{entry.repository}</button> : <span className="faint">{entry.repository ?? '—'}</span>}</td>
 									<td><AuditTarget entry={entry} /></td>
 									<td><AuditDetail detail={entry.detail} /></td>
 									<td className="muted small nowrap tabular">{formatIp(entry.ip)}</td>
@@ -215,14 +218,10 @@ export function Audit() {
 							))}
 						</tbody>
 					</table>
+					{page.data && <Pagination paging={paging(page.data.total)} noun="entries" />}
 				</div>
 			))}
-			{hasMore && (
-				<div className="toolbar">
-					<Button onClick={() => setLimit(value => value + PAGE_SIZE)} disabled={entries.loading}>{entries.loading ? 'Loading…' : 'Load more'}</Button>
-					<span className="muted small">Showing {rows?.length} entries</span>
-				</div>
-			)}
+
 		</>
 	);
 }

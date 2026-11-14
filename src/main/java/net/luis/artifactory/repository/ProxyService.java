@@ -12,6 +12,7 @@ import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.concurrent.*;
 
 /**
  * Fetches artifacts from the upstream of a remote (proxy) repository.<br>
@@ -20,6 +21,12 @@ public class ProxyService {
 	
 	private static final Logger LOGGER = LoggerFactory.getLogger(ProxyService.class);
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(30);
+	/**
+	 * The request timeout of the client ends once the headers arrived, a body that stalls for longer than this fails the read instead of
+	 * blocking the request thread without limit.<br>
+	 */
+	private static final Duration BODY_IDLE_TIMEOUT = Duration.ofSeconds(60);
+	private static final ScheduledExecutorService WATCHDOG = Executors.newSingleThreadScheduledExecutor(Thread.ofPlatform().name("upstream-watchdog").daemon().factory());
 	
 	private final HttpClient httpClient;
 	private final long maxBytes;
@@ -86,7 +93,7 @@ public class ProxyService {
 				return null;
 			}
 			String contentType = response.headers().firstValue("Content-Type").orElse(null);
-			return new Response(new LimitedInputStream(response.body(), this.maxBytes, path), contentType, length);
+			return new Response(new LimitedInputStream(new IdleTimeoutInputStream(response.body(), BODY_IDLE_TIMEOUT), this.maxBytes, path), contentType, length);
 		} catch (InterruptedException e) {
 			Thread.currentThread().interrupt();
 			return null;
@@ -146,6 +153,48 @@ public class ProxyService {
 		@Override
 		public int read(byte @NonNull [] buffer, int offset, int length) throws IOException {
 			return this.count(super.read(buffer, offset, length));
+		}
+	}
+	
+	/**
+	 * Closes the stream if a single read blocks for longer than the timeout, the blocked read then fails with an {@link IOException}.<br>
+	 */
+	private static final class IdleTimeoutInputStream extends FilterInputStream {
+		
+		private final long timeoutMillis;
+		private volatile boolean timedOut;
+		
+		private IdleTimeoutInputStream(@NonNull InputStream input, @NonNull Duration timeout) {
+			super(input);
+			this.timeoutMillis = timeout.toMillis();
+		}
+		
+		private <T> T guarded(@NonNull Callable<T> read) throws IOException {
+			ScheduledFuture<?> watchdog = WATCHDOG.schedule(() -> {
+				this.timedOut = true;
+				try {
+					this.in.close();
+				} catch (IOException ignored) {}
+			}, this.timeoutMillis, TimeUnit.MILLISECONDS);
+			try {
+				return read.call();
+			} catch (IOException e) {
+				throw this.timedOut ? new IOException("Upstream stopped sending data for " + this.timeoutMillis / 1000 + " seconds", e) : e;
+			} catch (Exception e) {
+				throw new IOException(e);
+			} finally {
+				watchdog.cancel(false);
+			}
+		}
+		
+		@Override
+		public int read() throws IOException {
+			return this.guarded(this.in::read);
+		}
+		
+		@Override
+		public int read(byte @NonNull [] buffer, int offset, int length) throws IOException {
+			return this.guarded(() -> this.in.read(buffer, offset, length));
 		}
 	}
 }

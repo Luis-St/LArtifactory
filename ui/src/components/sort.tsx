@@ -64,3 +64,12 @@ export function SortHeader<K extends string>({id, sort, onSort, children, classN
 		</th>
 	);
 }
+
+/**
+ * Sorting of a list the server sorts, each click cycles default -> ascending -> descending -> default like useSort.
+ */
+export function useServerSort<K extends string>(): { sort: SortState<K>; toggle: (key: K) => void; params: { sort?: K; dir?: SortDirection } } {
+	const [sort, setSort] = useState<SortState<K>>(null);
+	const toggle = (key: K) => setSort(current => current?.key !== key ? {key, direction: 'asc'} : current.direction === 'asc' ? {key, direction: 'desc'} : null);
+	return {sort, toggle, params: sort ? {sort: sort.key, dir: sort.direction} : {}};
+}

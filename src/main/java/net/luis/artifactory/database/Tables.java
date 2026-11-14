@@ -38,6 +38,8 @@ public final class Tables {
 	public static final SqlColumn<SessionEntity, String> SESSION_HASH = SESSIONS.column("secret_hash", SqlTypes.STRING.configure(SqlParameter.length(64)), SessionEntity::secretHash, col -> col.notNull().unique());
 	public static final SqlColumn<SessionEntity, Instant> SESSION_CREATED_AT = SESSIONS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SessionEntity::createdAt, SqlColumnBuilder::notNull);
 	public static final SqlColumn<SessionEntity, Instant> SESSION_EXPIRES_AT = SESSIONS.column("expires_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), SessionEntity::expiresAt, SqlColumnBuilder::notNull);
+	public static final SqlColumn<SessionEntity, String> SESSION_LEVEL = SESSIONS.column("level", SqlTypes.STRING.configure(SqlParameter.length(16)), SessionEntity::level);
+	public static final SqlColumn<SessionEntity, String> SESSION_TOKEN_ID = SESSIONS.column("token_id", SqlTypes.STRING.configure(SqlParameter.length(36)), SessionEntity::tokenId);
 	
 	public static final SqlTable<RepositoryEntity> REPOSITORIES = SqlTable.create(RepositoryEntity.class, "repositories");
 	public static final SqlColumn<RepositoryEntity, String> REPOSITORY_NAME = REPOSITORIES.column("name", SqlTypes.STRING.configure(SqlParameter.length(64)), RepositoryEntity::name, col -> col.primaryKey().notNull());
@@ -46,6 +48,10 @@ public final class Tables {
 	public static final SqlColumn<RepositoryEntity, Boolean> REPOSITORY_PUBLIC_READ = REPOSITORIES.column("public_read", SqlTypes.BOOLEAN, RepositoryEntity::publicRead, SqlColumnBuilder::notNull);
 	public static final SqlColumn<RepositoryEntity, Boolean> REPOSITORY_ALLOW_REDEPLOY = REPOSITORIES.column("allow_redeploy", SqlTypes.BOOLEAN, RepositoryEntity::allowRedeploy, SqlColumnBuilder::notNull);
 	public static final SqlColumn<RepositoryEntity, Instant> REPOSITORY_CREATED_AT = REPOSITORIES.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), RepositoryEntity::createdAt, SqlColumnBuilder::notNull);
+	
+	public static final SqlTable<RepositoryKindEntity> REPOSITORY_KINDS = SqlTable.create(RepositoryKindEntity.class, "repository_kinds");
+	public static final SqlColumn<RepositoryKindEntity, String> KIND_REPOSITORY = REPOSITORY_KINDS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), RepositoryKindEntity::repository, col -> col.primaryKey().notNull());
+	public static final SqlColumn<RepositoryKindEntity, String> KIND_KIND = REPOSITORY_KINDS.column("kind", SqlTypes.STRING.configure(SqlParameter.length(16)), RepositoryKindEntity::kind, SqlColumnBuilder::notNull);
 	
 	public static final SqlTable<PermissionEntity> PERMISSIONS = SqlTable.create(PermissionEntity.class, "permissions");
 	public static final SqlColumn<PermissionEntity, String> PERMISSION_REPOSITORY = PERMISSIONS.column("repository", SqlTypes.STRING.configure(SqlParameter.length(64)), PermissionEntity::repository, col -> col.primaryKey().notNull());

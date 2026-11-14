@@ -3,11 +3,11 @@ import {api} from '../api';
 import {Icon} from '../components/icons';
 import {Badge, Button, Empty, ErrorBox, errorText, Field, Modal, PageHeader, SearchField, Segmented, Spinner, Tabs, Toggle, TYPE_INFO, TypeBadge, TypeIcon} from '../components/ui';
 import {formatBytes, formatDate, formatNumber, formatRelative} from '../format';
-import {loadInventory, type RepositoryInventory} from '../inventory';
+import {loadSummary} from '../inventory';
 import {useAsync} from '../hooks';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {IMMUTABLE_TYPES, type Repository, REPOSITORY_TYPES, type RepositoryClass, type RepositoryType, visibleTypes} from '../types';
+import {canAdminister, IMMUTABLE_TYPES, type Repository, REPOSITORY_TYPES, type RepositoryClass, type RepositorySummary, type RepositoryType, visibleTypes} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
 import {Pagination, usePaging} from '../components/paging';
@@ -22,7 +22,8 @@ export function Repositories() {
 	const [creating, setCreating] = useState(false);
 	const [view, setView] = useState<View>(readView);
 	// The cards show sizes and counts, the content is only loaded once the card view is used
-	const inventory = useAsync(() => (view === 'cards' ? loadInventory() : Promise.resolve(null)), [view]);
+	const inventory = useAsync(() => (view === 'cards' ? loadSummary().then(summary => summary.repositories) : Promise.resolve(null)), [view]);
+	const admin = canAdminister(principal);
 	const changeView = (value: View) => {
 		setView(value);
 		try {
@@ -50,7 +51,7 @@ export function Repositories() {
 			<PageHeader
 				title="Repositories"
 				subtitle="Every repository hosts one package format and is served at /{type}/{name}/."
-				actions={principal?.admin && <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16}/>New repository</Button>}
+				actions={admin && <Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16}/>New repository</Button>}
 			/>
 			
 			<Tabs
@@ -74,7 +75,7 @@ export function Repositories() {
 			{repositories.error && <ErrorBox error={repositories.error} onRetry={repositories.reload}/>}
 			{repositories.data && (rows.length === 0 ? (
 				<Empty title={repositories.data.length === 0 ? 'No repositories yet' : 'No matching repositories'}>
-					{principal?.admin && repositories.data.length === 0 && <Button variant="primary" onClick={() => setCreating(true)}>Create a repository</Button>}
+					{admin && repositories.data.length === 0 && <Button variant="primary" onClick={() => setCreating(true)}>Create a repository</Button>}
 				</Empty>
 			) : (
 				view === 'cards' ? <RepositoryCards repositories={sorted} inventory={inventory.data ?? null}/> : (
@@ -135,14 +136,14 @@ function readView(): View {
 /**
  * Repositories as cards with their type colour, content counts, size and last upload.
  */
-function RepositoryCards({repositories, inventory}: { repositories: Repository[]; inventory: RepositoryInventory[] | null }) {
+function RepositoryCards({repositories, inventory}: { repositories: Repository[]; inventory: RepositorySummary[] | null }) {
 	return (
 		<div className="repo-grid">
 			{repositories.map(repository => {
-				const content = inventory?.find(entry => entry.repository.name === repository.name);
-				const size = content?.files.reduce((sum, file) => sum + file.size, 0);
-				const lastUpload = content?.files.reduce<string | undefined>((result, file) => (!result || file.createdAt > result ? file.createdAt : result), undefined);
-				const count = repository.type === 'generic' ? content?.files.length : content?.packages.length;
+				const content = inventory?.find(entry => entry.name === repository.name);
+				const size = content?.size;
+				const lastUpload = content?.lastUpload;
+				const count = repository.type === 'generic' ? content?.files : content?.packages;
 				return (
 					<a key={repository.name} className="repo-card" href={href('repositories', repository.name)} style={{'--badge': TYPE_INFO[repository.type].color} as React.CSSProperties}>
 						<div className="repo-card-head">

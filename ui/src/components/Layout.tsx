@@ -2,9 +2,10 @@ import {type ReactNode, useEffect, useRef, useState} from 'react';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
 import {useTheme} from '../theme';
-import {type Repository, visibleTypes} from '../types';
+import {canAdminister, type RepositoryType, visibleTypes} from '../types';
 import {CommandPalette} from './CommandPalette';
-import {loadPackageIndex, typeCounts} from '../inventory';
+import {loadSummary, typeCounts} from '../inventory';
+import {api} from '../api';
 import {NAV_GROUPS, visibleTo} from '../nav';
 import {Icon} from './icons';
 import {Avatar, Button, Menu, TYPE_INFO} from './ui';
@@ -23,11 +24,12 @@ let apiDocsProbe: Promise<boolean> | null = null;
 
 /**
  * Whether the server serves the Swagger ui, it is disabled unless ARTIFACTORY_ENABLE_API_DOCS is set.
+ * The health response says so, probing /openapi would leave a 404 in the access log on every page load.
  */
 function useApiDocs(): boolean {
 	const [available, setAvailable] = useState(false);
 	useEffect(() => {
-		apiDocsProbe ??= fetch('/openapi', {method: 'GET', headers: {Accept: 'application/json'}}).then(response => response.ok, () => false);
+		apiDocsProbe ??= api.health().then(health => health.apiDocs === true, () => false);
 		let active = true;
 		apiDocsProbe.then(value => active && setAvailable(value));
 		return () => {
@@ -40,11 +42,11 @@ function useApiDocs(): boolean {
 /**
  * Packages per type for the sidebar, reloaded on every page change (the index itself is cached for a minute).
  */
-function useTypeCounts(section: string): { counts: Record<string, number>; repositories: Repository[] } | null {
-	const [counts, setCounts] = useState<{ counts: Record<string, number>; repositories: Repository[] } | null>(null);
+function useTypeCounts(section: string): { counts: Record<string, number>; repositories: { type: RepositoryType }[] } | null {
+	const [counts, setCounts] = useState<{ counts: Record<string, number>; repositories: { type: RepositoryType }[] } | null>(null);
 	useEffect(() => {
 		let active = true;
-		loadPackageIndex().then(index => active && setCounts({counts: typeCounts(index), repositories: index.repositories}), () => undefined);
+		loadSummary().then(summary => active && setCounts({counts: typeCounts(summary), repositories: summary.repositories}), () => undefined);
 		return () => {
 			active = false;
 		};
@@ -210,7 +212,7 @@ export function Layout({section, type, children}: { section: string; type?: stri
 								<>
 									<strong>{principal.username}</strong>
 									<span className="muted small">
-										{principal.admin ? 'Administrator' : 'User'}
+										{canAdminister(principal) ? 'Administrator' : 'User'}
 										{principal.tokenLevel ? ` · signed in with a ${principal.tokenLevel} token` : ''}
 									</span>
 								</>

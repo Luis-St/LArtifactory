@@ -120,7 +120,13 @@ public class TokenUsageService {
 			return null;
 		}
 		try {
-			return InetAddress.getByName(host);
+			InetAddress address = InetAddress.getByName(host);
+			byte[] bytes = address.getAddress();
+			// An IPv4-mapped IPv6 address (::ffff:a.b.c.d, sent by dual stack sockets) is compared as the IPv4 address it maps
+			if (bytes.length == 16 && Arrays.equals(Arrays.copyOf(bytes, 12), new byte[] { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, (byte) 0xff, (byte) 0xff })) {
+				return InetAddress.getByAddress(Arrays.copyOfRange(bytes, 12, 16));
+			}
+			return address;
 		} catch (Exception e) {
 			return null;
 		}
@@ -139,19 +145,19 @@ public class TokenUsageService {
 				continue;
 			}
 			String address = entry;
+			int prefix = -1;
 			if (entry.contains("/")) {
 				int slash = entry.indexOf('/');
 				try {
-					int prefix = Integer.parseInt(entry.substring(slash + 1).strip());
-					if (prefix < 0 || prefix > 128) {
-						return false;
-					}
+					prefix = Integer.parseInt(entry.substring(slash + 1).strip());
 				} catch (NumberFormatException e) {
 					return false;
 				}
 				address = entry.substring(0, slash);
 			}
-			if (parse(address) == null) {
+			InetAddress parsed = parse(address);
+			// The prefix is limited by the length of the address, a /33 IPv4 range would be stored and never match
+			if (parsed == null || (prefix >= 0 && prefix > parsed.getAddress().length * 8) || (entry.contains("/") && prefix < 0)) {
 				return false;
 			}
 		}
@@ -159,7 +165,8 @@ public class TokenUsageService {
 	}
 	
 	/**
-	 * Clears the cached settings of a token (call after the token or its settings change).<br>
+	 * Clears the cached settings, the rate limit counter and the usage timestamp of a token, call it after the token
+	 * was deleted (revoked, removed with its user or by npm logout) or its settings changed.<br>
 	 */
 	public void invalidate(@NonNull String tokenId) {
 		this.metaCache.remove(tokenId);

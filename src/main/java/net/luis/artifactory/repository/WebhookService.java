@@ -40,6 +40,8 @@ public class WebhookService {
 	private static final int MAX_ATTEMPTS = 3;
 	private static final int MAX_DELIVERIES_PER_WEBHOOK = 100;
 	private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
+	private static final int DELIVERY_THREADS = 4;
+	private static final int QUEUE_CAPACITY = 2000;
 	
 	//region Event types
 	public static final String ARTIFACT_PUBLISHED = "artifact.published";
@@ -65,11 +67,13 @@ public class WebhookService {
 			.proxy(ProxySelector.getDefault())
 			.followRedirects(HttpClient.Redirect.NEVER)
 			.build();
-		this.executor = new ThreadPoolExecutor(1, 4, 60, TimeUnit.SECONDS, new LinkedBlockingQueue<>(2000), runnable -> {
+		// A fixed pool: a ThreadPoolExecutor only starts threads above its core size once the queue is full, so a core size of 1
+		// would deliver sequentially and one unreachable target would delay every other webhook
+		this.executor = new ThreadPoolExecutor(DELIVERY_THREADS, DELIVERY_THREADS, 0, TimeUnit.SECONDS, new LinkedBlockingQueue<>(QUEUE_CAPACITY), runnable -> {
 			Thread thread = new Thread(runnable, "webhook-delivery");
 			thread.setDaemon(true);
 			return thread;
-		}, new ThreadPoolExecutor.DiscardPolicy());
+		}, (_, _) -> LOGGER.warn("Webhook delivery queue is full ({} pending), an event was dropped", QUEUE_CAPACITY));
 	}
 	
 	private static boolean subscribed(@Nullable String events, @NonNull String event) {
@@ -137,7 +141,19 @@ public class WebhookService {
 		return webhook;
 	}
 	
-	public void update(@NonNull String id, @Nullable String url, @Nullable String events, @Nullable Boolean active) throws SqlException {
+	/**
+	 * Updates the given fields of a webhook, null fields are kept.<br>
+	 *
+	 * @param repository The repository the webhook is scoped to, an empty string removes the scope
+	 * @param secret The signing secret, an empty string removes it
+	 */
+	public void update(@NonNull String id, @Nullable String url, @Nullable String events, @Nullable Boolean active, @Nullable String repository, @Nullable String secret) throws SqlException {
+		if (repository != null) {
+			this.database.from(WEBHOOKS).update().set(WEBHOOK_REPOSITORY, repository.isEmpty() ? null : repository).where(Sql.equalTo(WEBHOOK_ID, id)).execute();
+		}
+		if (secret != null) {
+			this.database.from(WEBHOOKS).update().set(WEBHOOK_SECRET, secret.isEmpty() ? null : secret).where(Sql.equalTo(WEBHOOK_ID, id)).execute();
+		}
 		if (url != null) {
 			this.database.from(WEBHOOKS).update().set(WEBHOOK_URL, url).where(Sql.equalTo(WEBHOOK_ID, id)).execute();
 		}
@@ -211,9 +227,11 @@ public class WebhookService {
 	private void deliverWithRetries(@NonNull WebhookEntity webhook, @NonNull String event, @Nullable String repository, byte @NonNull [] payload) {
 		int statusCode = 0;
 		String error = null;
+		// Every attempt of one delivery carries the same id, so a receiver can recognize a retry of a delivery it already processed
+		String deliveryId = UUID.randomUUID().toString();
 		for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
 			try {
-				HttpResponse<Void> response = this.send(webhook, event, payload);
+				HttpResponse<Void> response = this.send(webhook, event, deliveryId, payload);
 				statusCode = response.statusCode();
 				if (statusCode >= 200 && statusCode < 300) {
 					this.recordDelivery(webhook.id(), event, repository, true, statusCode, null);
@@ -236,14 +254,14 @@ public class WebhookService {
 	}
 	
 	@NonNull
-	private HttpResponse<Void> send(@NonNull WebhookEntity webhook, @NonNull String event, byte @NonNull [] payload) throws Exception {
+	private HttpResponse<Void> send(@NonNull WebhookEntity webhook, @NonNull String event, @NonNull String deliveryId, byte @NonNull [] payload) throws Exception {
 		HttpRequest.Builder builder = HttpRequest.newBuilder()
 			.uri(URI.create(webhook.url()))
 			.timeout(REQUEST_TIMEOUT)
 			.header("Content-Type", "application/json")
 			.header("User-Agent", "LArtifactory-Webhook")
 			.header("X-LArtifactory-Event", event)
-			.header("X-LArtifactory-Delivery", UUID.randomUUID().toString())
+			.header("X-LArtifactory-Delivery", deliveryId)
 			.POST(HttpRequest.BodyPublishers.ofByteArray(payload));
 		if (webhook.secret() != null && !webhook.secret().isBlank()) {
 			builder.header("X-LArtifactory-Signature", "sha256=" + sign(webhook.secret(), payload));
@@ -282,7 +300,7 @@ public class WebhookService {
 		long statusCode = 0;
 		String error = null;
 		try {
-			HttpResponse<Void> response = this.send(webhook, PING, payload);
+			HttpResponse<Void> response = this.send(webhook, PING, UUID.randomUUID().toString(), payload);
 			statusCode = response.statusCode();
 			success = statusCode >= 200 && statusCode < 300;
 			if (!success) {

@@ -7,6 +7,7 @@ import org.jspecify.annotations.Nullable;
 import java.time.Instant;
 
 public record FileResponse(
+	@NonNull String repository,
 	@NonNull String path,
 	@Nullable String packageName,
 	@Nullable String version,
@@ -21,6 +22,6 @@ public record FileResponse(
 	
 	@NonNull
 	public static FileResponse of(@NonNull FileEntity entity) {
-		return new FileResponse(entity.path(), entity.packageName(), entity.version(), entity.size(), entity.sha256(), entity.sha1(), entity.md5(), entity.contentType(), entity.createdAt(), entity.createdBy());
+		return new FileResponse(entity.repository(), entity.path(), entity.packageName(), entity.version(), entity.size(), entity.sha256(), entity.sha1(), entity.md5(), entity.contentType(), entity.createdAt(), entity.createdBy());
 	}
 }

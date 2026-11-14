@@ -55,14 +55,19 @@ public class LoginThrottle {
 		this.checkWindow(addressKey(address), this.maxFailures * ADDRESS_FACTOR, now);
 	}
 	
-	public void failure(@NonNull String address, @NonNull String username) {
+	/**
+	 * Counts a failed login.<br>
+	 *
+	 * @return true if this failure reached a limit, further attempts are locked out from now on
+	 */
+	public boolean failure(@NonNull String address, @NonNull String username) {
 		if (this.windows.size() >= MAX_ENTRIES) {
 			this.cleanup();
 		}
 		Instant now = this.clock.instant();
-		for (String key : new String[] { userKey(address, username), addressKey(address) }) {
-			this.windows.compute(key, (_, window) -> window == null || window.expired(now, this.lockout) ? new Window(now, 1) : new Window(window.start(), window.failures() + 1));
-		}
+		Window user = this.windows.compute(userKey(address, username), (_, window) -> window == null || window.expired(now, this.lockout) ? new Window(now, 1) : new Window(window.start(), window.failures() + 1));
+		Window all = this.windows.compute(addressKey(address), (_, window) -> window == null || window.expired(now, this.lockout) ? new Window(now, 1) : new Window(window.start(), window.failures() + 1));
+		return user.failures() == this.maxFailures || all.failures() == this.maxFailures * ADDRESS_FACTOR;
 	}
 	
 	public void success(@NonNull String address, @NonNull String username) {

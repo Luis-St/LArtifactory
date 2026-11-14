@@ -6,6 +6,7 @@ import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
 import net.luis.artifactory.database.entity.PackageVersionEntity;
+import net.luis.artifactory.database.entity.RemoteConfigEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.artifactory.dto.request.CreateRepositoryRequest;
 import net.luis.artifactory.dto.request.UpdateRepositoryRequest;
@@ -100,21 +101,20 @@ public class RepositoryAdminHandler {
 	)
 	public void list(@NonNull Context ctx) throws Exception {
 		Principal principal = this.services.auth().authenticate(ctx);
-		String baseUrl = Requests.baseUrl(ctx, this.services.config());
 		List<RepositoryResponse> result = new ArrayList<>();
 		for (RepositoryEntity repository : this.services.repositories().list()) {
 			if (this.services.auth().canRead(principal, repository)) {
-				result.add(this.response(repository, baseUrl));
+				result.add(this.response(ctx, principal, repository));
 			}
 		}
 		ctx.json(result);
 	}
 	
 	/**
-	 * Builds a repository response enriched with its class (local/remote/virtual) and the remote/virtual settings.<br>
+	 * Builds a repository response enriched with its class (local/remote/virtual), the remote/virtual settings and the access level of the caller.<br>
 	 */
 	@NonNull
-	private RepositoryResponse response(@NonNull RepositoryEntity repository, @NonNull String baseUrl) throws Exception {
+	RepositoryResponse response(@NonNull Context ctx, @Nullable Principal principal, @NonNull RepositoryEntity repository) throws Exception {
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());
 		RepositoryResponse.RemoteInfo remote = null;
 		List<String> members = List.of();
@@ -124,7 +124,22 @@ public class RepositoryAdminHandler {
 		} else if (kind == RepositoryClass.VIRTUAL) {
 			members = this.services.repositories().virtualMembers(repository.name()).stream().map(net.luis.artifactory.database.entity.VirtualMemberEntity::member).toList();
 		}
-		return RepositoryResponse.of(repository, baseUrl, kind.name(), remote, members);
+		AccessLevel level = principal == null ? null : this.services.auth().effectiveLevel(principal, repository.name());
+		return RepositoryResponse.of(repository, this.repositoryUrl(ctx, repository), kind.name(), remote, members, level == null ? null : level.name());
+	}
+	
+	/**
+	 * The url clients use for the repository, the root of a host mapped to it with {@code ARTIFACTORY_HOST_REPOSITORIES} if there is one.<br>
+	 */
+	@NonNull
+	private String repositoryUrl(@NonNull Context ctx, @NonNull RepositoryEntity repository) {
+		String baseUrl = Requests.baseUrl(ctx, this.services.config());
+		for (Map.Entry<String, String> mapping : this.services.config().hostRepositories().entrySet()) {
+			if (mapping.getValue().equals(repository.name())) {
+				return baseUrl.substring(0, baseUrl.indexOf("://") + 3) + mapping.getKey();
+			}
+		}
+		return baseUrl + "/" + repository.type() + "/" + repository.name();
 	}
 	
 	@OpenApi(
@@ -141,7 +156,7 @@ public class RepositoryAdminHandler {
 	)
 	public void get(@NonNull Context ctx) throws Exception {
 		RepositoryEntity repository = this.readable(ctx);
-		ctx.json(this.response(repository, Requests.baseUrl(ctx, this.services.config())));
+		ctx.json(this.response(ctx, this.services.auth().authenticate(ctx), repository));
 	}
 	
 	@OpenApi(
@@ -189,19 +204,18 @@ public class RepositoryAdminHandler {
 			this.validateMembers(request.members(), type);
 		}
 		
-		RepositoryEntity repository = this.services.repositories().create(request.name(), type, request.description(), Boolean.TRUE.equals(request.publicRead()), Boolean.TRUE.equals(request.allowRedeploy()));
-		String kind = "local";
+		RepositoryClass kind = remote ? RepositoryClass.REMOTE : virtual ? RepositoryClass.VIRTUAL : RepositoryClass.LOCAL;
+		RemoteConfigEntity remoteConfig = null;
 		if (remote) {
 			CreateRepositoryRequest.Remote config = Objects.requireNonNull(request.remote());
-			this.services.repositories().setRemoteConfig(repository.name(), remoteUrl, Boolean.TRUE.equals(config.cacheEnabled()), blankToNull(config.username()), blankToNull(config.password()));
-			kind = "remote";
-		} else if (virtual) {
-			this.services.repositories().setVirtualMembers(repository.name(), normalizeMembers(request.members()));
-			kind = "virtual";
+			remoteConfig = new RemoteConfigEntity(request.name(), Objects.requireNonNull(remoteUrl), Boolean.TRUE.equals(config.cacheEnabled()), blankToNull(config.username()), blankToNull(config.password()));
 		}
-		this.services.audit().record(principal.username(), AuditService.REPOSITORY_CREATE, repository.name(), type.id(), Requests.clientIp(ctx, this.services.config()), kind + (repository.publicRead() ? ", publicRead" : ""));
+		List<String> members = virtual ? normalizeMembers(Objects.requireNonNull(request.members())) : List.of();
+		RepositoryEntity repository = this.services.repositories().create(request.name(), type, kind, request.description(), Boolean.TRUE.equals(request.publicRead()), Boolean.TRUE.equals(request.allowRedeploy()), remoteConfig, members);
+		String kindName = kind.name().toLowerCase(Locale.ROOT);
+		this.services.audit().record(principal.username(), AuditService.REPOSITORY_CREATE, repository.name(), type.id(), Requests.clientIp(ctx, this.services.config()), kindName + (repository.publicRead() ? ", publicRead" : ""));
 		this.services.webhooks().dispatch(WebhookService.REPOSITORY_CREATED, repository.name(), type.id());
-		ctx.status(201).json(this.response(repository, Requests.baseUrl(ctx, this.services.config())));
+		ctx.status(201).json(this.response(ctx, principal, repository));
 	}
 	
 	@OpenApi(
@@ -218,26 +232,39 @@ public class RepositoryAdminHandler {
 		Principal principal = this.services.auth().requireAdmin(ctx);
 		RepositoryEntity repository = this.require(ctx);
 		UpdateRepositoryRequest request = ctx.bodyAsClass(UpdateRepositoryRequest.class);
-		requireRedeploySupported(Objects.requireNonNull(RepositoryType.byId(repository.type())), request.allowRedeploy());
-		this.services.repositories().update(repository.name(), request.description(), request.publicRead(), request.allowRedeploy());
+		RepositoryType type = Objects.requireNonNull(RepositoryType.byId(repository.type()));
+		requireRedeploySupported(type, request.allowRedeploy());
 		
+		// Everything is validated before anything is written, a rejected request leaves the repository unchanged
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());
+		RemoteConfigEntity remote = null;
 		if (request.remote() != null) {
 			if (kind != RepositoryClass.REMOTE) {
 				throw HttpError.badRequest("Repository " + repository.name() + " is not a remote repository");
 			}
 			String url = validateRemoteUrl(request.remote());
-			this.services.repositories().setRemoteConfig(repository.name(), url, Boolean.TRUE.equals(request.remote().cacheEnabled()), blankToNull(request.remote().username()), blankToNull(request.remote().password()));
+			// Omitted fields keep their stored value, an empty username removes the upstream credentials
+			RemoteConfigEntity stored = this.services.repositories().remoteConfig(repository.name());
+			CreateRepositoryRequest.Remote changes = request.remote();
+			boolean cacheEnabled = changes.cacheEnabled() != null ? changes.cacheEnabled() : stored != null && stored.cacheEnabled();
+			String username = changes.username() != null ? blankToNull(changes.username()) : stored == null ? null : stored.username();
+			String password = username == null ? null : changes.password() != null ? blankToNull(changes.password()) : stored == null ? null : stored.password();
+			remote = new RemoteConfigEntity(repository.name(), url, cacheEnabled, username, password);
 		}
+		List<String> members = null;
 		if (request.members() != null) {
 			if (kind != RepositoryClass.VIRTUAL) {
 				throw HttpError.badRequest("Repository " + repository.name() + " is not a virtual repository");
 			}
-			this.validateMembers(request.members(), Objects.requireNonNull(RepositoryType.byId(repository.type())));
-			this.services.repositories().setVirtualMembers(repository.name(), normalizeMembers(request.members()));
+			this.validateMembers(request.members(), type);
+			members = normalizeMembers(request.members());
+			if (members.contains(repository.name())) {
+				throw HttpError.badRequest("A virtual repository can not be its own member");
+			}
 		}
+		this.services.repositories().update(repository.name(), request.description(), request.publicRead(), request.allowRedeploy(), remote, members);
 		this.services.audit().record(principal.username(), AuditService.REPOSITORY_UPDATE, repository.name(), null, Requests.clientIp(ctx, this.services.config()), null);
-		ctx.json(this.response(Objects.requireNonNull(this.services.repositories().get(repository.name())), Requests.baseUrl(ctx, this.services.config())));
+		ctx.json(this.response(ctx, principal, Objects.requireNonNull(this.services.repositories().get(repository.name()))));
 	}
 	
 	@OpenApi(
@@ -281,12 +308,16 @@ public class RepositoryAdminHandler {
 		String query = Objects.requireNonNullElse(ctx.queryParam("q"), "").strip();
 		long offset = queryLong(ctx, "offset", 0, Long.MAX_VALUE);
 		long limit = queryLong(ctx, "limit", DEFAULT_PACKAGE_LIMIT, MAX_PACKAGE_LIMIT);
+		// Versions and tags of the whole page are loaded with one query each
+		List<String> names = this.services.packages().packageNames(repository.name(), query, offset, limit);
+		Map<String, List<PackageVersionEntity>> versionsByName = this.services.packages().versions(repository.name(), names);
+		Map<String, Map<String, String>> tagsByName = this.services.packages().tags(repository.name(), names);
 		List<PackageResponse> result = new ArrayList<>();
-		for (String packageName : this.services.packages().packageNames(repository.name(), query, offset, limit)) {
-			List<PackageResponse.VersionResponse> versions = this.services.packages().versions(repository.name(), packageName).stream()
+		for (String packageName : names) {
+			List<PackageResponse.VersionResponse> versions = versionsByName.getOrDefault(packageName, List.of()).stream()
 				.map(version -> new PackageResponse.VersionResponse(version.version(), version.yanked(), version.createdAt(), version.createdBy()))
 				.toList();
-			result.add(new PackageResponse(packageName, versions, this.services.packages().tags(repository.name(), packageName)));
+			result.add(new PackageResponse(packageName, versions, tagsByName.getOrDefault(packageName, Map.of())));
 		}
 		ctx.header(TOTAL_COUNT_HEADER, String.valueOf(this.services.packages().countPackages(repository.name(), query)));
 		ctx.json(result);

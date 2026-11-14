@@ -8,6 +8,8 @@ import net.luis.artifactory.dto.request.CreateWebhookRequest;
 import net.luis.artifactory.dto.request.UpdateWebhookRequest;
 import net.luis.artifactory.dto.response.*;
 import net.luis.artifactory.http.HttpError;
+import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.AuditService;
 import net.luis.artifactory.repository.WebhookService;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -98,6 +100,7 @@ public class WebhookAdminHandler {
 			throw HttpError.badRequest("Secret must have at most 256 characters");
 		}
 		WebhookEntity webhook = this.services.webhooks().create(repository, url, secret, events, request.active() == null || request.active(), principal.username());
+		this.services.audit().record(principal.username(), AuditService.WEBHOOK_CREATE, repository, webhook.id(), Requests.clientIp(ctx, this.services.config()), url);
 		ctx.status(201).json(WebhookResponse.of(webhook));
 	}
 	
@@ -129,12 +132,34 @@ public class WebhookAdminHandler {
 		responses = @OpenApiResponse(status = "200", content = @OpenApiContent(from = WebhookResponse.class))
 	)
 	public void update(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		var principal = this.services.auth().requireAdmin(ctx);
 		WebhookEntity webhook = this.require(ctx);
 		UpdateWebhookRequest request = ctx.bodyAsClass(UpdateWebhookRequest.class);
 		String url = request.url() == null ? null : validateUrl(request.url());
 		String events = request.events() == null ? null : Objects.requireNonNullElse(validateEvents(request.events()), "");
-		this.services.webhooks().update(webhook.id(), url, events, request.active());
+		String repository = request.repository() == null ? null : Objects.requireNonNullElse(this.validateRepository(request.repository()), "");
+		String secret = request.secret() == null ? null : request.secret().strip();
+		if (secret != null && secret.length() > 256) {
+			throw HttpError.badRequest("Secret must have at most 256 characters");
+		}
+		this.services.webhooks().update(webhook.id(), url, events, request.active(), repository, secret);
+		List<String> changed = new ArrayList<>();
+		if (url != null) {
+			changed.add("url");
+		}
+		if (events != null) {
+			changed.add("events");
+		}
+		if (request.active() != null) {
+			changed.add("active=" + request.active());
+		}
+		if (repository != null) {
+			changed.add("repository");
+		}
+		if (secret != null) {
+			changed.add("secret");
+		}
+		this.services.audit().record(principal.username(), AuditService.WEBHOOK_UPDATE, webhook.repository(), webhook.id(), Requests.clientIp(ctx, this.services.config()), changed.isEmpty() ? null : String.join(", ", changed));
 		ctx.json(WebhookResponse.of(Objects.requireNonNull(this.services.webhooks().get(webhook.id()))));
 	}
 	
@@ -148,9 +173,10 @@ public class WebhookAdminHandler {
 		responses = @OpenApiResponse(status = "204")
 	)
 	public void delete(@NonNull Context ctx) throws Exception {
-		this.services.auth().requireAdmin(ctx);
+		var principal = this.services.auth().requireAdmin(ctx);
 		WebhookEntity webhook = this.require(ctx);
 		this.services.webhooks().delete(webhook.id());
+		this.services.audit().record(principal.username(), AuditService.WEBHOOK_DELETE, webhook.repository(), webhook.id(), Requests.clientIp(ctx, this.services.config()), webhook.url());
 		ctx.status(204);
 	}
 	

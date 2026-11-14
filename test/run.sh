@@ -53,9 +53,9 @@ check_status "grant lat-ci write on all repositories" 200 -u "$ADMIN_USER:$ADMIN
 check_status "grant lat-reader read on all repositories" 200 -u "$ADMIN_USER:$ADMIN_PASSWORD" -H 'Content-Type: application/json' \
 	-X PUT "$ARTIFACTORY_URL/api/permissions" -d '{"repository":"*","username":"lat-reader","level":"READ"}'
 
-CI_TOKEN="$(json_get "$(curl -sS -u "lat-ci:$CI_PASSWORD" -H 'Content-Type: application/json' -X POST "$ARTIFACTORY_URL/api/tokens" -d '{"name":"tests"}')" "data['token']")"
-READER_TOKEN="$(json_get "$(curl -sS -u "lat-reader:$READER_PASSWORD" -H 'Content-Type: application/json' -X POST "$ARTIFACTORY_URL/api/tokens" -d '{"name":"tests"}')" "data['token']")"
-ADMIN_TOKEN="$(json_get "$(api -X POST "$ARTIFACTORY_URL/api/tokens" -d '{"name":"tests"}')" "data['token']")"
+CI_TOKEN="$(json_get "$(curl -sS -u "lat-ci:$CI_PASSWORD" -H 'Content-Type: application/json' -X POST "$ARTIFACTORY_URL/api/tokens" -d '{"name":"tests","level":"WRITE"}')" "data['token']")"
+READER_TOKEN="$(json_get "$(curl -sS -u "lat-reader:$READER_PASSWORD" -H 'Content-Type: application/json' -X POST "$ARTIFACTORY_URL/api/tokens" -d '{"name":"tests","level":"READ"}')" "data['token']")"
+ADMIN_TOKEN="$(json_get "$(api -X POST "$ARTIFACTORY_URL/api/tokens" -d '{"name":"tests","level":"DELETE"}')" "data['token']")"
 check_contains "lat-ci token created" "lat_" "$CI_TOKEN"
 check_contains "lat-reader token created" "lat_" "$READER_TOKEN"
 check_status "token works as bearer token" 200 -H "Authorization: Bearer $CI_TOKEN" "$ARTIFACTORY_URL/api/me"

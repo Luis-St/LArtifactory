@@ -1,7 +1,6 @@
 import {useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {formatNumber} from '../format';
-import type {RepositoryInventory} from '../inventory';
-import {REPOSITORY_TYPES, type RepositoryType} from '../types';
+import {type ActivityBucket, REPOSITORY_TYPES, type RepositoryType} from '../types';
 import {TYPE_INFO} from './ui';
 
 const DAYS = 30;
@@ -22,7 +21,7 @@ function dayKey(date: Date): string {
 /**
  * Publications per local day over the last 30 days: package versions, and files for generic repositories.
  */
-function collectDays(inventory: RepositoryInventory[]): Day[] {
+function collectDays(activity: ActivityBucket[]): Day[] {
 	const today = new Date();
 	today.setHours(0, 0, 0, 0);
 	const days: Day[] = Array.from({length: DAYS}, (_, index) => {
@@ -31,18 +30,14 @@ function collectDays(inventory: RepositoryInventory[]): Day[] {
 		return {date, total: 0, byType: {}};
 	});
 	const byKey = new Map(days.map(day => [dayKey(day.date), day]));
-	const add = (timestamp: string, type: RepositoryType) => {
-		const day = byKey.get(dayKey(new Date(timestamp)));
+	// The server counts per hour, which places every publication on its local day for whole hour time zones
+	for (const bucket of activity) {
+		const day = byKey.get(dayKey(new Date(bucket.hour)));
 		if (day) {
-			day.total++;
-			day.byType[type] = (day.byType[type] ?? 0) + 1;
-		}
-	};
-	for (const entry of inventory) {
-		if (entry.repository.type === 'generic') {
-			entry.files.forEach(file => add(file.createdAt, 'generic'));
-		} else {
-			entry.packages.forEach(pkg => pkg.versions.forEach(version => add(version.createdAt, entry.repository.type)));
+			for (const [type, count] of Object.entries(bucket.counts) as [RepositoryType, number][]) {
+				day.total += count;
+				day.byType[type] = (day.byType[type] ?? 0) + count;
+			}
 		}
 	}
 	return days;
@@ -65,11 +60,11 @@ function niceMax(value: number): { max: number; ticks: number[] } {
 const dateFormat = new Intl.DateTimeFormat(undefined, {month: 'short', day: 'numeric'});
 const weekdayFormat = new Intl.DateTimeFormat(undefined, {weekday: 'short', month: 'short', day: 'numeric'});
 
-export function ActivityChart({inventory}: { inventory: RepositoryInventory[] }) {
+export function ActivityChart({activity}: { activity: ActivityBucket[] }) {
 	const container = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(0);
 	const [hover, setHover] = useState<number | null>(null);
-	const days = useMemo(() => collectDays(inventory), [inventory]);
+	const days = useMemo(() => collectDays(activity), [activity]);
 	const total = days.reduce((sum, day) => sum + day.total, 0);
 	const {max, ticks} = niceMax(Math.max(...days.map(day => day.total)));
 

@@ -1,5 +1,5 @@
 import {createContext, type ReactNode, useCallback, useContext, useEffect, useState} from 'react';
-import {api, basicAuthorization, hasAuthorization, hasSession, onUnauthorized, setAuthorization} from './api';
+import {api, ApiError, hasAuthorization, hasSession, onUnauthorized, setAuthorization} from './api';
 import type {Principal} from './types';
 
 interface Session {
@@ -54,10 +54,14 @@ function storeGuest(value: boolean): void {
 	}
 }
 
-export function SessionProvider({children}: { children: (state: { ready: boolean; principal: Principal | null; guest: boolean }) => ReactNode }) {
+export function SessionProvider({children}: { children: (state: { ready: boolean; principal: Principal | null; guest: boolean; unreachable: Error | null; retry: () => void }) => ReactNode }) {
 	const [principal, setPrincipal] = useState<Principal | null>(null);
 	const [guest, setGuest] = useState(() => !hasAuthorization() && readGuest());
 	const [ready, setReady] = useState(!hasAuthorization());
+	// Set while the stored session could not be checked because the server is unreachable or failing, the session is kept for a retry
+	const [unreachable, setUnreachable] = useState<Error | null>(null);
+	const [attempt, setAttempt] = useState(0);
+	const retry = useCallback(() => setAttempt(value => value + 1), []);
 	const [toasts, setToasts] = useState<Toast[]>([]);
 	
 	const notify = useCallback((message: string, kind: ToastKind = 'success') => {
@@ -88,19 +92,37 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 			logout();
 			notify('Your session has expired, please sign in again', 'info');
 		});
-		if (hasAuthorization()) {
-			api.me().then(setPrincipal, () => setAuthorization(null)).finally(() => setReady(true));
-		}
 	}, [logout, notify]);
 	
-	const login = useCallback(async (username: string, secret: string, remember: boolean) => {
-		if (username) {
-			// The password is only sent once to create a session, it is never stored in the browser
-			const session = await api.createSession(username, secret, remember);
-			setAuthorization(`Bearer ${session.token}`, remember);
-		} else {
-			setAuthorization(basicAuthorization('__token__', secret), remember);
+	useEffect(() => {
+		if (!hasAuthorization()) {
+			return;
 		}
+		setReady(false);
+		api.me().then(
+			value => {
+				setPrincipal(value);
+				setUnreachable(null);
+				setReady(true);
+			},
+			error => {
+				// Only a rejected session signs out, a restarting or unreachable server keeps it so the next attempt can use it
+				if (error instanceof ApiError && error.status === 401) {
+					setAuthorization(null);
+					setUnreachable(null);
+					setReady(true);
+				} else {
+					setUnreachable(error instanceof Error ? error : new Error(String(error)));
+				}
+			},
+		);
+	}, [attempt]);
+	
+	const login = useCallback(async (username: string, secret: string, remember: boolean) => {
+		// The password or token is only sent once to create a session, it is never stored in the browser.
+		// A session created from a token has the level of the token and ends when the token is revoked.
+		const session = await api.createSession(username || '__token__', secret, remember);
+		setAuthorization(`Bearer ${session.token}`, remember);
 		try {
 			setPrincipal(await api.me());
 			storeGuest(false);
@@ -113,7 +135,7 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 	
 	return (
 		<SessionContext.Provider value={{principal, guest, continueAsGuest, login, logout, notify}}>
-			{children({ready, principal, guest})}
+			{children({ready, principal, guest, unreachable, retry})}
 			<div className="toasts" role="status" aria-live="polite">
 				{toasts.map(toast => (
 					<div key={toast.id} className={`toast toast-${toast.kind}`} onClick={() => setToasts(current => current.filter(entry => entry.id !== toast.id))}>

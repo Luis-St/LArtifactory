@@ -85,7 +85,20 @@ public class UserService {
 		return this.database.from(USERS).select().where(Sql.equalTo(USER_ADMIN, true)).count();
 	}
 	
-	public void delete(@NonNull String username) throws SqlException {
+	/**
+	 * Returns whether a user exists whose name differs from the given one only by case.<br>
+	 */
+	public boolean existsIgnoreCase(@NonNull String username) throws SqlException {
+		return this.database.from(USERS).select().where(Sql.equalTo(Sql.lower(USER_NAME), username.toLowerCase(Locale.ROOT))).exists();
+	}
+	
+	/**
+	 * Deletes a user with its tokens, sessions and permissions.<br>
+	 *
+	 * @return The ids of the deleted tokens
+	 */
+	@NonNull
+	public List<String> delete(@NonNull String username) throws SqlException {
 		List<TokenEntity> tokens = this.database.from(TOKENS).select().where(Sql.equalTo(TOKEN_USERNAME, username)).fetch();
 		this.database.inTransaction(transaction -> {
 			for (TokenEntity token : tokens) {
@@ -94,8 +107,12 @@ public class UserService {
 			transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_USERNAME, username)).execute();
 			transaction.from(SESSIONS).delete().where(Sql.equalTo(SESSION_USERNAME, username)).execute();
 			transaction.from(PERMISSIONS).delete().where(Sql.equalTo(PERMISSION_USERNAME, username)).execute();
+			for (TokenEntity token : tokens) {
+				transaction.from(SESSIONS).delete().where(Sql.equalTo(SESSION_TOKEN_ID, token.id())).execute();
+			}
 			return transaction.from(USERS).delete().where(Sql.equalTo(USER_NAME, username)).execute();
 		});
+		return tokens.stream().map(TokenEntity::id).toList();
 	}
 	
 	@NonNull
@@ -187,17 +204,44 @@ public class UserService {
 		return new CreatedToken(token, secret);
 	}
 	
+	/**
+	 * Deletes a token with its settings and the sessions it was exchanged for.<br>
+	 */
 	public int deleteToken(@NonNull String id) throws SqlException {
-		this.database.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, id)).execute();
-		return this.database.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
+		return this.database.inTransaction(transaction -> {
+			transaction.from(SESSIONS).delete().where(Sql.equalTo(SESSION_TOKEN_ID, id)).execute();
+			transaction.from(TOKEN_META).delete().where(Sql.equalTo(TOKEN_META_ID, id)).execute();
+			return transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_ID, id)).execute();
+		});
 	}
 	
-	public int deleteTokenBySecret(@NonNull String secret) throws SqlException {
+	/**
+	 * Deletes all tokens of a user.<br>
+	 *
+	 * @return The ids of the deleted tokens
+	 */
+	@NonNull
+	public List<String> deleteTokens(@NonNull String username) throws SqlException {
+		List<String> ids = this.listTokens(username).stream().map(TokenEntity::id).toList();
+		for (String id : ids) {
+			this.deleteToken(id);
+		}
+		return ids;
+	}
+	
+	/**
+	 * Deletes the token with the given secret.<br>
+	 *
+	 * @return The id of the deleted token, null if there is no such token
+	 */
+	@Nullable
+	public String deleteTokenBySecret(@NonNull String secret) throws SqlException {
 		TokenEntity token = this.findTokenBySecret(secret);
 		if (token == null) {
-			return 0;
+			return null;
 		}
-		return this.deleteToken(token.id());
+		this.deleteToken(token.id());
+		return token.id();
 	}
 	
 	//region Token metadata
@@ -234,13 +278,24 @@ public class UserService {
 	}
 	
 	/**
-	 * Creates a web ui session and returns the plain secret, only its hash is stored.<br>
+	 * Creates a full web ui session and returns the plain secret, only its hash is stored.<br>
 	 */
 	@NonNull
 	public CreatedSession createSession(@NonNull String username, @NonNull Duration lifetime) throws SqlException {
+		return this.createSession(username, Instant.now().plus(lifetime), null, null);
+	}
+	
+	/**
+	 * Creates a session and returns the plain secret, only its hash is stored.<br>
+	 *
+	 * @param level The maximum access level of a restricted session, null for a full session
+	 * @param tokenId The token the session is exchanged for, the session ends when the token is revoked
+	 */
+	@NonNull
+	public CreatedSession createSession(@NonNull String username, @NonNull Instant expiresAt, @Nullable AccessLevel level, @Nullable String tokenId) throws SqlException {
 		String secret = SESSION_PREFIX + PasswordHasher.randomSecret(32);
 		Instant now = Instant.now();
-		SessionEntity session = new SessionEntity(UUID.randomUUID().toString(), username, hashToken(secret), now, now.plus(lifetime));
+		SessionEntity session = new SessionEntity(UUID.randomUUID().toString(), username, hashToken(secret), now, expiresAt, level == null ? null : level.name(), tokenId);
 		this.database.from(SESSIONS).insert(session).execute();
 		return new CreatedSession(session, secret);
 	}

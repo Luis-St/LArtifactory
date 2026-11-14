@@ -18,7 +18,7 @@ public class RepositoryDispatcher {
 	/**
 	 * First segments of the management api, only these are taken from a mapped host so that e.g. a Maven group {@code api.example} stays reachable.<br>
 	 */
-	private static final Set<String> API_RESOURCES = Set.of("me", "session", "repositories", "users", "permissions", "tokens", "audit", "webhooks");
+	private static final Set<String> API_RESOURCES = Set.of("me", "session", "repositories", "users", "permissions", "tokens", "audit", "webhooks", "summary", "packages", "files", "search", "downloads");
 	private static final Set<String> HEALTH_PATHS = Set.of("/health", "/health/live", "/health/ready");
 	private static final Set<String> API_DOCS_SEGMENTS = Set.of("swagger", "openapi", "webjars");
 	public static final String HOST_MAPPED_ATTRIBUTE = "artifactory.hostMapped";

@@ -1,4 +1,4 @@
-import {type AccessLevel, type AuditEntry, type FileEntry, type Health, type Package, type Permission, type Principal, type Repository, sortRepositories, type Token, type User, type Webhook, type WebhookDelivery} from './types';
+import {type AccessLevel, type AuditEntry, type FileEntry, type Health, type Package, type PackageDetail, type PackageSummary, type Page, type Permission, type Principal, type Repository, type SearchResult, sortRepositories, type Summary, type Token, type Tree, type User, type Webhook, type WebhookDelivery} from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
 
@@ -46,7 +46,7 @@ export function hasAuthorization(): boolean {
 	return authorization !== null;
 }
 
-/** Whether the stored authorization is a web ui session (created from a password) rather than an access token. */
+/** Whether the stored authorization is a web ui session, the ui only ever stores sessions, never passwords or tokens. */
 export function hasSession(): boolean {
 	return authorization !== null && authorization.startsWith('Bearer las_');
 }
@@ -70,6 +70,7 @@ async function errorMessage(response: Response): Promise<string> {
 		return `${response.status} ${response.statusText}`;
 	}
 	try {
+		// Errors of the management api are an ErrorResponse, the package protocols answer plain text
 		const json = JSON.parse(text);
 		if (json && typeof json.error === 'string') {
 			return json.description ? `${json.error}: ${json.description}` : json.error;
@@ -108,19 +109,20 @@ async function request<T>(method: string, path: string, body?: unknown, silent =
 }
 
 /**
- * Loads every page of a paged list endpoint, the server limits the size of a single page and reports the total in X-Total-Count.
+ * Loads one page of a paged list endpoint, the server reports the number of all matching rows in X-Total-Count.
  */
-async function requestAll<T>(path: string, params: Record<string, string | undefined>, pageSize: number): Promise<T[]> {
-	const result: T[] = [];
-	for (; ;) {
-		const response = await send('GET', `${path}${query({...params, offset: String(result.length), limit: String(pageSize)})}`);
-		const page = await parse<T[]>(response);
-		result.push(...page);
-		const total = Number(response.headers.get('X-Total-Count') ?? result.length);
-		if (page.length === 0 || result.length >= total) {
-			return result;
-		}
-	}
+async function requestPage<T>(path: string, params: Record<string, string | number | undefined>): Promise<Page<T>> {
+	const response = await send('GET', `${path}${query(Object.fromEntries(Object.entries(params).map(([key, value]) => [key, value?.toString()])))}`);
+	const rows = await parse<T[]>(response);
+	return {rows, total: Number(response.headers.get('X-Total-Count') ?? rows.length)};
+}
+
+/** Sorting and paging of a server side list. */
+export interface PageRequest {
+	offset: number;
+	limit: number;
+	sort?: string;
+	dir?: 'asc' | 'desc';
 }
 
 function query(params: Record<string, string | undefined>): string {
@@ -140,9 +142,10 @@ export const api = {
 	health: () => request<Health>('GET', '/health'),
 	// Silent: a failed sign in must not be reported as an expired session
 	me: () => request<Principal>('GET', '/api/me', undefined, true),
-	// Signs in with the password once, only the returned session token is kept
-	createSession: async (username: string, password: string, remember: boolean) =>
-		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', {remember}, true, {Authorization: basicAuthorization(username, password)})),
+	// Signs in with the password or an access token once, only the returned session token is kept. A session created from a token
+	// is restricted to the level of the token and ends when the token is revoked, so the token itself never reaches browser storage.
+	createSession: async (username: string, secret: string, remember: boolean) =>
+		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', {remember}, true, {Authorization: basicAuthorization(username, secret)})),
 	deleteSession: () => request<void>('DELETE', '/api/session', undefined, true),
 	
 	// Sorted by type in the order of REPOSITORY_TYPES, then by name, so every page lists them the same way
@@ -165,14 +168,19 @@ export const api = {
 		members?: string[];
 	}) => request<Repository>('PATCH', `/api/repositories/${enc(name)}`, body),
 	deleteRepository: (name: string) => request<void>('DELETE', `/api/repositories/${enc(name)}`),
-	packages: (name: string, q?: string) => requestAll<Package>(`/api/repositories/${enc(name)}/packages`, {q}, 500),
+	packages: (name: string, page: PageRequest, q?: string) => requestPage<Package>(`/api/repositories/${enc(name)}/packages`, {q, offset: page.offset, limit: page.limit}),
+	pkg: (name: string, pkg: string) => request<PackageDetail>('GET', `/api/repositories/${enc(name)}/packages/${enc(pkg)}`),
+	tree: (name: string, prefix: string) => request<Tree>('GET', `/api/repositories/${enc(name)}/tree${query({prefix})}`),
 	deletePackage: (name: string, pkg: string, version?: string) =>
 		request<void>('DELETE', `/api/repositories/${enc(name)}/packages${query({package: pkg, version})}`),
-	files: (name: string, prefix?: string) => requestAll<FileEntry>(`/api/repositories/${enc(name)}/files`, {prefix}, 5000),
+	summary: (repository?: string) => request<Summary>('GET', `/api/summary${query({repository})}`),
+	allPackages: (filter: { type?: string; repository?: string; q?: string }, page: PageRequest) => requestPage<PackageSummary>('/api/packages', {...filter, ...page}),
+	allFiles: (filter: { type?: string; repository?: string; q?: string }, page: PageRequest) => requestPage<FileEntry>('/api/files', {...filter, ...page}),
+	search: (q: string, limit = 8) => request<SearchResult[]>('GET', `/api/search${query({q, limit: String(limit)})}`),
 	
 	users: () => request<User[]>('GET', '/api/users'),
 	createUser: (body: { username: string; password: string; admin: boolean }) => request<User>('POST', '/api/users', body),
-	updateUser: (username: string, body: { password?: string; currentPassword?: string; admin?: boolean }) => request<User>('PATCH', `/api/users/${enc(username)}`, body),
+	updateUser: (username: string, body: { password?: string; currentPassword?: string; admin?: boolean; revokeTokens?: boolean }) => request<User>('PATCH', `/api/users/${enc(username)}`, body),
 	deleteUser: (username: string) => request<void>('DELETE', `/api/users/${enc(username)}`),
 	
 	permissions: (filter: { repository?: string; username?: string } = {}) => request<Permission[]>('GET', `/api/permissions${query(filter)}`),
@@ -183,12 +191,12 @@ export const api = {
 	createToken: (body: { name: string; username?: string; level: AccessLevel; expiresInDays?: number; allowedIps?: string; rateLimitPerMinute?: number }) => request<Token>('POST', '/api/tokens', body),
 	deleteToken: (id: string) => request<void>('DELETE', `/api/tokens/${enc(id)}`),
 
-	audit: (filter: { repository?: string; actor?: string; action?: string; from?: string; to?: string; limit?: number; offset?: number } = {}) =>
-		request<AuditEntry[]>('GET', `/api/audit${query({ repository: filter.repository, actor: filter.actor, action: filter.action, from: filter.from, to: filter.to, limit: filter.limit?.toString(), offset: filter.offset?.toString() })}`),
+	audit: (filter: { repository?: string; actor?: string; action?: string; from?: string; to?: string }, page: { offset: number; limit: number }) =>
+		requestPage<AuditEntry>('/api/audit', {...filter, ...page}),
 
 	webhooks: (repository?: string) => request<Webhook[]>('GET', `/api/webhooks${query({ repository })}`),
 	createWebhook: (body: { repository?: string; url: string; secret?: string; events: string[]; active: boolean }) => request<Webhook>('POST', '/api/webhooks', body),
-	updateWebhook: (id: string, body: { url?: string; events?: string[]; active?: boolean }) => request<Webhook>('PATCH', `/api/webhooks/${enc(id)}`, body),
+	updateWebhook: (id: string, body: { url?: string; events?: string[]; active?: boolean; repository?: string; secret?: string }) => request<Webhook>('PATCH', `/api/webhooks/${enc(id)}`, body),
 	deleteWebhook: (id: string) => request<void>('DELETE', `/api/webhooks/${enc(id)}`),
 	testWebhook: (id: string) => request<WebhookDelivery>('POST', `/api/webhooks/${enc(id)}/test`),
 	webhookDeliveries: (id: string) => request<WebhookDelivery[]>('GET', `/api/webhooks/${enc(id)}/deliveries`),
@@ -197,7 +205,7 @@ export const api = {
 /**
  * Maps the stored path of a file to the url path the format handler of the repository serves it at.
  */
-function downloadPath(repository: Repository, file: FileEntry): string {
+function downloadPath(repository: Pick<Repository, 'type'>, file: FileEntry): string {
 	const encodePath = (path: string) => path.split('/').map(enc).join('/');
 	switch (repository.type) {
 		case 'npm': {
@@ -224,19 +232,30 @@ function downloadPath(repository: Repository, file: FileEntry): string {
 }
 
 /**
- * Downloads a file of a repository with the current credentials, plain links would not carry the authorization header.
+ * The url path of a file of a repository.
  */
-export async function downloadFile(repository: Repository, file: FileEntry): Promise<void> {
-	const response = await fetch(`/${repository.type}/${enc(repository.name)}/${downloadPath(repository, file)}`, {headers: headers()});
-	if (!response.ok) {
-		throw new ApiError(response.status, await errorMessage(response));
-	}
-	const url = URL.createObjectURL(await response.blob());
+export function filePath(repository: Pick<Repository, 'type' | 'name'>, file: FileEntry): string {
+	return `/${repository.type}/${enc(repository.name)}/${downloadPath(repository, file)}`;
+}
+
+/**
+ * Downloads a file of a repository. A plain link carries no authorization header, so a signed in user first gets a single use ticket
+ * for the path, the browser then streams the download to disk instead of buffering the whole file in memory.
+ */
+export async function downloadFile(repository: Pick<Repository, 'type' | 'name'>, file: FileEntry): Promise<void> {
+	const path = filePath(repository, file);
+	const url = authorization ? (await request<{ url: string }>('POST', '/api/downloads', {path})).url : path;
 	const link = document.createElement('a');
 	link.href = url;
 	link.download = file.path.substring(file.path.lastIndexOf('/') + 1);
 	document.body.appendChild(link);
 	link.click();
 	link.remove();
-	setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
+/**
+ * Deletes a stored file, used for the files of generic repositories and the cached files of remote repositories.
+ */
+export async function deleteFile(repository: Pick<Repository, 'type' | 'name'>, file: FileEntry): Promise<void> {
+	await send('DELETE', filePath(repository, file));
 }

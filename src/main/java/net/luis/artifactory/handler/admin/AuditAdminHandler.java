@@ -25,14 +25,15 @@ public class AuditAdminHandler {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
 	}
 	
-	private static int parseInt(String value, int defaultValue) {
+	private static long parseLong(@NonNull Context ctx, @NonNull String name, long defaultValue, long max) {
+		String value = ctx.queryParam(name);
 		if (value == null || value.isBlank()) {
 			return defaultValue;
 		}
 		try {
-			return Integer.parseInt(value.strip());
+			return Math.clamp(Long.parseLong(value.strip()), 0, max);
 		} catch (NumberFormatException e) {
-			return defaultValue;
+			throw HttpError.badRequest("Query parameter " + name + " must be a number");
 		}
 	}
 	
@@ -63,7 +64,11 @@ public class AuditAdminHandler {
 			@OpenApiParam(name = "offset", description = "Number of entries to skip for paging")
 		},
 		responses = {
-			@OpenApiResponse(status = "200", content = @OpenApiContent(from = AuditResponse[].class)),
+			@OpenApiResponse(
+				status = "200",
+				content = @OpenApiContent(from = AuditResponse[].class),
+				headers = @OpenApiParam(name = RepositoryAdminHandler.TOTAL_COUNT_HEADER, type = Long.class, description = "Total number of matching entries")
+			),
 			@OpenApiResponse(status = "400", content = @OpenApiContent(from = ErrorResponse.class)),
 			@OpenApiResponse(status = "401", content = @OpenApiContent(from = ErrorResponse.class)),
 			@OpenApiResponse(status = "403", content = @OpenApiContent(from = ErrorResponse.class))
@@ -71,11 +76,14 @@ public class AuditAdminHandler {
 	)
 	public void list(@NonNull Context ctx) throws Exception {
 		this.services.auth().requireAdmin(ctx);
-		int limit = parseInt(ctx.queryParam("limit"), AuditService.DEFAULT_LIMIT);
-		int offset = parseInt(ctx.queryParam("offset"), 0);
+		int limit = (int) parseLong(ctx, "limit", AuditService.DEFAULT_LIMIT, AuditService.MAX_LIMIT);
+		long offset = parseLong(ctx, "offset", 0, Long.MAX_VALUE);
 		Instant from = parseInstant(ctx.queryParam("from"), "from");
 		Instant to = parseInstant(ctx.queryParam("to"), "to");
-		ctx.json(this.services.audit().list(ctx.queryParam("repository"), ctx.queryParam("actor"), ctx.queryParam("action"), from, to, limit, offset)
-			.stream().map(AuditResponse::of).toList());
+		String repository = ctx.queryParam("repository");
+		String actor = ctx.queryParam("actor");
+		String action = ctx.queryParam("action");
+		ctx.header(RepositoryAdminHandler.TOTAL_COUNT_HEADER, String.valueOf(this.services.audit().count(repository, actor, action, from, to)));
+		ctx.json(this.services.audit().list(repository, actor, action, from, to, limit, offset).stream().map(AuditResponse::of).toList());
 	}
 }

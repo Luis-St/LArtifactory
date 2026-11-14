@@ -1,5 +1,6 @@
+import {ErrorBoundary} from './components/ErrorBoundary';
 import {Layout} from './components/Layout';
-import {Empty} from './components/ui';
+import {Button, Empty, ErrorBox} from './components/ui';
 import {Account} from './pages/Account';
 import {Artifacts} from './pages/Artifacts';
 import {Audit} from './pages/Audit';
@@ -15,17 +16,33 @@ import {Users} from './pages/Users';
 import {Webhooks} from './pages/Webhooks';
 import {href, useRoute} from './router';
 import {SessionProvider} from './session';
-import {type Principal, REPOSITORY_TYPES, type RepositoryType} from './types';
+import {canAdminister, type Principal, REPOSITORY_TYPES, type RepositoryType} from './types';
 
 export function App() {
 	return (
 		<SessionProvider>
-			{({ready, principal, guest}) => (!ready ? <div className="login"/> : principal || guest ? <Routes principal={principal}/> : <Login/>)}
+			{({ready, principal, guest, unreachable, retry}) => (unreachable ? <Unreachable error={unreachable} onRetry={retry}/>
+				: !ready ? <div className="login"/> : principal || guest ? <Routes principal={principal}/> : <Login/>)}
 		</SessionProvider>
 	);
 }
 
+/**
+ * Shown while the stored session can not be checked, the server is restarting or unreachable. The session is kept and checked again on retry.
+ */
+function Unreachable({error, onRetry}: { error: Error; onRetry: () => void }) {
+	return (
+		<div className="login">
+			<div className="stack">
+				<ErrorBox error={`The server can not be reached right now (${error.message}). You are still signed in.`}/>
+				<div><Button variant="primary" onClick={onRetry}>Try again</Button></div>
+			</div>
+		</div>
+	);
+}
+
 function Routes({principal}: { principal: Principal | null }) {
+	const admin = canAdminister(principal);
 	const {segments, params} = useRoute();
 	const [section = '', id, sub, subId, detail, detailId] = segments;
 	const type = REPOSITORY_TYPES.includes(id as RepositoryType) ? (id as RepositoryType) : undefined;
@@ -44,19 +61,19 @@ function Routes({principal}: { principal: Principal | null }) {
 				: id ? <RepositoryDetail key={id} name={id} params={params}/> : <Repositories/>;
 			break;
 		case 'users':
-			page = principal?.admin ? <Users/> : null;
+			page = admin ? <Users/> : null;
 			break;
 		case 'permissions':
-			page = principal?.admin ? <Permissions params={params}/> : null;
+			page = admin ? <Permissions params={params}/> : null;
 			break;
 		case 'tokens':
 			page = principal ? <Tokens params={params}/> : null;
 			break;
 		case 'webhooks':
-			page = principal?.admin ? <Webhooks /> : null;
+			page = admin ? <Webhooks /> : null;
 			break;
 		case 'audit':
-			page = principal?.admin ? <Audit /> : null;
+			page = admin ? <Audit /> : null;
 			break;
 		case 'account':
 			page = principal ? <Account/> : null;
@@ -67,7 +84,9 @@ function Routes({principal}: { principal: Principal | null }) {
 		<Layout section={section} type={type}>
 			{/* Keyed by the path so every page change fades in, query changes (tabs, filters) keep the page */}
 			<div className="page" key={segments.join('/')}>
-				{page ?? <Empty title="Page not found"><a className="link" href={href()}>Back to the overview</a></Empty>}
+				<ErrorBoundary>
+					{page ?? <Empty title="Page not found"><a className="link" href={href()}>Back to the overview</a></Empty>}
+				</ErrorBoundary>
 			</div>
 		</Layout>
 	);

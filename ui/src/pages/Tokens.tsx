@@ -6,7 +6,7 @@ import {levelTone} from './Users';
 import {formatDate, formatRelative} from '../format';
 import {useAsync} from '../hooks';
 import {useSession} from '../session';
-import {ACCESS_LEVELS, type AccessLevel, type Token} from '../types';
+import {ACCESS_LEVELS, type AccessLevel, canAdminister, type Token} from '../types';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
 import {href, navigate} from '../router';
@@ -14,7 +14,7 @@ import {href, navigate} from '../router';
 export function Tokens({params}: { params: URLSearchParams }) {
 	const {principal, notify} = useSession();
 	const [owner, setOwner] = useState(principal?.username ?? '');
-	const users = useAsync(() => (principal?.admin ? api.users() : Promise.resolve([])), [principal?.admin]);
+	const users = useAsync(() => (canAdminister(principal) ? api.users() : Promise.resolve([])), [canAdminister(principal)]);
 	// Tokens can only be managed after signing in with a password, a token can not create or list tokens
 	const signedInWithToken = principal?.tokenLevel != null;
 	const tokens = useAsync(() => (signedInWithToken ? Promise.resolve([]) : api.tokens(owner || undefined)), [owner, signedInWithToken]);
@@ -56,11 +56,11 @@ export function Tokens({params}: { params: URLSearchParams }) {
 				subtitle="Tokens authenticate package managers and CI. They can be restricted to a lower access level and expire."
 				actions={<Button variant="primary" onClick={() => setCreating(true)}><Icon name="plus" size={16}/>New token</Button>}
 			/>
-			{principal?.admin && (
+			{canAdminister(principal) && (
 				<div className="toolbar">
 					<label className="cell-inline">
 						<span className="muted">Showing tokens of</span>
-						<Select label="Token owner" value={owner} onChange={setOwner} options={(users.data ?? [{username: principal.username}]).map(user => ({value: user.username, label: user.username}))}/>
+						<Select label="Token owner" value={owner} onChange={setOwner} options={(users.data ?? [{username: principal!.username}]).map(user => ({value: user.username, label: user.username}))}/>
 					</label>
 				</div>
 			)}

@@ -373,7 +373,7 @@ public class MavenHandler extends PathRepositoryHandler {
 			if (this.alreadyStored(work, repository, path, blob, immutable)) {
 				return false;
 			}
-			this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), coordinates.packageName(), coordinates.version(), fileMetadata, username);
+			this.record(work, repository, path, blob, contentType(path), coordinates.packageName(), coordinates.version(), fileMetadata, username, immutable);
 			return this.services.packages().ensure(work, repository.name(), coordinates.packageName(), coordinates.version(), Json.write(metadata), username);
 		});
 	}

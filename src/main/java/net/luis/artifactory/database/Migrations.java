@@ -106,6 +106,26 @@ public final class Migrations {
 			builder.dropTable(WEBHOOKS);
 			builder.dropTable(AUDIT_LOG);
 			builder.dropTable(TOKEN_META);
+		}),
+		migration(Version.of(1, 4, 0), "Stored repository classes, restricted sessions and audit indexes", (builder, _) -> {
+			// Existing repositories get their class from their remote configuration or members on startup, see RepositoryService#backfillKinds
+			builder.createTable(REPOSITORY_KINDS, table -> table
+				.column(KIND_REPOSITORY, SqlTypes.STRING.configure(SqlParameter.length(64)), SqlMigrationColumnBuilder::notNull)
+				.column(KIND_KIND, SqlTypes.STRING.configure(SqlParameter.length(16)), SqlMigrationColumnBuilder::notNull)
+				.primaryKey(KIND_REPOSITORY)
+			);
+			builder.addColumn(SESSION_LEVEL, SqlTypes.STRING.configure(SqlParameter.length(16)));
+			builder.addColumn(SESSION_TOKEN_ID, SqlTypes.STRING.configure(SqlParameter.length(36)));
+			builder.createIndex(SESSIONS, "idx_sessions_token", index -> index.columns(SESSION_TOKEN_ID).method(SqlIndexMethod.BTREE));
+			builder.createIndex(AUDIT_LOG, "idx_audit_log_actor", index -> index.columns(AUDIT_ACTOR).method(SqlIndexMethod.BTREE));
+			builder.createIndex(AUDIT_LOG, "idx_audit_log_repository", index -> index.columns(AUDIT_REPOSITORY).method(SqlIndexMethod.BTREE));
+		}, (builder, _) -> {
+			builder.dropIndex(AUDIT_LOG, "idx_audit_log_repository");
+			builder.dropIndex(AUDIT_LOG, "idx_audit_log_actor");
+			builder.dropIndex(SESSIONS, "idx_sessions_token");
+			builder.dropColumn(SESSION_TOKEN_ID);
+			builder.dropColumn(SESSION_LEVEL);
+			builder.dropTable(REPOSITORY_KINDS);
 		})
 	);
 	

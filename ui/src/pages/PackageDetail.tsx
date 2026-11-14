@@ -1,5 +1,5 @@
 import {useMemo, useState} from 'react';
-import {api, downloadFile} from '../api';
+import {api, ApiError, downloadFile} from '../api';
 import {Icon} from '../components/icons';
 import {Select} from '../components/Select';
 import {SortHeader, useSort} from '../components/sort';
@@ -10,7 +10,7 @@ import {latestLabel, latestVersion} from '../inventory';
 import {href, navigate, versionHref} from '../router';
 import {useSession} from '../session';
 import {installSnippets} from '../setup';
-import type {FileEntry, PackageVersion} from '../types';
+import {type FileEntry, includesLevel, type PackageVersion} from '../types';
 import {Pagination, usePaging} from '../components/paging';
 
 type Column = 'version' | 'published' | 'by' | 'files' | 'size';
@@ -21,14 +21,21 @@ type Column = 'version' | 'published' | 'by' | 'files' | 'size';
 export function PackageDetail({repositoryName, packageName, params}: { repositoryName: string; packageName: string; params: URLSearchParams }) {
 	const {notify} = useSession();
 	const repository = useAsync(() => api.repository(repositoryName), [repositoryName]);
-	const packages = useAsync(() => api.packages(repositoryName), [repositoryName]);
-	const files = useAsync(() => api.files(repositoryName), [repositoryName]);
+	// Only this package is loaded, with its versions, tags and the files of all versions
+	const packages = useAsync(() => api.pkg(repositoryName, packageName).catch(error => {
+		if (error instanceof ApiError && error.status === 404) {
+			return null;
+		}
+		throw error;
+	}), [repositoryName, packageName]);
+	const files = {data: packages.data?.files, error: packages.error, reload: packages.reload};
 	const [deleting, setDeleting] = useState<{ version?: string } | null>(null);
 
 	const repo = repository.data;
-	const pkg = packages.data?.find(entry => entry.name === packageName);
+	const pkg = packages.data ?? undefined;
 	const oci = repo?.type === 'oci';
-	const packageFiles = useMemo(() => (files.data ?? []).filter(file => file.packageName === packageName), [files.data, packageName]);
+	const packageFiles = useMemo(() => files.data ?? [], [files.data]);
+	const canDelete = includesLevel(repo?.access, 'DELETE') && repo?.kind === 'LOCAL';
 	const filesByVersion = useMemo(() => packageFiles.reduce<Record<string, FileEntry[]>>((result, file) => {
 		(result[file.version ?? ''] ??= []).push(file);
 		return result;
@@ -49,7 +56,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 	}, {version: (a, b) => oci ? a.createdAt.localeCompare(b.createdAt) : compareVersions(a.version, b.version)});
 	const {visible, paging} = usePaging(sorted);
 
-	if ((repository.loading && !repo) || (packages.loading && !packages.data)) {
+	if ((repository.loading && !repo) || (packages.loading && packages.data === undefined)) {
 		return <Spinner/>;
 	}
 	const back = {label: repositoryName, href: href('repositories', repositoryName)};
@@ -76,7 +83,7 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 
 	const requested = params.get('version');
 	// OCI versions are digests, the manifest the newest tag points at is the latest one
-	const latestTag = oci ? latestLabel(repo, pkg) : undefined;
+	const latestTag = oci ? latestLabel(repo.type, pkg) : undefined;
 	const latest = (latestTag && pkg.tags[latestTag]) || latestVersion(pkg);
 	const selected = versions.find(version => version.version === requested) ?? versions.find(version => version.version === latest) ?? versions[0];
 	const selectVersion = (version: string) => navigate(`${href('repositories', repositoryName, 'packages', packageName)}?version=${encodeURIComponent(version)}`);
@@ -95,11 +102,11 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 				crumbs={crumbs}
 				title={<span className="cell-inline package-title">{pkg.name} <TypeBadge type={repo.type}/></span>}
 				subtitle={<>Package in <a className="link" href={back.href}>{repositoryName}</a>{repo.description ? ` · ${repo.description}` : ''}</>}
-				actions={<Button variant="ghost" className="danger-text" onClick={() => setDeleting({})}><Icon name="trash" size={15}/>Delete package</Button>}
+				actions={canDelete && <Button variant="ghost" className="danger-text" onClick={() => setDeleting({})}><Icon name="trash" size={15}/>Delete package</Button>}
 			/>
 
 			<Stats>
-				<Stat label={oci ? 'Latest tag' : 'Latest version'} value={latestLabel(repo, pkg) ?? '—'}/>
+				<Stat label={oci ? 'Latest tag' : 'Latest version'} value={latestLabel(repo.type, pkg) ?? '—'}/>
 				<Stat label="Versions" value={formatNumber(pkg.versions.length)}/>
 				<Stat label="Files" value={files.data ? formatNumber(packageFiles.length) : '…'}/>
 				<Stat label="Storage" value={files.data ? formatBytes(totalSize) : '…'}/>
@@ -150,13 +157,15 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 										<td className="num">{filesByVersion[version.version]?.length ?? 0}</td>
 										<td className="num">{formatBytes(sizeOf(version.version))}</td>
 										<td className="actions">
-											<Button small variant="ghost" className="btn-icon danger-text" title={`Delete ${oci ? 'manifest' : 'version'}`} aria-label={`Delete ${version.version}`}
-													onClick={event => {
-														event.stopPropagation();
-														setDeleting({version: version.version});
-													}}>
-												<Icon name="trash" size={16}/>
-											</Button>
+											{canDelete && (
+												<Button small variant="ghost" className="btn-icon danger-text" title={`Delete ${oci ? 'manifest' : 'version'}`} aria-label={`Delete ${version.version}`}
+														onClick={event => {
+															event.stopPropagation();
+															setDeleting({version: version.version});
+														}}>
+													<Icon name="trash" size={16}/>
+												</Button>
+											)}
 										</td>
 									</tr>
 								))}
@@ -225,7 +234,6 @@ export function PackageDetail({repositoryName, packageName, params}: { repositor
 							navigate(back.href);
 						} else {
 							packages.reload();
-							files.reload();
 						}
 					}}
 					onClose={() => setDeleting(null)}

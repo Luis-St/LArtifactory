@@ -5,10 +5,26 @@ export interface Snippet {
 	code: string;
 }
 
+/** Snippets that publish, upload or delete, a remote or virtual repository is read only and leaves them out. */
+const WRITE_SNIPPETS = new Set(['Gradle publishing (build.gradle.kts)', 'Upload', 'Delete', 'twine upload', 'Publish', 'Push', 'Login & publish', 'Other OCI artifacts (oras)']);
+
 /**
  * Client configuration snippets for a repository, the token placeholder has to be replaced with an access token.
+ * The url comes from the server, it is the root of the host when the repository is mapped to one with ARTIFACTORY_HOST_REPOSITORIES.
  */
 export function setupSnippets(repository: Repository, username: string): Snippet[] {
+	const snippets = allSetupSnippets(repository, username);
+	if (repository.kind === 'LOCAL') {
+		return snippets;
+	}
+	return snippets
+		.filter(snippet => !WRITE_SNIPPETS.has(snippet.title))
+		.map(snippet => snippet.title === 'Maven (pom.xml)'
+			? {...snippet, code: snippet.code.replace(/\n<distributionManagement>[\s\S]*<\/distributionManagement>/, '')}
+			: snippet.title === 'Login & publish' ? {...snippet, code: snippet.code.split('\n')[0]} : snippet);
+}
+
+function allSetupSnippets(repository: Repository, username: string): Snippet[] {
 	const url = repository.url;
 	const host = url.replace(/^https?:/, '');
 	const id = repository.name;
@@ -66,7 +82,7 @@ export function setupSnippets(repository: Repository, username: string): Snippet
 				{title: 'Cargo.toml dependency', code: `[dependencies]\nmy-crate = { version = "1.0", registry = "${id}" }`},
 			];
 		case 'oci': {
-			const image = `${ociRegistry(url)}/${id}/my-image`;
+			const image = `${ociImage(repository)}/my-image`;
 			return [
 				{title: 'Login', code: `docker login ${ociRegistry(url)} -u ${username}`},
 				{title: 'Push', code: `docker tag my-image:1.0 ${image}:1.0\ndocker push ${image}:1.0`},
@@ -82,6 +98,15 @@ export function setupSnippets(repository: Repository, username: string): Snippet
  */
 export function ociRegistry(url: string): string {
 	return url.replace(/^https?:\/\//, '').replace(/\/oci\/[^/]+$/, '');
+}
+
+/**
+ * The image name prefix of an OCI repository: the repository is the first path component of the image, except on a host
+ * mapped to the repository, where the images are at the root.
+ */
+export function ociImage(repository: Repository): string {
+	const mapped = !/\/oci\/[^/]+$/.test(repository.url);
+	return mapped ? ociRegistry(repository.url) : `${ociRegistry(repository.url)}/${repository.name}`;
 }
 
 /**
@@ -122,7 +147,7 @@ export function installSnippets(repository: Repository, name: string, version: s
 				{title: 'Cargo.toml', code: `[dependencies]\n${name} = { version = "${version}", registry = "${id}" }`},
 			];
 		case 'oci': {
-			const image = `${ociRegistry(url)}/${id}/${name}`;
+			const image = `${ociImage(repository)}/${name}`;
 			return [
 				{title: 'docker pull', code: tag ? `docker pull ${image}:${tag}` : `docker pull ${image}@${version}`},
 				{title: 'By digest', code: `docker pull ${image}@${version}`},

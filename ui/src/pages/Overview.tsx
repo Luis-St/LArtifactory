@@ -3,14 +3,16 @@ import {ActivityChart} from '../components/ActivityChart';
 import {Badge, Card, Empty, ErrorBox, PageHeader, Spinner, Stat, Stats, TYPE_INFO, TypeBadge, TypeIcon} from '../components/ui';
 import {formatBytes, formatNumber, formatRelative, shortDigest} from '../format';
 import {useAsync} from '../hooks';
-import {loadInventory, recentUploads, summarizeTypes} from '../inventory';
+import {loadSummary, summarizeTypes} from '../inventory';
+import {canAdminister, type RecentVersion} from '../types';
 import {href, versionHref} from '../router';
 import {useSession} from '../session';
 
 export function Overview() {
 	const {principal, guest} = useSession();
 	const health = useAsync(() => api.health(), []);
-	const inventory = useAsync(loadInventory, []);
+	// Counts, sizes and the activity are aggregated on the server, the overview never loads packages or files
+	const inventory = useAsync(() => loadSummary(true), []);
 	
 	const types = inventory.data ? summarizeTypes(inventory.data) : [];
 	// A guest only sees the public repositories, empty types would only be noise
@@ -25,7 +27,6 @@ export function Overview() {
 		}),
 		{repositories: 0, packages: 0, versions: 0, files: 0, size: 0},
 	);
-	const failed = inventory.data?.filter(entry => entry.error) ?? [];
 	
 	return (
 		<>
@@ -42,7 +43,6 @@ export function Overview() {
 			
 			{inventory.loading && !inventory.data && <Spinner label="Loading repositories"/>}
 			{inventory.error && <ErrorBox error={inventory.error} onRetry={inventory.reload}/>}
-			{failed.length > 0 && <ErrorBox error={`Could not load the content of ${failed.map(entry => entry.repository.name).join(', ')}`}/>}
 			
 			{inventory.data && (
 				<>
@@ -55,7 +55,7 @@ export function Overview() {
 					</Stats>
 					
 					<Card title="Activity" actions={<a className="link small" href={href('artifacts')}>Browse artifacts</a>}>
-						<ActivityChart inventory={inventory.data}/>
+						<ActivityChart activity={inventory.data.activity}/>
 					</Card>
 					
 					<h2 className="section-title">Artifacts by type</h2>
@@ -102,23 +102,23 @@ export function Overview() {
 					
 					<div className="two-columns">
 						<Card title="Recent publications" actions={<a className="link small" href={href('artifacts')}>Browse all</a>}>
-							<RecentList inventory={inventory.data}/>
+							<RecentList recent={inventory.data.recent}/>
 						</Card>
 						<Card title="Repositories" actions={<a className="link small" href={href('repositories')}>Manage</a>}>
-							{inventory.data.length === 0 ? (
-								<Empty title="No repositories yet">{principal?.admin ? <a className="link" href={href('repositories')}>Create the first repository</a> : principal ? 'Ask an administrator for access.' : 'No public repositories, sign in to see more.'}</Empty>
+							{inventory.data.repositories.length === 0 ? (
+								<Empty title="No repositories yet">{canAdminister(principal) ? <a className="link" href={href('repositories')}>Create the first repository</a> : principal ? 'Ask an administrator for access.' : 'No public repositories, sign in to see more.'}</Empty>
 							) : (
 								<ul className="list list-grid list-repositories">
-									{inventory.data.map(entry => (
-										<li key={entry.repository.name}>
-											<a className="list-row" href={href('repositories', entry.repository.name)}>
-												<span className="list-type"><TypeBadge type={entry.repository.type}/></span>
+									{inventory.data.repositories.map(entry => (
+										<li key={entry.name}>
+											<a className="list-row" href={href('repositories', entry.name)}>
+												<span className="list-type"><TypeBadge type={entry.type}/></span>
 												<span className="list-main">
-													<span className="list-title">{entry.repository.name}</span>
-													{entry.repository.publicRead && <Badge tone="success">public</Badge>}
+													<span className="list-title">{entry.name}</span>
+													{entry.publicRead && <Badge tone="success">public</Badge>}
 												</span>
-												<span className="list-meta">{entry.repository.type === 'generic' ? plural(entry.files.length, 'file') : plural(entry.packages.length, 'package')}</span>
-												<span className="list-meta list-num">{formatBytes(entry.files.reduce((sum, file) => sum + file.size, 0))}</span>
+												<span className="list-meta">{entry.type === 'generic' ? plural(entry.files, 'file') : plural(entry.packages, 'package')}</span>
+												<span className="list-meta list-num">{formatBytes(entry.size)}</span>
 											</a>
 										</li>
 									))}
@@ -144,17 +144,16 @@ function plural(count: number, word: string): string {
 	return `${formatNumber(count)} ${word}${count === 1 ? '' : 's'}`;
 }
 
-function RecentList({inventory}: { inventory: Parameters<typeof recentUploads>[0] }) {
-	const recent = recentUploads(inventory, 10);
+function RecentList({recent}: { recent: RecentVersion[] }) {
 	if (recent.length === 0) {
 		return <Empty title="Nothing published yet">Publish a package with your package manager to see it here.</Empty>;
 	}
 	return (
 		<ul className="list list-grid list-recent">
 			{recent.map(entry => (
-				<li key={`${entry.repository.name}/${entry.packageName}/${entry.version}`}>
-					<a className="list-row" href={versionHref(entry.repository.name, entry.packageName, entry.version)} title={`${entry.packageName} in ${entry.repository.name}`}>
-						<span className="list-type"><TypeBadge type={entry.repository.type}/></span>
+				<li key={`${entry.repository}/${entry.packageName}/${entry.version}`}>
+					<a className="list-row" href={versionHref(entry.repository, entry.packageName, entry.version)} title={`${entry.packageName} in ${entry.repository}`}>
+						<span className="list-type"><TypeBadge type={entry.type}/></span>
 						<span className="list-main">
 							<span className="list-title">{entry.packageName}</span>
 							<span className="list-version">{entry.tags.length > 0 ? entry.tags.join(', ') : shortDigest(entry.version)}</span>

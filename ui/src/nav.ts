@@ -1,5 +1,5 @@
 import type {IconName} from './components/icons';
-import type {Principal} from './types';
+import {canAdminister, type Principal} from './types';
 
 export interface NavItem {
 	id: string;
@@ -11,7 +11,7 @@ export interface NavItem {
 }
 
 export function visibleTo(item: NavItem, principal: Principal | null): boolean {
-	return (!item.admin || principal?.admin === true) && (!item.user || principal !== null);
+	return (!item.admin || canAdminister(principal)) && (!item.user || principal !== null);
 }
 
 export const NAV_GROUPS: { label?: string; items: NavItem[] }[] = [

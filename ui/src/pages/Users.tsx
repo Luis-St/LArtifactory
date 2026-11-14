@@ -191,6 +191,7 @@ export function PasswordDialog({username, onClose}: { username: string; onClose:
 	const [current, setCurrent] = useState('');
 	const [password, setPassword] = useState('');
 	const [confirm, setConfirm] = useState('');
+	const [revokeTokens, setRevokeTokens] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 	
@@ -203,8 +204,9 @@ export function PasswordDialog({username, onClose}: { username: string; onClose:
 		setBusy(true);
 		setError(undefined);
 		try {
-			await api.updateUser(username, self ? {password, currentPassword: current} : {password});
-			notify(`Password of ${username} changed`);
+			// Tokens survive a password change unless they are revoked here, other sessions always end
+			await api.updateUser(username, {password, ...(self ? {currentPassword: current} : {}), ...(revokeTokens ? {revokeTokens: true} : {})});
+			notify(revokeTokens ? `Password of ${username} changed and all access tokens revoked` : `Password of ${username} changed`);
 			onClose();
 		} catch (e) {
 			setError(errorText(e));
@@ -226,6 +228,8 @@ export function PasswordDialog({username, onClose}: { username: string; onClose:
 				<Field label="Confirm password">
 					<input type="password" value={confirm} onChange={event => setConfirm(event.target.value)} required autoComplete="new-password"/>
 				</Field>
+				<Toggle checked={revokeTokens} onChange={setRevokeTokens} label="Also revoke all access tokens"
+						description="Other sessions always end. Revoke the tokens as well if the account may be compromised, CI jobs then need new tokens."/>
 				{error && <ErrorBox error={error}/>}
 				<div className="modal-footer">
 					<Button onClick={onClose} disabled={busy}>Cancel</Button>

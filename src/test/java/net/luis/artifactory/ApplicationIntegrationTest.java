@@ -488,6 +488,145 @@ class ApplicationIntegrationTest {
 		assertEquals(400, this.send("POST", "/api/repositories", admin, "{\"name\":\"npm-redeploy\",\"type\":\"npm\",\"allowRedeploy\":true}").statusCode());
 	}
 	
+	@Test
+	void virtualRepositoryOnlyServesReadableMembers() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"private-member\",\"type\":\"generic\"}").statusCode());
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"public-group\",\"type\":\"generic\",\"publicRead\":true,\"members\":[\"private-member\"]}").statusCode());
+		assertEquals(201, this.send("PUT", "/generic/private-member/secret.txt", admin, "secret").statusCode());
+		assertEquals(404, this.send("GET", "/generic/public-group/secret.txt", null, null).statusCode(), "a public virtual repository does not publish a private member");
+		assertEquals("secret", this.send("GET", "/generic/public-group/secret.txt", admin, null).body(), "a reader of the member resolves it through the group");
+	}
+	
+	@Test
+	void virtualRepositoryStaysVirtualWithoutMembers() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"only-member\",\"type\":\"generic\"}").statusCode());
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"lonely-group\",\"type\":\"generic\",\"members\":[\"only-member\"]}").statusCode());
+		assertEquals(204, this.send("DELETE", "/api/repositories/only-member", admin, null).statusCode());
+		assertEquals("VIRTUAL", Json.parse(this.send("GET", "/api/repositories/lonely-group", admin, null).body()).get("kind").asString());
+		assertEquals(405, this.send("PUT", "/generic/lonely-group/file.txt", admin, "x").statusCode(), "a virtual repository never accepts uploads");
+	}
+	
+	@Test
+	void rejectedRepositoryUpdateChangesNothing() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"unchanged\",\"type\":\"generic\",\"description\":\"before\"}").statusCode());
+		assertEquals(400, this.send("PATCH", "/api/repositories/unchanged", admin, "{\"description\":\"after\",\"publicRead\":true,\"members\":[\"files\"]}").statusCode());
+		JsonNode repository = Json.parse(this.send("GET", "/api/repositories/unchanged", admin, null).body());
+		assertEquals("before", repository.get("description").asString());
+		assertFalse(repository.get("publicRead").asBoolean());
+	}
+	
+	@Test
+	void remoteUpdateKeepsOmittedFields() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"upstream\",\"type\":\"generic\",\"remote\":{\"url\":\"https://example.invalid/repo\",\"cacheEnabled\":true,\"username\":\"u\",\"password\":\"p\"}}").statusCode());
+		assertEquals(200, this.send("PATCH", "/api/repositories/upstream", admin, "{\"remote\":{\"url\":\"https://example.invalid/other\"}}").statusCode());
+		JsonNode remote = Json.parse(this.send("GET", "/api/repositories/upstream", admin, null).body()).get("remote");
+		assertEquals("https://example.invalid/other", remote.get("url").asString());
+		assertTrue(remote.get("cacheEnabled").asBoolean());
+		assertEquals("u", remote.get("username").asString());
+		assertTrue(remote.get("hasPassword").asBoolean());
+	}
+	
+	@Test
+	void tokenSessionsAreRestricted() throws Exception {
+		JsonNode token0 = Json.parse(this.send("POST", "/api/tokens", basic("admin", ADMIN_PASSWORD), "{\"name\":\"ui\",\"level\":\"WRITE\"}").body());
+		String token = token0.get("token").asString();
+		String id = token0.get("id").asString();
+		HttpResponse<String> created = this.send("POST", "/api/session", basic("__token__", token), "{}");
+		assertEquals(201, created.statusCode(), created.body());
+		String session = "Bearer " + Json.parse(created.body()).get("token").asString();
+		JsonNode me = Json.parse(this.send("GET", "/api/me", session, null).body());
+		assertEquals("WRITE", me.get("tokenLevel").asString(), "a token session keeps the level of the token");
+		assertEquals(403, this.send("GET", "/api/users", session, null).statusCode(), "a token session of an administrator does not administer");
+		assertEquals(403, this.send("GET", "/api/tokens", session, null).statusCode());
+		
+		assertEquals(204, this.send("DELETE", "/api/tokens/" + id, basic("admin", ADMIN_PASSWORD), null).statusCode());
+		assertEquals(401, this.send("GET", "/api/me", session, null).statusCode(), "revoking the token ends its sessions");
+	}
+	
+	@Test
+	void registrySessionsDoNotAdminister() throws Exception {
+		String token = Json.parse(this.send("GET", "/v2/token?service=LArtifactory", basic("admin", ADMIN_PASSWORD), null).body()).get("token").asString();
+		assertEquals(403, this.send("GET", "/api/users", "Bearer " + token, null).statusCode());
+	}
+	
+	@Test
+	void managementErrorsAreJson() throws Exception {
+		HttpResponse<String> missing = this.send("GET", "/api/repositories/does-not-exist", basic("admin", ADMIN_PASSWORD), null);
+		assertEquals(404, missing.statusCode());
+		assertTrue(missing.headers().firstValue("Content-Type").orElse("").startsWith("application/json"), missing.headers().toString());
+		assertTrue(Json.parse(missing.body()).get("error").asString().contains("does-not-exist"));
+		assertTrue(this.send("GET", "/generic/files/does-not-exist.txt", basic("admin", ADMIN_PASSWORD), null).headers().firstValue("Content-Type").orElse("").startsWith("text/plain"));
+	}
+	
+	@Test
+	void usernamesDifferingOnlyByCaseAreRejected() throws Exception {
+		assertEquals(409, this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"Dev\",\"password\":\"developer-pass-1\"}").statusCode());
+	}
+	
+	@Test
+	void tokensDefaultToRead() throws Exception {
+		HttpResponse<String> response = this.send("POST", "/api/tokens", basic("dev", "developer-pass-1"), "{\"name\":\"default\"}");
+		assertEquals("READ", Json.parse(response.body()).get("level").asString());
+	}
+	
+	@Test
+	void browseEndpointsAggregateOnTheServer() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		assertEquals(201, this.send("POST", "/api/repositories", admin, "{\"name\":\"browse\",\"type\":\"generic\"}").statusCode());
+		assertEquals(201, this.send("PUT", "/generic/browse/a/one.txt", admin, "1").statusCode());
+		assertEquals(201, this.send("PUT", "/generic/browse/a/b/two.txt", admin, "22").statusCode());
+		assertEquals(201, this.send("PUT", "/npm/npm/browsed", admin, npmPublishBody("browsed", "1.0.0")).statusCode());
+		
+		JsonNode summary = Json.parse(this.send("GET", "/api/summary?repository=browse", admin, null).body());
+		JsonNode repository = summary.get("repositories").get(0);
+		assertEquals(2, repository.get("files").asLong());
+		assertEquals(3, repository.get("size").asLong());
+		JsonNode all = Json.parse(this.send("GET", "/api/summary", admin, null).body());
+		assertFalse(all.get("activity").isEmpty());
+		assertFalse(all.get("recent").isEmpty());
+		
+		HttpResponse<String> packages = this.send("GET", "/api/packages?type=npm&q=browsed", admin, null);
+		assertEquals("1", packages.headers().firstValue("X-Total-Count").orElse(null), packages.body());
+		assertEquals("browsed", Json.parse(packages.body()).get(0).get("name").asString());
+		
+		HttpResponse<String> files = this.send("GET", "/api/files?repository=browse&sort=size&limit=1", admin, null);
+		assertEquals("2", files.headers().firstValue("X-Total-Count").orElse(null));
+		assertEquals("a/b/two.txt", Json.parse(files.body()).get(0).get("path").asString());
+		
+		JsonNode tree = Json.parse(this.send("GET", "/api/repositories/browse/tree?prefix=a/", admin, null).body());
+		assertEquals("b", tree.get("folders").get(0).asString());
+		assertEquals("a/one.txt", tree.get("files").get(0).get("path").asString());
+		
+		JsonNode pkg = Json.parse(this.send("GET", "/api/repositories/npm/packages/browsed", admin, null).body());
+		assertEquals(1, pkg.get("files").size());
+		assertEquals("browsed", Json.parse(this.send("GET", "/api/search?q=rowse", admin, null).body()).get(0).get("name").asString());
+		assertEquals(0, Json.parse(this.send("GET", "/api/search?q=browsed", null, null).body()).size(), "anonymous callers only search public repositories");
+	}
+	
+	@Test
+	void auditIsPagedInTheDatabase() throws Exception {
+		String admin = basic("admin", ADMIN_PASSWORD);
+		HttpResponse<String> first = this.send("GET", "/api/audit?limit=2", admin, null);
+		long total = Long.parseLong(first.headers().firstValue("X-Total-Count").orElseThrow());
+		assertTrue(total > 2, first.body());
+		JsonNode page = Json.parse(first.body());
+		JsonNode second = Json.parse(this.send("GET", "/api/audit?limit=2&offset=2", admin, null).body());
+		assertTrue(page.get(0).get("timestamp").asString().compareTo(page.get(1).get("timestamp").asString()) >= 0, "newest first");
+		assertNotEquals(page.get(1).get("id").asString(), second.get(0).get("id").asString());
+		assertEquals(400, this.send("GET", "/api/audit?limit=many", admin, null).statusCode());
+	}
+	
+	@Test
+	void repositoryResponseCarriesTheAccessLevel() throws Exception {
+		this.send("PUT", "/api/permissions", basic("admin", ADMIN_PASSWORD), "{\"repository\":\"files\",\"username\":\"dev\",\"level\":\"WRITE\"}");
+		assertEquals("WRITE", Json.parse(this.send("GET", "/api/repositories/files", basic("dev", "developer-pass-1"), null).body()).get("access").asString());
+		assertEquals("DELETE", Json.parse(this.send("GET", "/api/repositories/files", basic("admin", ADMIN_PASSWORD), null).body()).get("access").asString());
+	}
+	
 	private HttpResponse<String> sendHeaders(String method, String path, Map<String, String> headers) throws IOException, InterruptedException {
 		HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path)).method(method, HttpRequest.BodyPublishers.noBody());
 		headers.forEach(builder::header);

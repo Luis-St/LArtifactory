@@ -5,10 +5,12 @@ import net.luis.artifactory.config.ServerConfig;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.AuditService;
 import net.luis.artifactory.storage.BlobStore;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.MDC;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -46,12 +48,21 @@ public class AuthService {
 	private final TokenUsageService tokenUsage;
 	private final ServerConfig config;
 	private final LoginThrottle throttle;
+	private final AuditService audit;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
+	private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
+	/**
+	 * Query parameter of a download ticket, see {@link #createTicket}.<br>
+	 */
+	public static final String TICKET_PARAMETER = "ticket";
+	private static final Duration TICKET_LIFETIME = Duration.ofSeconds(60);
+	private static final int MAX_TICKETS = 10_000;
 	
-	public AuthService(@NonNull UserService userService, @NonNull TokenUsageService tokenUsage, @NonNull ServerConfig config) {
+	public AuthService(@NonNull UserService userService, @NonNull TokenUsageService tokenUsage, @NonNull ServerConfig config, @NonNull AuditService audit) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
 		this.tokenUsage = Objects.requireNonNull(tokenUsage, "Token usage service must not be null");
 		this.config = Objects.requireNonNull(config, "Config must not be null");
+		this.audit = Objects.requireNonNull(audit, "Audit service must not be null");
 		this.throttle = new LoginThrottle(config.loginMaxFailures(), Duration.ofMinutes(config.loginLockoutMinutes()));
 	}
 	
@@ -68,6 +79,41 @@ public class AuthService {
 		if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
 			String value = authorization.substring(7).strip();
 			return value.startsWith(UserService.SESSION_PREFIX) ? value : null;
+		}
+		return null;
+	}
+	
+	/**
+	 * Returns the access token secret the request authenticates with, null if it uses a password, a session or no credentials.<br>
+	 */
+	@Nullable
+	public static String tokenSecret(@NonNull Context ctx) {
+		String authorization = ctx.header("Authorization");
+		if (authorization != null && !authorization.isBlank()) {
+			authorization = authorization.strip();
+			int space = authorization.indexOf(' ');
+			String scheme = space < 0 ? "" : authorization.substring(0, space);
+			String value = space < 0 ? authorization : authorization.substring(space + 1).strip();
+			if ("Basic".equalsIgnoreCase(scheme)) {
+				try {
+					String decoded = new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+					int colon = decoded.indexOf(':');
+					String secret = colon < 0 ? "" : decoded.substring(colon + 1);
+					return colon >= 0 && ("__token__".equals(decoded.substring(0, colon)) || secret.startsWith("lat_")) ? secret : null;
+				} catch (IllegalArgumentException e) {
+					return null;
+				}
+			}
+			if (value.startsWith(UserService.SESSION_PREFIX) || ANONYMOUS_TOKEN.equals(value)) {
+				return null;
+			}
+			return "Bearer".equalsIgnoreCase(scheme) || "token".equalsIgnoreCase(scheme) || space < 0 ? value : null;
+		}
+		for (String header : List.of("X-NuGet-ApiKey", "X-JFrog-Art-Api")) {
+			String apiKey = ctx.header(header);
+			if (apiKey != null && !apiKey.isBlank()) {
+				return apiKey.strip();
+			}
 		}
 		return null;
 	}
@@ -91,6 +137,7 @@ public class AuthService {
 	public void cleanup() {
 		long now = System.currentTimeMillis();
 		this.cache.values().removeIf(entry -> entry.expiresAt() <= now);
+		this.tickets.values().removeIf(ticket -> ticket.expiresAt().isBefore(Instant.now()));
 		this.throttle.cleanup();
 	}
 	
@@ -126,6 +173,7 @@ public class AuthService {
 	@Nullable
 	public UserEntity login(@NonNull Context ctx, @NonNull String username, @NonNull String password) throws SqlException {
 		String address = Requests.clientIp(ctx, this.config);
+		// Locked out attempts are not recorded one by one, the lockout itself was recorded when it began
 		this.throttle.check(address, username);
 		
 		UserEntity user = this.userService.get(username);
@@ -137,7 +185,11 @@ public class AuthService {
 			valid = this.verifyPassword(password, user.passwordHash());
 		}
 		if (!valid) {
-			this.throttle.failure(address, username);
+			boolean locked = this.throttle.failure(address, username);
+			this.audit.record(username, AuditService.LOGIN_FAILED, null, username, address, user == null ? "unknown user" : null);
+			if (locked) {
+				this.audit.record(username, AuditService.LOGIN_LOCKED, null, username, address, "locked for " + this.config.loginLockoutMinutes() + " minutes");
+			}
 			return null;
 		}
 		this.throttle.success(address, username);
@@ -157,6 +209,9 @@ public class AuthService {
 		
 		Principal principal = this.resolve(ctx);
 		ctx.attribute(PRINCIPAL_ATTRIBUTE, principal);
+		if (principal != null) {
+			MDC.put(AuditService.USER_KEY, principal.username());
+		}
 		return principal;
 	}
 	
@@ -216,7 +271,8 @@ public class AuthService {
 	/**
 	 * Returns a bearer token for the credentials of the request, used by the token flow of the OCI registry.<br>
 	 * An access token or session is returned as is, so its restrictions keep applying. A password is never returned,
-	 * a session with the given lifetime is created for it instead.<br>
+	 * a restricted session with the given lifetime is created for it instead: it grants repository access like a token with
+	 * level DELETE, but never administration, so a registry credential can not administer the server.<br>
 	 *
 	 * @return The bearer token, {@link #ANONYMOUS_TOKEN} for an anonymous request
 	 * @throws HttpError 401 if credentials are present but invalid
@@ -238,7 +294,7 @@ public class AuthService {
 			if ("__token__".equals(username) || secret.startsWith("lat_")) {
 				return secret;
 			}
-			return this.userService.createSession(principal.username(), sessionLifetime).secret();
+			return this.userService.createSession(principal.username(), Instant.now().plus(sessionLifetime), AccessLevel.DELETE, null).secret();
 		}
 		if (!authorization.isEmpty()) {
 			return value;
@@ -287,7 +343,7 @@ public class AuthService {
 				return null;
 			}
 			if ("Bearer".equalsIgnoreCase(scheme) && value.startsWith(UserService.SESSION_PREFIX)) {
-				return this.requireSession(value);
+				return this.requireSession(ctx, value);
 			}
 			if ("Bearer".equalsIgnoreCase(scheme) || "token".equalsIgnoreCase(scheme)) {
 				return this.requireToken(ctx, value, null);
@@ -304,7 +360,42 @@ public class AuthService {
 				return this.requireToken(ctx, apiKey.strip(), null);
 			}
 		}
+		String ticket = ctx.queryParam(TICKET_PARAMETER);
+		if (ticket != null && Requests.isGetOrHead(ctx)) {
+			return this.redeemTicket(ctx, ticket);
+		}
 		return null;
+	}
+	
+	/**
+	 * Creates a single use download ticket for one path, so the web ui can download with a plain link that the browser streams to disk
+	 * instead of buffering the file in memory to attach the authorization header.<br>
+	 * The ticket authenticates one GET of exactly that path within a minute, with at most READ access.<br>
+	 *
+	 * @param path The raw path of the download, starting with a slash
+	 * @return The ticket
+	 */
+	@NonNull
+	public String createTicket(@NonNull Principal principal, @NonNull String path) {
+		if (this.tickets.size() >= MAX_TICKETS) {
+			this.cleanup();
+			if (this.tickets.size() >= MAX_TICKETS) {
+				throw HttpError.of(503, "Too many pending downloads, try again later");
+			}
+		}
+		String ticket = PasswordHasher.randomSecret(24);
+		Principal reader = new Principal(principal.username(), principal.admin(), principal.tokenLevel() == null ? AccessLevel.READ : AccessLevel.min(principal.tokenLevel(), AccessLevel.READ));
+		this.tickets.put(ticket, new Ticket(reader, path, Instant.now().plus(TICKET_LIFETIME)));
+		return ticket;
+	}
+	
+	@NonNull
+	private Principal redeemTicket(@NonNull Context ctx, @NonNull String value) {
+		Ticket ticket = this.tickets.remove(value);
+		if (ticket == null || ticket.expiresAt().isBefore(Instant.now()) || !ticket.path().equals(Requests.rawPath(ctx))) {
+			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+		}
+		return ticket.principal();
 	}
 	
 	@NonNull
@@ -374,10 +465,13 @@ public class AuthService {
 	}
 	
 	@NonNull
-	private Principal requireSession(@NonNull String secret) throws SqlException {
+	private Principal requireSession(@NonNull Context ctx, @NonNull String secret) throws SqlException {
 		String cacheKey = "session:" + UserService.hashToken(secret);
 		CacheEntry cached = this.cached(cacheKey);
 		if (cached != null) {
+			if (cached.tokenId() != null) {
+				this.tokenUsage.enforceAndRecord(cached.tokenId(), Requests.clientIp(ctx, this.config));
+			}
 			return cached.principal();
 		}
 		SessionEntity session = this.userService.findSessionBySecret(secret);
@@ -388,8 +482,14 @@ public class AuthService {
 		if (user == null) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
-		Principal principal = new Principal(user.username(), user.admin(), null);
-		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, session.expiresAt(), null));
+		// A restricted session (exchanged for a token or created by the registry token flow) acts with the level of a token
+		AccessLevel level = session.level() == null ? null : Objects.requireNonNullElse(AccessLevel.parse(session.level()), AccessLevel.READ);
+		Principal principal = new Principal(user.username(), user.admin(), level);
+		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, session.expiresAt(), session.tokenId()));
+		if (session.tokenId() != null) {
+			// The ip allowlist and rate limit of the token keep applying to the session
+			this.tokenUsage.enforceAndRecord(session.tokenId(), Requests.clientIp(ctx, this.config));
+		}
 		return principal;
 	}
 	
@@ -405,6 +505,8 @@ public class AuthService {
 		}
 		return null;
 	}
+	
+	private record Ticket(@NonNull Principal principal, @NonNull String path, @NonNull Instant expiresAt) {}
 	
 	private record CacheEntry(@NonNull Principal principal, long expiresAt, @Nullable Instant credentialExpiresAt, @Nullable String tokenId) {}
 }

@@ -1,0 +1,29 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: gradle/actions/setup-gradle@v4
+      # Builds the ui (type check and bundle) and runs the unit tests and the integration tests,
+      # the integration tests use the docker daemon of the runner for their PostgreSQL container
+      - run: ./gradlew test --no-daemon
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: test-reports
+          path: build/reports/tests/test

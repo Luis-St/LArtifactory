@@ -8,11 +8,22 @@ export interface Route {
 	params: URLSearchParams;
 }
 
+/**
+ * Decodes one path segment, a malformed escape like a lone % is kept as it is instead of crashing the page.
+ */
+function decodeSegment(segment: string): string {
+	try {
+		return decodeURIComponent(segment);
+	} catch {
+		return segment;
+	}
+}
+
 function parse(): Route {
 	const hash = window.location.hash.replace(/^#\/?/, '');
 	const [path, search = ''] = hash.split('?', 2);
 	return {
-		segments: path.split('/').filter(Boolean).map(decodeURIComponent),
+		segments: path.split('/').filter(Boolean).map(decodeSegment),
 		params: new URLSearchParams(search),
 	};
 }

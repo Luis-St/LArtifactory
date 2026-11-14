@@ -8,6 +8,7 @@ import {href} from '../router';
 import {useSession} from '../session';
 import {ACCENTS, type Density, type ThemePreference, useAccent, useDensity, useTheme} from '../theme';
 import {levelTone, PasswordDialog} from './Users';
+import {canAdminister} from '../types';
 
 export function Account() {
 	const {principal, logout} = useSession();
@@ -35,7 +36,7 @@ export function Account() {
 				<div className="account-identity">
 					<div className="cell-inline">
 						<h2>{principal.username}</h2>
-						{principal.admin ? <Badge tone="accent">Administrator</Badge> : <Badge>User</Badge>}
+						{principal.admin ? <Badge tone="accent">Administrator{principal.tokenLevel ? ' (not with a token)' : ''}</Badge> : <Badge>User</Badge>}
 					</div>
 					<span className="muted">Signed in with {signedInWithToken ? `an access token (${principal.tokenLevel})` : 'a password'}</span>
 				</div>
@@ -50,7 +51,7 @@ export function Account() {
 					</div>
 					<div>
 						<dt>Access</dt>
-						<dd>{principal.admin ? 'Full' : 'Per repository'}</dd>
+						<dd>{canAdminister(principal) ? 'Full' : principal.admin ? `Up to ${principal.tokenLevel} while signed in with a token` : 'Per repository'}</dd>
 					</div>
 				</dl>
 				<Button onClick={logout}><Icon name="logout" size={15}/>Sign out</Button>

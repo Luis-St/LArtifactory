@@ -156,7 +156,19 @@ val generateOpenApi = tasks.register("generateOpenApi") {
 			"Could not find the expected empty info block in the generated OpenAPI spec. " +
 					"The OpenAPI tooling output changed, update generateOpenApi to keep openapi.json in sync with Application.java."
 		}
-		target.asFile.writeText(generated.replace(placeholder, info))
+		// The security schemes are configured at runtime as well, basic auth with the password and bearer auth with a session
+		// or an access token, either one satisfies the global requirement
+		val components = "  \"components\" : {\n"
+		require(generated.contains(components)) {
+			"Could not find the components block in the generated OpenAPI spec, update generateOpenApi."
+		}
+		val schemes = components +
+				"    \"securitySchemes\" : {\n" +
+				"      \"basicAuth\" : {\n        \"type\" : \"http\",\n        \"scheme\" : \"basic\"\n      },\n" +
+				"      \"bearerAuth\" : {\n        \"type\" : \"http\",\n        \"scheme\" : \"bearer\"\n      }\n" +
+				"    },\n"
+		val security = "  \"security\" : [ {\n    \"basicAuth\" : [ ]\n  }, {\n    \"bearerAuth\" : [ ]\n  } ],\n"
+		target.asFile.writeText(generated.replace(placeholder, info).replace(components, security + schemes))
 	}
 }
 

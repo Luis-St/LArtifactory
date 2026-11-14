@@ -40,11 +40,23 @@ public class ArtifactService {
 	private final SqlDatabase database;
 	private final BlobStore blobStore;
 	private final WebhookService webhooks;
+	private final AuditService audit;
 	
-	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore, @NonNull WebhookService webhooks) {
+	public ArtifactService(@NonNull SqlDatabase database, @NonNull BlobStore blobStore, @NonNull WebhookService webhooks, @NonNull AuditService audit) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
 		this.blobStore = Objects.requireNonNull(blobStore, "Blob store must not be null");
 		this.webhooks = Objects.requireNonNull(webhooks, "Webhook service must not be null");
+		this.audit = Objects.requireNonNull(audit, "Audit service must not be null");
+	}
+	
+	/**
+	 * Notifies the webhooks and records the change in the audit log once the transaction was committed.<br>
+	 */
+	private void changed(@NonNull UnitOfWork work, @NonNull String event, @NonNull String action, @NonNull String repository, @NonNull String target, @Nullable String actor) {
+		work.afterCommit(() -> {
+			this.webhooks.dispatch(event, repository, target);
+			this.audit.record(actor, action, repository, target, null, null);
+		});
 	}
 	
 	@Nullable
@@ -264,7 +276,17 @@ public class ArtifactService {
 	
 	@NonNull
 	public FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
-		return this.put(work, repository, path, blob, contentType, packageName, version, metadata, createdBy, true);
+		return this.put(work, repository, path, blob, contentType, packageName, version, metadata, createdBy, true, true);
+	}
+	
+	/**
+	 * Records a file at a path the caller found empty in the same transaction, without replacing anything.<br>
+	 * A file committed at the path in between makes the insert fail with a unique violation, so the unique key decides
+	 * a race of uploads to an immutable path instead of the later upload silently replacing the earlier one.<br>
+	 */
+	@NonNull
+	public FileEntity insert(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy) throws SqlException {
+		return this.put(work, repository, path, blob, contentType, packageName, version, metadata, createdBy, true, false);
 	}
 	
 	/**
@@ -272,13 +294,13 @@ public class ArtifactService {
 	 */
 	@NonNull
 	public FileEntity putCached(@NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType) throws SqlException {
-		return this.transaction(work -> this.put(work, repository, path, blob, contentType, null, null, null, "remote-cache", false));
+		return this.transaction(work -> this.put(work, repository, path, blob, contentType, null, null, null, "remote-cache", false, true));
 	}
 	
 	@NonNull
-	private FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify) throws SqlException {
+	private FileEntity put(@NonNull UnitOfWork work, @NonNull String repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String createdBy, boolean notify, boolean replace) throws SqlException {
 		FileEntity file = new FileEntity(repository, path, packageName, version, blob.size(), blob.sha256(), blob.sha1(), blob.md5(), blob.sha512(), contentType, metadata, Instant.now(), createdBy);
-		FileEntity previous = get(work.sql(), repository, path);
+		FileEntity previous = replace ? get(work.sql(), repository, path) : null;
 		// Only the file read here is replaced: a file a concurrent upload committed after this read is not deleted,
 		// the insert then fails with a unique violation instead of silently overwriting an immutable path
 		if (previous != null) {
@@ -289,7 +311,7 @@ public class ArtifactService {
 			work.removed(List.of(previous));
 		}
 		if (notify) {
-			work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_PUBLISHED, repository, path));
+			this.changed(work, WebhookService.ARTIFACT_PUBLISHED, AuditService.ARTIFACT_PUBLISH, repository, path, createdBy);
 		}
 		return file;
 	}
@@ -305,7 +327,7 @@ public class ArtifactService {
 		}
 		work.sql().from(FILES).delete().where(fileCondition(repository, path)).execute();
 		work.removed(List.of(file));
-		work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, path));
+		this.changed(work, WebhookService.ARTIFACT_DELETED, AuditService.ARTIFACT_DELETE, repository, path, null);
 		return true;
 	}
 	
@@ -317,7 +339,7 @@ public class ArtifactService {
 		}
 		work.removed(files);
 		if (!files.isEmpty()) {
-			work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, prefix));
+			this.changed(work, WebhookService.ARTIFACT_DELETED, AuditService.ARTIFACT_DELETE, repository, prefix, null);
 		}
 		return files;
 	}
@@ -327,7 +349,7 @@ public class ArtifactService {
 		work.sql().from(FILES).delete().where(versionCondition(repository, packageName, version)).execute();
 		work.removed(files);
 		if (!files.isEmpty()) {
-			work.afterCommit(() -> this.webhooks.dispatch(WebhookService.ARTIFACT_DELETED, repository, packageName + "@" + version));
+			this.changed(work, WebhookService.ARTIFACT_DELETED, AuditService.ARTIFACT_DELETE, repository, packageName + "@" + version, null);
 		}
 		return files.size();
 	}

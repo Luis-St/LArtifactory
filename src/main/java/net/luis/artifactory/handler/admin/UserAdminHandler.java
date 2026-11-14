@@ -57,7 +57,8 @@ public class UserAdminHandler {
 	}
 	
 	@OpenApi(
-		summary = "Sign in to the web ui with the user password (basic auth), returns a session token for bearer authentication",
+		summary = "Sign in to the web ui with the user password or an access token (basic auth), returns a session token for bearer authentication",
+		description = "A session created with an access token is restricted to the level of the token, it never grants administration or token management, ends when the token is revoked or expires and is subject to the ip allowlist and rate limit of the token",
 		operationId = "createSession",
 		path = "/api/session",
 		methods = HttpMethod.POST,
@@ -70,17 +71,33 @@ public class UserAdminHandler {
 		}
 	)
 	public void createSession(@NonNull Context ctx) throws Exception {
-		// Only a password creates a session, so a session (or token) can not be used to extend itself
+		// Only a password or a token creates a session, so a session can not be used to extend itself
 		if (AuthService.sessionSecret(ctx) != null) {
-			throw HttpError.forbidden("A session can only be created with the user password");
+			throw HttpError.forbidden("A session can only be created with the user password or an access token");
 		}
-		Principal principal = this.services.auth().requirePassword(ctx, "Signing in to the web ui");
+		Principal principal = this.services.auth().requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		String body = ctx.body();
 		CreateSessionRequest request = body.isBlank() ? new CreateSessionRequest(null) : ctx.bodyAsClass(CreateSessionRequest.class);
 		Duration lifetime = Boolean.TRUE.equals(request.remember())
 			? Duration.ofDays(this.services.config().sessionRememberDays())
 			: Duration.ofHours(this.services.config().sessionHours());
-		ctx.status(201).json(SessionResponse.of(this.services.users().createSession(principal.username(), lifetime)));
+		Instant expiresAt = Instant.now().plus(lifetime);
+		UserService.CreatedSession session;
+		if (principal.tokenLevel() == null) {
+			session = this.services.users().createSession(principal.username(), lifetime);
+		} else {
+			// The browser keeps a session that expires and is revoked on sign out instead of the token itself
+			String secret = AuthService.tokenSecret(ctx);
+			TokenEntity token = secret == null ? null : this.services.users().findTokenBySecret(secret);
+			if (token == null) {
+				throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+			}
+			if (token.expiresAt() != null && token.expiresAt().isBefore(expiresAt)) {
+				expiresAt = token.expiresAt();
+			}
+			session = this.services.users().createSession(principal.username(), expiresAt, principal.tokenLevel(), token.id());
+		}
+		ctx.status(201).json(SessionResponse.of(session));
 	}
 	
 	@OpenApi(
@@ -132,8 +149,9 @@ public class UserAdminHandler {
 			throw HttpError.badRequest("Invalid username");
 		}
 		validatePassword(request.password());
-		if (this.services.users().get(request.username()) != null) {
-			throw HttpError.conflict("User " + request.username() + " already exists");
+		// Names that differ only by case look alike in permission lists and share one login throttle counter
+		if (this.services.users().existsIgnoreCase(request.username())) {
+			throw HttpError.conflict("User " + request.username() + " already exists (user names are compared without case)");
 		}
 		UserEntity user = this.services.users().create(request.username(), request.password(), Boolean.TRUE.equals(request.admin()));
 		this.services.audit().record(admin.username(), AuditService.USER_CREATE, null, user.username(), Requests.clientIp(ctx, this.services.config()), user.admin() ? "admin" : null);
@@ -177,6 +195,9 @@ public class UserAdminHandler {
 			// Sign out everywhere else, the session changing its own password stays valid
 			this.services.users().deleteSessions(username, self ? AuthService.sessionSecret(ctx) : null);
 		}
+		if (Boolean.TRUE.equals(request.revokeTokens())) {
+			this.services.users().deleteTokens(username).forEach(this.services.tokenUsage()::invalidate);
+		}
 		this.services.auth().invalidateCache();
 		StringBuilder detail = new StringBuilder();
 		if (request.password() != null) {
@@ -184,6 +205,9 @@ public class UserAdminHandler {
 		}
 		if (request.admin() != null) {
 			detail.append(detail.isEmpty() ? "" : ", ").append("admin=").append(request.admin());
+		}
+		if (Boolean.TRUE.equals(request.revokeTokens())) {
+			detail.append(detail.isEmpty() ? "" : ", ").append("tokens revoked");
 		}
 		this.services.audit().record(principal.username(), AuditService.USER_UPDATE, null, username, Requests.clientIp(ctx, this.services.config()), detail.isEmpty() ? null : detail.toString());
 		ctx.json(UserResponse.of(Objects.requireNonNull(this.services.users().get(username))));
@@ -207,7 +231,7 @@ public class UserAdminHandler {
 		if (this.services.users().get(username) == null) {
 			throw HttpError.notFound("No such user: " + username);
 		}
-		this.services.users().delete(username);
+		this.services.users().delete(username).forEach(this.services.tokenUsage()::invalidate);
 		this.services.auth().invalidateCache();
 		this.services.audit().record(principal.username(), AuditService.USER_DELETE, null, username, Requests.clientIp(ctx, this.services.config()), null);
 		ctx.status(204);
@@ -320,7 +344,8 @@ public class UserAdminHandler {
 		if (this.services.users().get(username) == null) {
 			throw HttpError.notFound("No such user: " + username);
 		}
-		AccessLevel level = request.level() == null ? AccessLevel.DELETE : AccessLevel.parse(request.level());
+		// A caller that forgets the level gets the least access, not the most
+		AccessLevel level = request.level() == null ? AccessLevel.READ : AccessLevel.parse(request.level());
 		if (level == null) {
 			throw HttpError.badRequest("Invalid level, allowed: READ, WRITE, DELETE");
 		}

@@ -109,6 +109,11 @@ public final class Requests {
 		return "HEAD".equalsIgnoreCase(ctx.req().getMethod());
 	}
 	
+	public static boolean isGetOrHead(@NonNull Context ctx) {
+		String method = ctx.req().getMethod();
+		return "GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method);
+	}
+	
 	@NonNull
 	public static String method(@NonNull Context ctx) {
 		return ctx.req().getMethod().toUpperCase(Locale.ROOT);

@@ -73,6 +73,15 @@
                   }
                 }
               }
+            },
+            "headers" : {
+              "X-Total-Count" : {
+                "description" : "Total number of matching entries",
+                "schema" : {
+                  "type" : "integer",
+                  "format" : "int64"
+                }
+              }
             }
           },
           "400" : {
@@ -108,6 +117,116 @@
         }
       }
     },
+    "/api/downloads" : {
+      "post" : {
+        "tags" : [ "Browse" ],
+        "summary" : "Create a single use download ticket for one path, the path can then be fetched once within a minute with ?ticket=",
+        "description" : "Lets a browser download with a plain link that streams to disk, the ticket grants at most READ access to exactly that path",
+        "operationId" : "createDownloadTicket",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/DownloadRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/DownloadResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files" : {
+      "get" : {
+        "tags" : [ "Browse" ],
+        "summary" : "List the files of all readable repositories, newest first by default",
+        "operationId" : "listAllFiles",
+        "parameters" : [ {
+          "name" : "type",
+          "in" : "query",
+          "description" : "Only files of repositories of this type",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "repository",
+          "in" : "query",
+          "description" : "Only files of this repository",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "q",
+          "in" : "query",
+          "description" : "Filter files by path",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "sort",
+          "in" : "query",
+          "description" : "path, repository, size or uploaded (default)",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "dir",
+          "in" : "query",
+          "description" : "asc or desc, default desc for uploaded and size",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "Default 50, at most 500",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/FileResponse"
+                  }
+                }
+              }
+            },
+            "headers" : {
+              "X-Total-Count" : {
+                "schema" : {
+                  "type" : "integer",
+                  "format" : "int64"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me" : {
       "get" : {
         "tags" : [ "Users" ],
@@ -130,6 +249,87 @@
               "application/json" : {
                 "schema" : {
                   "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/packages" : {
+      "get" : {
+        "tags" : [ "Browse" ],
+        "summary" : "List the packages of all readable repositories, sorted and paged on the server",
+        "operationId" : "listAllPackages",
+        "parameters" : [ {
+          "name" : "type",
+          "in" : "query",
+          "description" : "Only packages of repositories of this type",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "repository",
+          "in" : "query",
+          "description" : "Only packages of this repository",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "q",
+          "in" : "query",
+          "description" : "Filter packages by name",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "sort",
+          "in" : "query",
+          "description" : "name, repository, versions, size or updated (default)",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "dir",
+          "in" : "query",
+          "description" : "asc or desc, default desc for updated, versions and size",
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "offset",
+          "in" : "query",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "Default 50, at most 500",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/PackageSummaryResponse"
+                  }
+                }
+              }
+            },
+            "headers" : {
+              "X-Total-Count" : {
+                "schema" : {
+                  "type" : "integer",
+                  "format" : "int64"
                 }
               }
             }
@@ -536,10 +736,128 @@
         }
       }
     },
+    "/api/repositories/{name}/packages/{package}" : {
+      "get" : {
+        "tags" : [ "Repositories" ],
+        "summary" : "Get one package of a repository with its versions, tags and files",
+        "operationId" : "getPackage",
+        "parameters" : [ {
+          "name" : "name",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "package",
+          "in" : "path",
+          "description" : "The package name, a slash (npm scopes) is sent encoded",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PackageDetailResponse"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "Not Found",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/repositories/{name}/tree" : {
+      "get" : {
+        "tags" : [ "Repositories" ],
+        "summary" : "List the direct content of a folder of a repository",
+        "operationId" : "listTree",
+        "parameters" : [ {
+          "name" : "name",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "prefix",
+          "in" : "query",
+          "description" : "The folder with a trailing slash, empty for the root",
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TreeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search" : {
+      "get" : {
+        "tags" : [ "Browse" ],
+        "summary" : "Search the packages of all readable repositories by name",
+        "operationId" : "search",
+        "parameters" : [ {
+          "name" : "q",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "description" : "At most 50",
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "type" : "array",
+                  "items" : {
+                    "$ref" : "#/components/schemas/SearchResultResponse"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/session" : {
       "post" : {
         "tags" : [ "Users" ],
-        "summary" : "Sign in to the web ui with the user password (basic auth), returns a session token for bearer authentication",
+        "summary" : "Sign in to the web ui with the user password or an access token (basic auth), returns a session token for bearer authentication",
+        "description" : "A session created with an access token is restricted to the level of the token, it never grants administration or token management, ends when the token is revoked or expires and is subject to the ip allowlist and rate limit of the token",
         "operationId" : "createSession",
         "requestBody" : {
           "content" : {
@@ -583,6 +901,33 @@
         "responses" : {
           "204" : {
             "description" : "No Content"
+          }
+        }
+      }
+    },
+    "/api/summary" : {
+      "get" : {
+        "tags" : [ "Browse" ],
+        "summary" : "Content counts of the readable repositories, the newest publications and the publications per hour of the last 31 days",
+        "operationId" : "summary",
+        "parameters" : [ {
+          "name" : "repository",
+          "in" : "query",
+          "description" : "Only summarize this repository",
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SummaryResponse"
+                }
+              }
+            }
           }
         }
       }
@@ -1066,7 +1411,22 @@
       }
     }
   },
+  "security" : [ {
+    "basicAuth" : [ ]
+  }, {
+    "bearerAuth" : [ ]
+  } ],
   "components" : {
+    "securitySchemes" : {
+      "basicAuth" : {
+        "type" : "http",
+        "scheme" : "basic"
+      },
+      "bearerAuth" : {
+        "type" : "http",
+        "scheme" : "bearer"
+      }
+    },
     "schemas" : {
       "CreateRepositoryRequest" : {
         "type" : "object",
@@ -1232,6 +1592,9 @@
           },
           "admin" : {
             "type" : "boolean"
+          },
+          "revokeTokens" : {
+            "type" : "boolean"
           }
         }
       },
@@ -1249,6 +1612,12 @@
           },
           "active" : {
             "type" : "boolean"
+          },
+          "repository" : {
+            "type" : "string"
+          },
+          "secret" : {
+            "type" : "string"
           }
         }
       },
@@ -1296,6 +1665,9 @@
       "FileResponse" : {
         "type" : "object",
         "properties" : {
+          "repository" : {
+            "type" : "string"
+          },
           "path" : {
             "type" : "string"
           },
@@ -1339,14 +1711,44 @@
           },
           "database" : {
             "type" : "string"
+          },
+          "apiDocs" : {
+            "type" : "boolean"
           }
-        }
+        },
+        "required" : [ "apiDocs" ]
       },
       "LivenessResponse" : {
         "type" : "object",
         "properties" : {
           "status" : {
             "type" : "string"
+          }
+        }
+      },
+      "PackageDetailResponse" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "versions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VersionResponse"
+            }
+          },
+          "tags" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "string"
+            }
+          },
+          "files" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FileResponse"
+            }
           }
         }
       },
@@ -1388,6 +1790,45 @@
           }
         },
         "required" : [ "yanked" ]
+      },
+      "PackageSummaryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "repository" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          },
+          "versions" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/VersionResponse"
+            }
+          },
+          "tags" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "string"
+            }
+          },
+          "files" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "updatedAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "files", "size" ]
       },
       "PermissionResponse" : {
         "type" : "object",
@@ -1454,6 +1895,9 @@
             "items" : {
               "type" : "string"
             }
+          },
+          "access" : {
+            "type" : "string"
           }
         },
         "required" : [ "publicRead", "allowRedeploy" ]
@@ -1469,9 +1913,26 @@
           },
           "username" : {
             "type" : "string"
+          },
+          "hasPassword" : {
+            "type" : "boolean"
           }
         },
-        "required" : [ "cacheEnabled" ]
+        "required" : [ "cacheEnabled", "hasPassword" ]
+      },
+      "SearchResultResponse" : {
+        "type" : "object",
+        "properties" : {
+          "repository" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
       },
       "SessionResponse" : {
         "type" : "object",
@@ -1487,6 +1948,116 @@
             "format" : "date-time"
           }
         }
+      },
+      "SummaryResponse" : {
+        "type" : "object",
+        "properties" : {
+          "repositories" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RepositorySummary"
+            }
+          },
+          "recent" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/RecentVersion"
+            }
+          },
+          "activity" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/ActivityBucket"
+            }
+          }
+        }
+      },
+      "ActivityBucket" : {
+        "type" : "object",
+        "properties" : {
+          "hour" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "counts" : {
+            "type" : "object",
+            "additionalProperties" : {
+              "type" : "integer",
+              "format" : "int64"
+            }
+          }
+        }
+      },
+      "RecentVersion" : {
+        "type" : "object",
+        "properties" : {
+          "repository" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "packageName" : {
+            "type" : "string"
+          },
+          "version" : {
+            "type" : "string"
+          },
+          "createdAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "createdBy" : {
+            "type" : "string"
+          },
+          "tags" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
+      },
+      "RepositorySummary" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "type" : {
+            "type" : "string"
+          },
+          "kind" : {
+            "type" : "string"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "publicRead" : {
+            "type" : "boolean"
+          },
+          "packages" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "versions" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "files" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "size" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "lastUpload" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "publicRead", "packages", "versions", "files", "size" ]
       },
       "TokenResponse" : {
         "type" : "object",
@@ -1530,6 +2101,26 @@
           }
         },
         "required" : [ "rateLimit" ]
+      },
+      "TreeResponse" : {
+        "type" : "object",
+        "properties" : {
+          "prefix" : {
+            "type" : "string"
+          },
+          "folders" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "files" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/FileResponse"
+            }
+          }
+        }
       },
       "UserResponse" : {
         "type" : "object",
@@ -1609,6 +2200,22 @@
           }
         },
         "required" : [ "hasSecret", "active" ]
+      },
+      "DownloadRequest" : {
+        "type" : "object",
+        "properties" : {
+          "path" : {
+            "type" : "string"
+          }
+        }
+      },
+      "DownloadResponse" : {
+        "type" : "object",
+        "properties" : {
+          "url" : {
+            "type" : "string"
+          }
+        }
       }
     }
   }

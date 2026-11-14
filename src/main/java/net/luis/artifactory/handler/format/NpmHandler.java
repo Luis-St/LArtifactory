@@ -8,6 +8,7 @@ import net.luis.artifactory.database.UnitOfWork;
 import net.luis.artifactory.database.entity.*;
 import net.luis.artifactory.http.HttpError;
 import net.luis.artifactory.http.Requests;
+import net.luis.artifactory.repository.AuditService;
 import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.BlobStore;
 import net.luis.artifactory.storage.StoredBlob;
@@ -264,7 +265,11 @@ public class NpmHandler extends FormatHandler {
 	
 	private void user(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments, @NonNull String method) throws Exception {
 		if (segments.size() == 2 && "token".equals(segments.get(0)) && "DELETE".equals(method)) {
-			this.services.users().deleteTokenBySecret(segments.get(1));
+			String id = this.services.users().deleteTokenBySecret(segments.get(1));
+			if (id != null) {
+				this.services.tokenUsage().invalidate(id);
+				this.services.audit().record(null, AuditService.TOKEN_DELETE, repository.name(), id, Requests.clientIp(ctx, this.services.config()), "npm logout");
+			}
 			this.services.auth().invalidateCache();
 			json(ctx, 200, ok());
 			return;
@@ -294,7 +299,9 @@ public class NpmHandler extends FormatHandler {
 		}
 		int days = this.services.config().npmTokenDays();
 		Instant expiresAt = days == 0 ? null : Instant.now().plus(days, ChronoUnit.DAYS);
-		UserService.CreatedToken token = this.services.users().createToken(user.username(), "npm login", AccessLevel.DELETE, expiresAt);
+		// Publishing needs WRITE, unpublishing still works with a token of the DELETE level created on the tokens page
+		UserService.CreatedToken token = this.services.users().createToken(user.username(), "npm login", AccessLevel.WRITE, expiresAt);
+		this.services.audit().record(user.username(), AuditService.TOKEN_CREATE, repository.name(), token.token().id(), Requests.clientIp(ctx, this.services.config()), "user=" + user.username() + ", level=WRITE, npm login");
 		ObjectNode root = ok();
 		root.put("id", "org.couchdb.user:" + user.username());
 		root.put("token", token.secret());

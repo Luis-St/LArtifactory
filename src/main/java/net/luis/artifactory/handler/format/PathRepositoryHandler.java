@@ -165,12 +165,12 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	}
 	
 	protected void get(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, boolean directory) throws Exception {
-		this.authorize(ctx, repository, AccessLevel.READ);
+		Principal principal = this.authorize(ctx, repository, AccessLevel.READ);
 		RepositoryClass kind = this.services.repositories().classOf(repository.name());
 		
 		if (!directory && !path.isEmpty()) {
 			if (kind == RepositoryClass.VIRTUAL) {
-				List<RepositoryEntity> members = this.members(repository);
+				List<RepositoryEntity> members = this.members(repository, principal);
 				if (this.serveMerged(ctx, repository, members, path)) {
 					return;
 				}
@@ -184,21 +184,23 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 			}
 		}
 		
-		if (!this.listDirectory(ctx, repository, kind, path)) {
+		if (!this.listDirectory(ctx, repository, kind, path, principal)) {
 			throw HttpError.notFound();
 		}
 	}
 	
 	/**
-	 * Returns the members of a virtual repository in their resolution order, members of another type and virtual members are skipped,
-	 * virtual repositories are never resolved recursively to avoid cycles.<br>
+	 * Returns the members of a virtual repository the caller can read, in their resolution order. Members of another type and virtual members
+	 * are skipped, virtual repositories are never resolved recursively to avoid cycles.<br>
+	 * Members the caller can not read are skipped as well, so aggregating a private repository in a public virtual repository does not publish it.<br>
 	 */
 	@NonNull
-	protected List<RepositoryEntity> members(@NonNull RepositoryEntity repository) throws SqlException {
+	protected List<RepositoryEntity> members(@NonNull RepositoryEntity repository, @Nullable Principal principal) throws SqlException {
 		List<RepositoryEntity> members = new ArrayList<>();
 		for (VirtualMemberEntity member : this.services.repositories().virtualMembers(repository.name())) {
 			RepositoryEntity memberRepository = this.services.repositories().get(member.member());
-			if (memberRepository != null && memberRepository.type().equals(repository.type()) && this.services.repositories().classOf(memberRepository.name()) != RepositoryClass.VIRTUAL) {
+			if (memberRepository != null && memberRepository.type().equals(repository.type()) && this.services.repositories().classOf(memberRepository.name()) != RepositoryClass.VIRTUAL
+				&& this.services.auth().canRead(principal, memberRepository)) {
 				members.add(memberRepository);
 			}
 		}
@@ -394,14 +396,14 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 		return false;
 	}
 	
-	private boolean listDirectory(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull RepositoryClass kind, @NonNull String path) throws Exception {
+	private boolean listDirectory(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull RepositoryClass kind, @NonNull String path, @Nullable Principal principal) throws Exception {
 		String prefix = path.isEmpty() ? "" : path + "/";
 		ArtifactService.DirectoryListing listing;
 		if (kind == RepositoryClass.VIRTUAL) {
 			// Aggregate the (locally stored) content of all members, the first member wins on a path collision
 			SortedSet<String> directories = new TreeSet<>();
 			Map<String, FileEntity> byPath = new LinkedHashMap<>();
-			for (RepositoryEntity member : this.members(repository)) {
+			for (RepositoryEntity member : this.members(repository, principal)) {
 				ArtifactService.DirectoryListing memberListing = this.services.artifacts().listDirectory(member.name(), prefix);
 				directories.addAll(memberListing.directories());
 				for (FileEntity file : memberListing.files()) {
@@ -453,7 +455,7 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	protected void put(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		if (this.services.repositories().classOf(repository.name()) != RepositoryClass.LOCAL) {
-			throw HttpError.badRequest("Can not publish to a remote or virtual repository");
+			throw HttpError.of(405, "Can not publish to a remote or virtual repository, they are read only");
 		}
 		
 		if (this.consumeComputedUpload(ctx, repository, path)) {
@@ -533,10 +535,22 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	protected void store(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @Nullable String username, boolean immutable) throws Exception {
 		this.services.artifacts().transaction(work -> {
 			if (!this.alreadyStored(work, repository, path, blob, immutable)) {
-				this.services.artifacts().put(work, repository.name(), path, blob, contentType(path), null, null, null, username);
+				this.record(work, repository, path, blob, contentType(path), null, null, null, username, immutable);
 			}
 			return null;
 		});
+	}
+	
+	/**
+	 * Records an uploaded file. An immutable path was found empty by {@link #alreadyStored} in the same transaction, it is inserted without
+	 * a replace so a file committed concurrently in between makes the insert fail instead of being overwritten.<br>
+	 */
+	protected void record(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String contentType, @Nullable String packageName, @Nullable String version, @Nullable String metadata, @Nullable String username, boolean immutable) throws SqlException {
+		if (immutable) {
+			this.services.artifacts().insert(work, repository.name(), path, blob, contentType, packageName, version, metadata, username);
+		} else {
+			this.services.artifacts().put(work, repository.name(), path, blob, contentType, packageName, version, metadata, username);
+		}
 	}
 	
 	protected boolean consumeComputedUpload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
@@ -554,8 +568,9 @@ public abstract class PathRepositoryHandler extends FormatHandler {
 	
 	protected void delete(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
-		if (this.services.repositories().classOf(repository.name()) != RepositoryClass.LOCAL) {
-			throw HttpError.badRequest("Can not delete from a remote or virtual repository");
+		// A remote repository only deletes its cached copies, e.g. to drop a wrong artifact, they are fetched again on the next request
+		if (this.services.repositories().classOf(repository.name()) == RepositoryClass.VIRTUAL) {
+			throw HttpError.of(405, "Can not delete from a virtual repository, delete from its members instead");
 		}
 		if (path.isEmpty()) {
 			throw HttpError.badRequest("Refusing to delete the repository root, delete the repository instead");

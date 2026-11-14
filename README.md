@@ -28,8 +28,9 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_NPM_TOKEN_DAYS`               | `90`                                           | Lifetime of tokens created by `npm login`, `0` for no expiry                               |
 | `ARTIFACTORY_MAINTENANCE_INTERVAL_MINUTES` | `60`                                           | Interval of the cleanup of orphaned blobs, temporary files and expired sessions            |
 | `ARTIFACTORY_REMOTE_METADATA_TTL_MINUTES`  | `30`                                           | Age after which a remote repository fetches Maven metadata and snapshots again, `0` always |
+| `ARTIFACTORY_AUDIT_RETENTION_DAYS`         | `365`                                          | Age after which audit log entries are deleted by the maintenance task, `0` keeps them      |
 | `ARTIFACTORY_DB_URL`                       | `jdbc:postgresql://localhost:5432/artifactory` | JDBC url                                                                                   |
-| `ARTIFACTORY_DB_USERNAME`                  | required                                       | Database user                                                                              |
+| `ARTIFACTORY_DB_USERNAME`                  | required (`artifactory` in the image)          | Database user                                                                              |
 | `ARTIFACTORY_DB_PASSWORD`                  | required                                       | Database password                                                                          |
 | `ARTIFACTORY_DB_POOL_SIZE`                 | `10`                                           | HikariCP maximum pool size                                                                 |
 | `ARTIFACTORY_LOG_ALL`                      | `WARN`                                         | Log level of third-party libraries (Jetty, HikariCP), the server itself always logs `INFO` |
@@ -41,11 +42,17 @@ Without `ARTIFACTORY_BASE_URL` the public url is derived from the request. The c
 redirected to an attacker host via a forged `Host`/`X-Forwarded-Host` header.
 The client address used for the login lockout is the last `X-Forwarded-For` entry,
 because the proxy appends the address it received the request from and all earlier entries can be forged by the client.
+Without `ARTIFACTORY_TRUST_PROXY` every client behind a reverse proxy has the address of the proxy.
+The login lockout then locks all users out after the failures of anyone, and token ip allowlists and the addresses in the audit log only show the proxy.
+The server logs a warning once when a request carries `X-Forwarded-For` while the option is off, because the misconfiguration is otherwise silent.
 The database schema is created on startup and later schema changes are applied as versioned migrations (recorded in `_sql_migrations`).
 Files are stored content addressed (sha256) below `ARTIFACTORY_STORAGE_PATH`.
 A blob that no file references any more is deleted once it is older than one hour,
 because an upload stores its blob before the file is committed to the database and a younger blob may still be in use.
-The maintenance task removes such blobs, temporary files older than a day and expired sessions.
+The maintenance task removes such blobs, temporary files older than a day, expired sessions and audit log entries older than `ARTIFACTORY_AUDIT_RETENTION_DAYS`.
+The database holds the upstream password of remote repositories and the signing secret of webhooks in plain text,
+because both are needed in plain form to authenticate to the upstream and to sign deliveries, so they can not be hashed like passwords and tokens.
+A database dump is therefore as sensitive as these credentials and has to be protected accordingly.
 `GET /health` responds with `503` while the database is unreachable, so load balancers and orchestrators can detect it.
 For production deployments, set a strong `ARTIFACTORY_ADMIN_PASSWORD` (user passwords created through the API must be at least 12 characters), a dedicated `ARTIFACTORY_DB_PASSWORD`, and leave `ARTIFACTORY_ENABLE_API_DOCS` disabled. Uploaded
 artifacts are always served with `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff` so they can not execute in the browser.
@@ -53,9 +60,16 @@ artifacts are always served with `Content-Disposition: attachment` and `X-Conten
 The server ships a web ui at `/ui/` (`/` redirects there). It shows an overview of the stored artifacts per repository type,
 lets you browse packages, versions and files, and covers the configuration of repositories, users, permissions and tokens,
 including copy-ready client setup snippets for every repository.
-Administrators also get an audit log of administrative actions and can manage webhooks.
-Users sign in with their password or an access token.
-Signing in with a password creates a session (`POST /api/session`), only the session token is kept in the browser and never the password.
+Administrators also get the audit log and can manage webhooks.
+Users sign in with their password or an access token, and without signing in the ui can be browsed as a guest, which shows the public repositories only.
+Signing in creates a session (`POST /api/session`) and only the session token is kept in the browser, never the password or the access token.
+With "keep me signed in" the session is kept in `localStorage`, otherwise in `sessionStorage`, and signing out revokes it on the server.
+A session created with an access token has the level of the token, ends when the token expires or is revoked and never grants administration,
+because the token it was exchanged for does not grant it either.
+Counts, sizes, the package list, the search and the folders of the file browser are computed and paged by the server,
+so the ui never loads all packages and files of an instance.
+Downloads use a single use ticket (`POST /api/downloads`) that authenticates one request of one path within a minute,
+because a plain link carries no authorization header and the browser can then stream the file to disk instead of buffering it in memory.
 The ui is a React single page application in `ui/`, built with Vite and packaged into the jar by Gradle (requires Node.js 20.19+):
 
 ```bash
@@ -88,6 +102,8 @@ Besides normal local repositories, which store the artifacts that are published 
 A remote repository proxies an upstream and optionally caches what is fetched.
 A virtual repository aggregates several repositories and resolves reads across them in order.
 Remote and virtual repositories are read-only and currently support only the path based `maven` and `generic` types.
+Publishing to them answers `405 Method Not Allowed`, because the request is valid but the repository does not support the method.
+The class of a repository is fixed when it is created, a virtual repository stays virtual even when its last member is deleted.
 
 ```bash
 # A remote repository proxying Maven Central, caching downloads locally
@@ -109,6 +125,15 @@ A virtual repository resolves each read against its members, local or remote, in
 including the generated metadata, checksums and non-unique snapshot names of local members.
 `maven-metadata.xml` is the exception, it is merged across all members so the version list contains the versions of every member.
 Snapshot level metadata can not be merged, because build numbers are local to a repository, so the most recently updated one is served.
+A virtual repository only resolves members the caller can read.
+A public virtual repository with a private member therefore serves that member to its readers only,
+because otherwise one toggle on the virtual repository would publish the private repository to everyone.
+A cached file of a remote repository can be deleted with `DELETE` and the `DELETE` level, for example to drop a wrong artifact.
+It is fetched from the upstream again on the next request.
+The upstream settings and the members can be changed with `PATCH /api/repositories/{name}`,
+omitted fields of `remote` keep their stored value and an empty `username` removes the upstream credentials.
+
+
 ### Client configuration
 **Gradle**
 
@@ -154,7 +179,9 @@ registry=https://repo.example.com/npm/npm-local/
 dotnet nuget push package.nupkg --source https://repo.example.com/nuget/nuget-local/v3/index.json --api-key <token>
 ```
 
-For restores add the source with `packageSourceCredentials` (user name and token) to `nuget.config`. **Cargo** (`.cargo/config.toml`)
+For restores add the source with `packageSourceCredentials` (user name and token) to `nuget.config`.
+
+**Cargo** (`.cargo/config.toml`)
 
 ```toml
 [registries.lartifactory]
@@ -197,6 +224,8 @@ The registry uses the token flow of the distribution spec: an anonymous request 
 A `Basic` challenge does not work, the Docker engine then aborts every request without stored credentials, so an anonymous pull from a `publicRead` repository would fail.
 Without credentials the token endpoint hands out an anonymous token, which reads public repositories.
 With credentials it returns the access token itself or, for a password, a session that is valid for one hour, so the password is never sent again.
+That session grants repository access like a token of the `DELETE` level but no administration,
+because a credential stored by the Docker engine should not be able to manage the server.
 Basic auth on the api endpoints keeps working for clients such as `curl`.
 
 ### One host per ecosystem
@@ -214,63 +243,70 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 ## Authentication
 
 - Users authenticate with their password (basic auth) or with tokens.
-- Tokens are created with `POST /api/tokens` and can be used as password (basic auth, any user name or `__token__`),
+- Tokens are created with `POST /api/tokens` and can be used as password (basic auth with the user name of the token owner or `__token__`),
   as bearer token (npm), as `X-NuGet-ApiKey` (NuGet) or as raw `Authorization` header (Cargo).
-  A token can be limited to a lower access level than its user and can expire. Tokens may additionally be restricted
+  A token can be limited to a lower access level than its user and can expire.
+  A token created without `level` gets `READ`, because a caller that forgets the field should get the least access and not the most.
+  Tokens may additionally be restricted
   to an IP allowlist (`allowedIps`, a comma or whitespace separated list of IPs or CIDR ranges) and to a per minute
   request rate limit (`rateLimitPerMinute`); the server records when and from which IP each token was last used.
 - Access levels per repository: `READ` (download), `WRITE` (publish, tags, yank, unlist) and `DELETE` (delete, unpublish).
   Permissions are granted per repository or for all repositories with `*`. Administrators have full access.
-- The management api (`/api/*`) requires authenticating with the user password (basic auth) or a web ui session.
-  Tokens, including an admin's token, grant repository access only.
+- Administration and token management require the user password (basic auth) or a web ui session created with it.
+  Tokens, including an admin's token, and sessions created with a token grant repository access only.
   They can not administer users, permissions or repositories and can not create, list or revoke tokens,
   so a leaked short-lived token can not be turned into a token that never expires.
+  `GET /api/me`, the read endpoints of the repositories and `DELETE /api/repositories/{name}/packages` accept tokens,
+  and the read endpoints answer anonymous callers for public repositories, which is what the guest mode of the ui uses.
 - Failed password logins are counted per client address and user.
   After `ARTIFACTORY_LOGIN_MAX_FAILURES` failures the login responds with `429` for `ARTIFACTORY_LOGIN_LOCKOUT_MINUTES`,
   and an address is locked for all users after five times as many failures.
   Behind a reverse proxy the client address is only taken from `X-Forwarded-For` with `ARTIFACTORY_TRUST_PROXY=true`.
-- Tokens created by `npm login` expire after `ARTIFACTORY_NPM_TOKEN_DAYS`, run `npm login` again afterwards.
+- Tokens created by `npm login` have the `WRITE` level and expire after `ARTIFACTORY_NPM_TOKEN_DAYS`, run `npm login` again afterwards.
+  Publishing needs `WRITE` only, `npm unpublish` needs a token of the `DELETE` level created on the tokens page.
+- Changing a password ends all other sessions of the user and keeps the tokens, because CI jobs depend on them.
+  `revokeTokens` revokes the tokens in the same request, for a password change after a compromise.
+- User names are unique without regard to case, because look-alike names such as `Admin` and `admin` mislead in permission lists.
 - The last administrator can not lose the administrator privileges, so the server can not be locked out of its own management.
 - Repositories are private by default, `publicRead` allows anonymous downloads.
 
 ## Management API
 
-| Method                 | Path                                | Description                                                                  |
-|------------------------|-------------------------------------|------------------------------------------------------------------------------|
-| `GET`                  | `/api/me`                           | The authenticated user                                                       |
-| `POST` `DELETE`        | `/api/session`                      | Sign in with the password / sign out (web ui session)                        |
-| `GET` `POST`           | `/api/repositories`                 | List / create repositories                                                   |
-| `GET` `PATCH` `DELETE` | `/api/repositories/{name}`          | Get / update / delete a repository                                           |
-| `GET` `DELETE`         | `/api/repositories/{name}/packages` | List packages and versions (`?q=&offset=&limit=`) / delete a package version |
-| `GET`                  | `/api/repositories/{name}/files`    | List files (`?prefix=&offset=&limit=`)                                       |
-| `GET` `POST`           | `/api/users`                        | List / create users                                                          |
-| `PATCH` `DELETE`       | `/api/users/{username}`             | Update (password, admin) / delete a user                                     |
-| `GET` `PUT` `DELETE`   | `/api/permissions`                  | List / grant / revoke permissions                                            |
-| `GET` `POST`           | `/api/tokens`                       | List / create tokens                                                         |
-| `DELETE`               | `/api/tokens/{id}`                  | Revoke a token                                                               |
-| `GET`                  | `/api/audit`                        | List audit log entries (admin, `?repository=&actor=&action=&limit=&offset=`) |
-| `GET` `POST`           | `/api/webhooks`                     | List / create webhooks (admin)                                               |
-| `GET` `PATCH` `DELETE` | `/api/webhooks/{id}`                | Get / update / delete a webhook (admin)                                      |
-| `POST`                 | `/api/webhooks/{id}/test`           | Send a test ping and return the delivery result (admin)                      |
-| `GET`                  | `/api/webhooks/{id}/deliveries`     | List recent delivery attempts of a webhook (admin)                           |
+| Method                 | Path                                          | Description                                                                               |
+|------------------------|-----------------------------------------------|-------------------------------------------------------------------------------------------|
+| `GET`                  | `/api/me`                                     | The authenticated user                                                                    |
+| `POST` `DELETE`        | `/api/session`                                | Sign in with the password or a token / sign out (web ui session)                          |
+| `GET` `POST`           | `/api/repositories`                           | List / create repositories                                                                |
+| `GET` `PATCH` `DELETE` | `/api/repositories/{name}`                    | Get / update / delete a repository                                                        |
+| `GET` `DELETE`         | `/api/repositories/{name}/packages`           | List packages and versions (`?q=&offset=&limit=`) / delete a package version              |
+| `GET`                  | `/api/repositories/{name}/files`              | List files (`?prefix=&offset=&limit=`)                                                    |
+| `GET`                  | `/api/repositories/{name}/packages/{package}` | One package with its versions, tags and files                                             |
+| `GET`                  | `/api/repositories/{name}/tree`               | Direct content of a folder (`?prefix=`)                                                   |
+| `GET`                  | `/api/summary`                                | Content counts per readable repository, newest versions, activity (`?repository=`)        |
+| `GET`                  | `/api/packages`                               | Packages of all readable repositories (`?type=&repository=&q=&sort=&dir=&offset=&limit=`) |
+| `GET`                  | `/api/files`                                  | Files of all readable repositories (`?type=&repository=&q=&sort=&dir=&offset=&limit=`)    |
+| `GET`                  | `/api/search`                                 | Packages of all readable repositories by name (`?q=&limit=`)                              |
+| `POST`                 | `/api/downloads`                              | Single use download ticket for one path                                                   |
+| `GET` `POST`           | `/api/users`                                  | List / create users                                                                       |
+| `PATCH` `DELETE`       | `/api/users/{username}`                       | Update (password, admin, revokeTokens) / delete a user                                    |
+| `GET` `PUT` `DELETE`   | `/api/permissions`                            | List / grant / revoke permissions                                                         |
+| `GET` `POST`           | `/api/tokens`                                 | List / create tokens                                                                      |
+| `DELETE`               | `/api/tokens/{id}`                            | Revoke a token                                                                            |
+| `GET`                  | `/api/audit`                                  | List audit log entries (admin, `?repository=&actor=&action=&from=&to=&limit=&offset=`)    |
+| `GET` `POST`           | `/api/webhooks`                               | List / create webhooks (admin)                                                            |
+| `GET` `PATCH` `DELETE` | `/api/webhooks/{id}`                          | Get / update / delete a webhook (admin)                                                   |
+| `POST`                 | `/api/webhooks/{id}/test`                     | Send a test ping and return the delivery result (admin)                                   |
+| `GET`                  | `/api/webhooks/{id}/deliveries`               | List recent delivery attempts of a webhook (admin)                                        |
 
 Users changing their own password also send `currentPassword`,
 so a stolen web ui session alone can not be used to take over the account.
 The package and file lists are paged, the total number of entries is returned in the `X-Total-Count` header.
 A page holds at most 500 packages or 5000 files, so a single request can not load a whole large repository into memory.
+The audit log and the cross repository package and file lists are paged the same way.
+Errors of the management api are an `ErrorResponse` json object, the package protocols keep the plain text errors their clients expect.
+A remote repository is created and updated with `remote.url`, `remote.cacheEnabled`, `remote.username` and `remote.password`,
+the password is never returned, the response only says whether one is stored (`hasPassword`).
 The full api is documented in `openapi.json` and served by Swagger UI at `/swagger`.
-
-### Webhooks
-
-Webhooks notify external services when something changes. Each webhook has a target url, an optional repository scope
-(empty means all repositories), an optional set of event types (empty means all) and an optional signing secret.
-
-Events: `artifact.published`, `artifact.deleted`, `package.deleted`, `repository.created`, `repository.deleted`.
-
-Deliveries are sent asynchronously as a JSON `POST` and retried a few times; the body is
-`{"event":..., "repository":..., "target":..., "timestamp":...}`. Each request carries `X-LArtifactory-Event`,
-`X-LArtifactory-Delivery` and, when a secret is configured, `X-LArtifactory-Signature: sha256=<hmac>` (HMAC-SHA256 of
-the raw body). The last delivery attempts are recorded and can be inspected in the web UI or via the API.
 
 ```bash
 curl -u admin:password -X POST https://repo.example.com/api/repositories -H 'Content-Type: application/json' \
@@ -283,6 +319,30 @@ curl -u ci:a-long-password -X POST https://repo.example.com/api/tokens -H 'Conte
 	-d '{"name": "github actions", "level": "WRITE"}'
 ```
 
+### Audit log
+
+The audit log records administrative actions (repositories, users, permissions, tokens, webhooks and package deletions),
+failed logins and the start of a lockout, and artifacts published or deleted through the package protocols.
+Locked out attempts are not recorded one by one, because a flood of attempts would otherwise flood the table.
+Entries older than `ARTIFACTORY_AUDIT_RETENTION_DAYS` are deleted by the maintenance task.
+
+### Webhooks
+
+Webhooks notify external services when something changes. Each webhook has a target url, an optional repository scope
+(empty means all repositories), an optional set of event types (empty means all) and an optional signing secret.
+
+Events: `artifact.published`, `artifact.deleted`, `package.deleted`, `repository.created`, `repository.deleted`.
+
+Deliveries are sent asynchronously as a JSON `POST` and retried a few times, the body is
+`{"event":..., "repository":..., "target":..., "timestamp":...}`.
+Each request carries `X-LArtifactory-Event`, `X-LArtifactory-Delivery` and, when a secret is configured,
+`X-LArtifactory-Signature: sha256=<hmac>` (HMAC-SHA256 of the raw body).
+All attempts of one delivery carry the same `X-LArtifactory-Delivery` id, so a receiver can recognize a retry.
+Four deliveries run in parallel, so one slow target does not hold up the others, and an event that does not fit into the full queue is logged.
+Webhooks scoped to a repository are deleted together with the repository.
+The url, the events, the repository scope and the secret can be changed with `PATCH /api/webhooks/{id}`, an empty `secret` removes it.
+The last delivery attempts are recorded and can be inspected in the web UI or via the API.
+
 ## Development
 
 ```bash
@@ -292,6 +352,7 @@ curl -u ci:a-long-password -X POST https://repo.example.com/api/tokens -H 'Conte
 ```
 
 `./gradlew compileJava` also regenerates `openapi.json` from the `@OpenApi` annotations.
+The GitHub workflow in `.github/workflows/build.yml` runs the type check of the ui and all tests on every push and pull request.
 The integration tests start the server against a PostgreSQL container with Testcontainers and are skipped if no docker daemon is available.
 Swagger UI is served at `/swagger`, the health endpoints below are served at `/health`.
 

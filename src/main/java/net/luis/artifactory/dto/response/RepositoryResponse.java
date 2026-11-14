@@ -18,17 +18,16 @@ public record RepositoryResponse(
 	@NonNull String url,
 	@NonNull String kind,
 	@Nullable RemoteInfo remote,
-	@NonNull List<String> members
+	@NonNull List<String> members,
+	@Nullable String access
 ) {
 	
+	/**
+	 * @param access The effective access level of the caller (READ, WRITE or DELETE), null for an anonymous reader of a public repository
+	 */
 	@NonNull
-	public static RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String baseUrl) {
-		return of(entity, baseUrl, "LOCAL", null, List.of());
-	}
-	
-	@NonNull
-	public static RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String baseUrl, @NonNull String kind, @Nullable RemoteInfo remote, @NonNull List<String> members) {
-		return new RepositoryResponse(entity.name(), entity.type(), entity.description(), entity.publicRead(), entity.allowRedeploy(), entity.createdAt(), baseUrl + "/" + entity.type() + "/" + entity.name(), kind, remote, members);
+	public static RepositoryResponse of(@NonNull RepositoryEntity entity, @NonNull String url, @NonNull String kind, @Nullable RemoteInfo remote, @NonNull List<String> members, @Nullable String access) {
+		return new RepositoryResponse(entity.name(), entity.type(), entity.description(), entity.publicRead(), entity.allowRedeploy(), entity.createdAt(), url, kind, remote, members, access);
 	}
 	
 	/**
@@ -37,12 +36,13 @@ public record RepositoryResponse(
 	public record RemoteInfo(
 		@NonNull String url,
 		boolean cacheEnabled,
-		@Nullable String username
+		@Nullable String username,
+		boolean hasPassword
 	) {
 		
 		@NonNull
 		public static RemoteInfo of(@NonNull RemoteConfigEntity entity) {
-			return new RemoteInfo(entity.url(), entity.cacheEnabled(), entity.username());
+			return new RemoteInfo(entity.url(), entity.cacheEnabled(), entity.username(), entity.password() != null && !entity.password().isEmpty());
 		}
 	}
 }

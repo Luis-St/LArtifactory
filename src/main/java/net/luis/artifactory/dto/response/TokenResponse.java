@@ -25,11 +25,6 @@ public record TokenResponse(
 ) {
 	
 	@NonNull
-	public static TokenResponse of(@NonNull TokenEntity entity, @Nullable String secret) {
-		return of(entity, null, secret);
-	}
-	
-	@NonNull
 	public static TokenResponse of(@NonNull TokenEntity entity, @Nullable TokenMetaEntity meta, @Nullable String secret) {
 		return new TokenResponse(
 			entity.id(),

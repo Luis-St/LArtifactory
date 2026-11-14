@@ -2736,6 +2736,13 @@ input:disabled {
 	min-width: 0;
 }
 
+.checkbox-inline {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	cursor: pointer;
+}
+
 .toggle {
 	display: flex;
 	align-items: flex-start;
@@ -3537,4 +3544,10 @@ input[aria-invalid='true'] {
 	.modal-footer {
 		flex-wrap: wrap;
 	}
+}
+
+/* A server paged table keeps its rows while the next page loads */
+.table-wrap.loading {
+	opacity: 0.6;
+	transition: opacity 0.15s;
 }

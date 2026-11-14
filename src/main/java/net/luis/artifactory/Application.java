@@ -6,6 +6,8 @@ import io.javalin.config.SizeUnit;
 import io.javalin.http.HandlerType;
 import io.javalin.http.staticfiles.Location;
 import io.javalin.json.JavalinJackson3;
+import io.javalin.openapi.BasicAuth;
+import io.javalin.openapi.BearerAuth;
 import io.javalin.openapi.plugin.OpenApiPlugin;
 import io.javalin.openapi.plugin.swagger.SwaggerPlugin;
 import net.luis.artifactory.auth.*;
@@ -34,6 +36,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class Application {
 	
@@ -79,20 +82,27 @@ public class Application {
 		UserService userService = new UserService(database);
 		userService.bootstrapAdmin(serverConfig.adminUsername(), serverConfig.adminPassword());
 		WebhookService webhookService = new WebhookService(database);
-		ArtifactService artifactService = new ArtifactService(database, blobStore, webhookService);
+		AuditService auditService = new AuditService(database);
+		ArtifactService artifactService = new ArtifactService(database, blobStore, webhookService, auditService);
 		TokenUsageService tokenUsageService = new TokenUsageService(userService);
+		RepositoryService repositoryService = new RepositoryService(database, artifactService);
+		int backfilled = repositoryService.backfillKinds();
+		if (backfilled > 0) {
+			LOGGER.info("Stored the class of {} existing repositories", backfilled);
+		}
 		Services services = new Services(
 			serverConfig,
 			userService,
-			new AuthService(userService, tokenUsageService, serverConfig),
+			new AuthService(userService, tokenUsageService, serverConfig, auditService),
 			tokenUsageService,
-			new RepositoryService(database, artifactService),
+			repositoryService,
 			artifactService,
 			new PackageService(database),
 			new BodyReader(Math.min(serverConfig.maxBufferedUploadSize(), serverConfig.maxUploadSize() * 2), Runtime.getRuntime().maxMemory()),
-			new AuditService(database),
+			auditService,
 			webhookService,
-			new ProxyService(serverConfig.maxUploadSize())
+			new ProxyService(serverConfig.maxUploadSize()),
+			database
 		);
 		
 		Javalin app = createApp(services, databaseProvider).start(serverConfig.port());
@@ -112,9 +122,10 @@ public class Application {
 			int temporary = services.artifacts().blobStore().cleanTemporaryFiles(TEMPORARY_FILE_MAX_AGE);
 			int sessions = services.users().deleteExpiredSessions();
 			int ociBlobs = OciHandler.collectGarbage(services, OCI_BLOB_MIN_AGE);
+			int audit = services.audit().prune(services.config().auditRetentionDays());
 			services.auth().cleanup();
-			if (blobs > 0 || temporary > 0 || sessions > 0 || ociBlobs > 0) {
-				LOGGER.info("Maintenance removed {} orphaned blobs, {} temporary files, {} expired sessions and {} unreferenced OCI blobs", blobs, temporary, sessions, ociBlobs);
+			if (blobs > 0 || temporary > 0 || sessions > 0 || ociBlobs > 0 || audit > 0) {
+				LOGGER.info("Maintenance removed {} orphaned blobs, {} temporary files, {} expired sessions, {} unreferenced OCI blobs and {} expired audit entries", blobs, temporary, sessions, ociBlobs, audit);
 			}
 		} catch (Exception e) {
 			LOGGER.error("Maintenance failed", e);
@@ -124,7 +135,9 @@ public class Application {
 	@NonNull
 	private static Javalin createApp(@NonNull Services services, @NonNull DatabaseProvider databaseProvider) {
 		ServerConfig serverConfig = services.config();
-		var healthHandler = new HealthHandler(databaseProvider);
+		var healthHandler = new HealthHandler(databaseProvider, serverConfig.apiDocsEnabled());
+		var browseHandler = new BrowseHandler(services);
+		AtomicBoolean proxyWarned = new AtomicBoolean();
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);
 		var userAdminHandler = new UserAdminHandler(services);
 		var auditAdminHandler = new AuditAdminHandler(services);
@@ -154,6 +167,12 @@ public class Application {
 						definition.info(info ->
 							info.title("LArtifactory").version("1.0.0").description("Artifact repository management API")
 						)
+							// Administration and token management require a password (basic) or a session from POST /api/session (bearer),
+							// the read endpoints also accept access tokens as bearer token or as basic password with the user __token__
+							.withSecurityScheme("basicAuth", new BasicAuth())
+							.withSecurityScheme("bearerAuth", new BearerAuth())
+							.withGlobalSecurity("basicAuth", _ -> {})
+							.withGlobalSecurity("bearerAuth", _ -> {})
 					)
 				));
 				config.registerPlugin(new SwaggerPlugin());
@@ -174,7 +193,13 @@ public class Application {
 			config.routes.before(ctx -> {
 				String traceId = UUID.randomUUID().toString();
 				MDC.put("trace_id", traceId);
-				MDC.put("source_ip", Requests.clientIp(ctx, serverConfig));
+				MDC.put(AuditService.IP_KEY, Requests.clientIp(ctx, serverConfig));
+				// Behind a reverse proxy every client has the address of the proxy unless it is trusted, which makes the login
+				// lockout, token ip allowlists and the audit log addresses apply to the proxy instead of the clients
+				if (!serverConfig.trustProxy() && ctx.header("X-Forwarded-For") != null && proxyWarned.compareAndSet(false, true)) {
+					LOGGER.warn("Requests carry X-Forwarded-For but {} is not set, all clients behind the proxy share its address {} for the login lockout, token ip allowlists and the audit log",
+						EnvKeys.TRUST_PROXY, ctx.req().getRemoteAddr());
+				}
 				ctx.attribute("trace_id", traceId);
 				ctx.attribute("request_start", System.nanoTime());
 				// Prevent browsers from MIME sniffing uploaded artifacts (e.g. a stored .html/.svg) into active content
@@ -210,7 +235,13 @@ public class Application {
 					}
 				});
 				if (e.body() != null && !"HEAD".equalsIgnoreCase(ctx.req().getMethod())) {
-					ctx.contentType(e.contentType() == null ? "text/plain" : e.contentType()).result(e.body());
+					// The management api answers the documented ErrorResponse json, the package protocols keep their plain text errors
+					boolean api = ctx.path().startsWith("/api/");
+					if (api && "text/plain".equals(e.contentType())) {
+						ctx.json(new ErrorResponse(e.body()));
+					} else {
+						ctx.contentType(e.contentType() == null ? "text/plain" : e.contentType()).result(e.body());
+					}
 				} else {
 					ctx.result("");
 				}
@@ -265,6 +296,13 @@ public class Application {
 			config.routes.get("/api/repositories/{name}/packages", repositoryAdminHandler::packages);
 			config.routes.delete("/api/repositories/{name}/packages", repositoryAdminHandler::deletePackage);
 			config.routes.get("/api/repositories/{name}/files", repositoryAdminHandler::files);
+			config.routes.get("/api/repositories/{name}/packages/<package>", browseHandler::pkg);
+			config.routes.get("/api/repositories/{name}/tree", browseHandler::tree);
+			config.routes.get("/api/summary", browseHandler::summary);
+			config.routes.get("/api/packages", browseHandler::packages);
+			config.routes.get("/api/files", browseHandler::files);
+			config.routes.get("/api/search", browseHandler::search);
+			config.routes.post("/api/downloads", browseHandler::download);
 			config.routes.get("/api/users", userAdminHandler::listUsers);
 			config.routes.post("/api/users", userAdminHandler::createUser);
 			config.routes.patch("/api/users/{username}", userAdminHandler::updateUser);

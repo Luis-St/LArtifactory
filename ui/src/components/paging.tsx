@@ -92,3 +92,23 @@ export function Pagination({paging, noun = 'rows'}: { paging: Paging; noun?: str
 		</div>
 	);
 }
+
+/**
+ * Paging of a list the server pages, the page goes back to the first one whenever one of the reset keys (filters, sorting) or the page size changes.
+ */
+export function useServerPaging(resetKeys: unknown[]): { offset: number; limit: number; paging: (total: number) => Paging } {
+	const [size, setSize] = useState(pageSize);
+	const [page, setPage] = useState(0);
+	useEffect(() => {
+		listeners.add(setSize);
+		return () => {
+			listeners.delete(setSize);
+		};
+	}, []);
+	useEffect(() => setPage(0), [...resetKeys, size]);
+	return {
+		offset: page * size,
+		limit: size,
+		paging: total => ({page: Math.min(page, Math.max(0, Math.ceil(total / size) - 1)), pageCount: Math.max(1, Math.ceil(total / size)), size, total, setPage}),
+	};
+}

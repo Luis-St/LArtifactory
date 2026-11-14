@@ -22,9 +22,11 @@ import java.util.Objects;
 public class HealthHandler {
 	
 	private final DatabaseProvider databaseProvider;
+	private final boolean apiDocs;
 	
-	public HealthHandler(@NonNull DatabaseProvider databaseProvider) {
+	public HealthHandler(@NonNull DatabaseProvider databaseProvider, boolean apiDocs) {
 		this.databaseProvider = Objects.requireNonNull(databaseProvider, "Database provider must not be null");
+		this.apiDocs = apiDocs;
 	}
 	
 	@OpenApi(
@@ -43,7 +45,7 @@ public class HealthHandler {
 		
 		// The server can not serve anything without the database, so report it as unavailable for load balancers and orchestrators
 		boolean dbHealthy = this.databaseProvider.isHealthy();
-		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN"));
+		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN", this.apiDocs));
 	}
 	
 	@OpenApi(
@@ -79,6 +81,6 @@ public class HealthHandler {
 		
 		boolean dbHealthy = this.databaseProvider.isHealthy();
 		// Return 503 when not ready so load balancers and orchestrators stop routing traffic until the database recovers.
-		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN"));
+		ctx.status(dbHealthy ? 200 : 503).json(new HealthResponse(dbHealthy ? "UP" : "DOWN", dbHealthy ? "UP" : "DOWN", this.apiDocs));
 	}
 }

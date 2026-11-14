@@ -62,6 +62,14 @@ class LoginThrottleTest {
 		assertDoesNotThrow(() -> this.throttle.check("10.0.0.1", "admin"));
 	}
 	
+	@Test
+	void failureReportsTheStartOfALockout() {
+		assertFalse(this.throttle.failure("10.0.0.2", "admin"));
+		assertFalse(this.throttle.failure("10.0.0.2", "admin"));
+		assertTrue(this.throttle.failure("10.0.0.2", "admin"));
+		assertFalse(this.throttle.failure("10.0.0.2", "admin"), "only the failure that reaches the limit starts the lockout");
+	}
+	
 	private static final class MutableClock extends Clock {
 		
 		private Instant now = Instant.parse("2026-01-01T00:00:00Z");

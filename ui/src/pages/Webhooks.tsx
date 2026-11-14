@@ -14,6 +14,7 @@ export function Webhooks() {
 	const { notify } = useSession();
 	const webhooks = useAsync(() => api.webhooks(), []);
 	const [creating, setCreating] = useState(false);
+	const [editing, setEditing] = useState<Webhook | null>(null);
 	const [deleting, setDeleting] = useState<Webhook | null>(null);
 	const [history, setHistory] = useState<Webhook | null>(null);
 	const [testing, setTesting] = useState<string | null>(null);
@@ -87,6 +88,7 @@ export function Webhooks() {
 										<span className="row-actions">
 											<Button small variant="ghost" disabled={testing === webhook.id} onClick={() => test(webhook)}>{testing === webhook.id ? 'Sending…' : 'Send test'}</Button>
 											<Menu label="Webhook actions" items={[
+												{ label: 'Edit webhook', icon: 'webhooks', onSelect: () => setEditing(webhook) },
 												{ label: 'Delivery history', icon: 'audit', onSelect: () => setHistory(webhook) },
 												{ label: webhook.active ? 'Disable' : 'Enable', icon: webhook.active ? 'close' : 'check', onSelect: () => toggle(webhook) },
 												{ label: 'Delete webhook', icon: 'trash', onSelect: () => setDeleting(webhook), danger: true },
@@ -100,7 +102,8 @@ export function Webhooks() {
 				</div>
 			))}
 
-			{creating && <CreateWebhookDialog onClose={() => setCreating(false)} onCreated={() => { setCreating(false); webhooks.reload(); notify('Webhook created'); }} />}
+			{creating && <WebhookDialog onClose={() => setCreating(false)} onSaved={() => { setCreating(false); webhooks.reload(); notify('Webhook created'); }} />}
+			{editing && <WebhookDialog webhook={editing} onClose={() => setEditing(null)} onSaved={() => { setEditing(null); webhooks.reload(); notify('Webhook saved'); }} />}
 			{history && <HistoryDialog webhook={history} onClose={() => setHistory(null)} />}
 			{deleting && (
 				<ConfirmDialog
@@ -132,12 +135,16 @@ function eventTone(event: string): 'success' | 'danger' | 'neutral' {
 	return event.endsWith('.deleted') ? 'danger' : event.endsWith('.published') || event.endsWith('.created') ? 'success' : 'neutral';
 }
 
-function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+/**
+ * Creates a webhook, or edits one when it is given. A stored secret is never shown, it is kept unless a new one is entered or it is removed.
+ */
+function WebhookDialog({ webhook, onClose, onSaved }: { webhook?: Webhook; onClose: () => void; onSaved: () => void }) {
 	const repositories = useAsync(() => api.repositories(), []);
-	const [url, setUrl] = useState('');
-	const [repository, setRepository] = useState('');
+	const [url, setUrl] = useState(webhook?.url ?? '');
+	const [repository, setRepository] = useState(webhook?.repository ?? '');
 	const [secret, setSecret] = useState('');
-	const [events, setEvents] = useState<string[]>([]);
+	const [removeSecret, setRemoveSecret] = useState(false);
+	const [events, setEvents] = useState<string[]>(webhook?.events ?? []);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
 
@@ -148,8 +155,12 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 		setBusy(true);
 		setError(undefined);
 		try {
-			await api.createWebhook({ url: url.trim(), repository: repository || undefined, secret: secret.trim() || undefined, events, active: true });
-			onCreated();
+			if (webhook) {
+				await api.updateWebhook(webhook.id, { url: url.trim(), repository, events, secret: removeSecret ? '' : secret.trim() || undefined });
+			} else {
+				await api.createWebhook({ url: url.trim(), repository: repository || undefined, secret: secret.trim() || undefined, events, active: true });
+			}
+			onSaved();
 		} catch (e) {
 			setError(errorText(e));
 			setBusy(false);
@@ -157,7 +168,7 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 	};
 
 	return (
-		<Modal title="New webhook" onClose={onClose}>
+		<Modal title={webhook ? 'Edit webhook' : 'New webhook'} onClose={onClose}>
 			<form className="form" onSubmit={submit}>
 				<Field label="Payload URL" hint="An http(s) endpoint that receives a POST for each event">
 					<input value={url} onChange={e => setUrl(e.target.value)} required autoFocus placeholder="https://ci.example.com/hooks/lartifactory" maxLength={1024} />
@@ -168,9 +179,15 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 						...sortRepositories(repositories.data ?? []).map(repo => ({value: repo.name, label: repo.name, hint: TYPE_INFO[repo.type].label})),
 					]}/>
 				</Field>
-				<Field label="Secret" hint="Optional, used to sign payloads with HMAC-SHA256 (X-LArtifactory-Signature)">
-					<input value={secret} onChange={e => setSecret(e.target.value)} placeholder="Unsigned" maxLength={256} />
+				<Field label="Secret" hint={webhook?.hasSecret ? 'A secret is set, enter a new one to replace it' : 'Optional, used to sign payloads with HMAC-SHA256 (X-LArtifactory-Signature)'}>
+					<input value={secret} onChange={e => setSecret(e.target.value)} placeholder={webhook?.hasSecret ? 'Keep the current secret' : 'Unsigned'} maxLength={256} disabled={removeSecret} />
 				</Field>
+				{webhook?.hasSecret && (
+					<label className="checkbox-inline">
+						<input type="checkbox" checked={removeSecret} onChange={e => setRemoveSecret(e.target.checked)} />
+						<span>Remove the secret, payloads are sent unsigned</span>
+					</label>
+				)}
 				<Field group label="Events" hint="Select none to receive all events">
 					<div className="checkbox-list">
 						{WEBHOOK_EVENTS.map(event => (
@@ -184,7 +201,7 @@ function CreateWebhookDialog({ onClose, onCreated }: { onClose: () => void; onCr
 				{error && <ErrorBox error={error} />}
 				<div className="modal-footer">
 					<Button onClick={onClose} disabled={busy}>Cancel</Button>
-					<Button variant="primary" type="submit" disabled={busy || !url.trim()}>{busy ? 'Creating…' : 'Create webhook'}</Button>
+					<Button variant="primary" type="submit" disabled={busy || !url.trim()}>{busy ? 'Saving…' : webhook ? 'Save webhook' : 'Create webhook'}</Button>
 				</div>
 			</form>
 		</Modal>

@@ -4,6 +4,7 @@ import net.luis.artifactory.auth.*;
 import net.luis.artifactory.config.ServerConfig;
 import net.luis.artifactory.http.BodyReader;
 import net.luis.artifactory.repository.*;
+import net.luis.utils.io.database.SqlDatabase;
 import org.jspecify.annotations.NonNull;
 
 import java.util.Objects;
@@ -19,7 +20,8 @@ public record Services(
 	@NonNull BodyReader bodies,
 	@NonNull AuditService audit,
 	@NonNull WebhookService webhooks,
-	@NonNull ProxyService proxy
+	@NonNull ProxyService proxy,
+	@NonNull SqlDatabase database
 ) {
 	
 	public Services {
@@ -34,5 +36,6 @@ public record Services(
 		Objects.requireNonNull(audit, "Audit service must not be null");
 		Objects.requireNonNull(webhooks, "Webhook service must not be null");
 		Objects.requireNonNull(proxy, "Proxy service must not be null");
+		Objects.requireNonNull(database, "Database must not be null");
 	}
 }

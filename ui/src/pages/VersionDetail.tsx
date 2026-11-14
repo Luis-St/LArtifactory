@@ -1,5 +1,5 @@
 import {useMemo, useState} from 'react';
-import {api} from '../api';
+import {api, ApiError} from '../api';
 import {Icon} from '../components/icons';
 import {Select} from '../components/Select';
 import {Badge, Button, Card, ConfirmDialog, CopyButton, Empty, ErrorBox, PageHeader, SnippetTabs, Spinner, Stat, Stats, TypeBadge} from '../components/ui';
@@ -9,7 +9,7 @@ import {latestLabel, latestVersion} from '../inventory';
 import {href, navigate, versionHref} from '../router';
 import {useSession} from '../session';
 import {installSnippets} from '../setup';
-import type {FileEntry} from '../types';
+import {type FileEntry, includesLevel} from '../types';
 import {FileBrowser} from './RepositoryDetail';
 
 /**
@@ -37,18 +37,25 @@ function commonFolder(files: FileEntry[]): string {
 export function VersionDetail({repositoryName, packageName, version}: { repositoryName: string; packageName: string; version: string }) {
 	const {notify} = useSession();
 	const repository = useAsync(() => api.repository(repositoryName), [repositoryName]);
-	const packages = useAsync(() => api.packages(repositoryName), [repositoryName]);
-	const files = useAsync(() => api.files(repositoryName), [repositoryName]);
+	// Only this package is loaded, with its versions, tags and the files of all versions
+	const packages = useAsync(() => api.pkg(repositoryName, packageName).catch(error => {
+		if (error instanceof ApiError && error.status === 404) {
+			return null;
+		}
+		throw error;
+	}), [repositoryName, packageName]);
+	const files = {data: packages.data?.files, error: packages.error, reload: packages.reload};
 	const [deleting, setDeleting] = useState(false);
 
 	const repo = repository.data;
-	const pkg = packages.data?.find(entry => entry.name === packageName);
+	const pkg = packages.data ?? undefined;
 	const oci = repo?.type === 'oci';
 	const entry = pkg?.versions.find(candidate => candidate.version === version);
-	const versionFiles = useMemo(() => (files.data ?? []).filter(file => file.packageName === packageName && file.version === version), [files.data, packageName, version]);
+	const versionFiles = useMemo(() => (files.data ?? []).filter(file => file.version === version), [files.data, version]);
+	const canDelete = includesLevel(repo?.access, 'DELETE') && repo?.kind === 'LOCAL';
 	const versions = useMemo(() => [...(pkg?.versions ?? [])].sort((a, b) => oci ? b.createdAt.localeCompare(a.createdAt) : compareVersions(b.version, a.version)), [pkg, oci]);
 
-	if ((repository.loading && !repo) || (packages.loading && !packages.data)) {
+	if ((repository.loading && !repo) || (packages.loading && packages.data === undefined)) {
 		return <Spinner/>;
 	}
 	const versionLabel = (value: string) => isDigest(value) ? shortDigest(value) : value;
@@ -80,7 +87,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 	}
 
 	const tags = Object.entries(pkg.tags).filter(([, target]) => target === version).map(([tag]) => tag);
-	const latestTag = oci ? latestLabel(repo, pkg) : undefined;
+	const latestTag = oci ? latestLabel(repo.type, pkg) : undefined;
 	const latest = (latestTag && pkg.tags[latestTag]) || latestVersion(pkg);
 	const isLatest = latest === version;
 	const size = versionFiles.reduce((sum, file) => sum + file.size, 0);
@@ -107,7 +114,7 @@ export function VersionDetail({repositoryName, packageName, version}: { reposito
 										hint: candidate.version === latest ? 'latest' : Object.entries(pkg.tags).filter(([, target]) => target === candidate.version).map(([tag]) => tag).join(', ') || undefined,
 									}))}/>
 						)}
-						<Button variant="ghost" className="danger-text" onClick={() => setDeleting(true)}><Icon name="trash" size={15}/>Delete {oci ? 'manifest' : 'version'}</Button>
+						{canDelete && <Button variant="ghost" className="danger-text" onClick={() => setDeleting(true)}><Icon name="trash" size={15}/>Delete {oci ? 'manifest' : 'version'}</Button>}
 					</>
 				}
 			/>

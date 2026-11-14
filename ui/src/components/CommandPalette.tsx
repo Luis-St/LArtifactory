@@ -2,8 +2,8 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import {NAV_GROUPS, visibleTo} from '../nav';
 import {href, navigate} from '../router';
 import {useSession} from '../session';
-import {loadPackageIndex as loadIndex, type PackageIndex as Index} from '../inventory';
-import type {Repository} from '../types';
+import {api} from '../api';
+import type {Repository, RepositoryType, SearchResult} from '../types';
 import {Icon, type IconName} from './icons';
 import {TypeBadge} from './ui';
 
@@ -13,7 +13,7 @@ interface Entry {
 	detail?: string;
 	target: string;
 	icon?: IconName;
-	repository?: Repository;
+	type?: RepositoryType;
 	group: string;
 }
 
@@ -25,13 +25,29 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 	const list = useRef<HTMLUListElement>(null);
 	const [query, setQuery] = useState('');
 	const [active, setActive] = useState(0);
-	const [index, setIndex] = useState<Index | null>(null);
+	const [repositoryList, setRepositoryList] = useState<Repository[] | null>(null);
+	const [packageHits, setPackageHits] = useState<SearchResult[]>([]);
 	const [error, setError] = useState(false);
 
 	useEffect(() => {
 		dialog.current?.showModal();
-		loadIndex().then(setIndex, () => setError(true));
+		api.repositories().then(setRepositoryList, () => setError(true));
 	}, []);
+	
+	// Packages are searched on the server, debounced so typing does not send a request per key
+	useEffect(() => {
+		const needle = query.trim();
+		if (!needle) {
+			setPackageHits([]);
+			return;
+		}
+		let active = true;
+		const timer = setTimeout(() => api.search(needle, LIMIT).then(hits => active && setPackageHits(hits), () => active && setPackageHits([])), 150);
+		return () => {
+			active = false;
+			clearTimeout(timer);
+		};
+	}, [query]);
 
 	const entries = useMemo(() => {
 		const needle = query.trim().toLowerCase();
@@ -40,23 +56,20 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 			.filter(item => visibleTo(item, principal))
 			.filter(item => matches(item.label))
 			.map(item => ({key: `page:${item.id}`, label: item.label, target: href(...(item.id ? [item.id] : [])), icon: item.icon, group: 'Pages'}));
-		const repositories: Entry[] = (index?.repositories ?? [])
+		const repositories: Entry[] = (repositoryList ?? [])
 			.filter(repository => matches(repository.name, repository.description, repository.type))
 			.slice(0, LIMIT)
-			.map(repository => ({key: `repo:${repository.name}`, label: repository.name, detail: repository.description ?? undefined, target: href('repositories', repository.name), repository, group: 'Repositories'}));
-		const packages: Entry[] = needle ? (index?.packages ?? [])
-			.filter(entry => matches(entry.pkg.name))
-			.slice(0, LIMIT)
-			.map(({repository, pkg}) => ({
-				key: `pkg:${repository.name}/${pkg.name}`,
-				label: pkg.name,
-				detail: repository.name,
-				target: href('repositories', repository.name, 'packages', pkg.name),
-				repository,
-				group: 'Packages',
-			})) : [];
+			.map(repository => ({key: `repo:${repository.name}`, label: repository.name, detail: repository.description ?? undefined, target: href('repositories', repository.name), type: repository.type, group: 'Repositories'}));
+		const packages: Entry[] = needle ? packageHits.map(hit => ({
+			key: `pkg:${hit.repository}/${hit.name}`,
+			label: hit.name,
+			detail: hit.repository,
+			target: href('repositories', hit.repository, 'packages', hit.name),
+			type: hit.type,
+			group: 'Packages',
+		})) : [];
 		return [...(needle ? [...packages, ...repositories] : repositories), ...pages];
-	}, [query, index, principal]);
+	}, [query, repositoryList, packageHits, principal]);
 
 	useEffect(() => setActive(0), [query]);
 	useEffect(() => {
@@ -99,12 +112,12 @@ export function CommandPalette({onClose}: { onClose: () => void }) {
 				<kbd>Esc</kbd>
 			</div>
 			<ul ref={list} className="palette-list" role="listbox">
-				{entries.length === 0 && <li className="palette-empty muted">{error ? 'Could not load repositories' : index ? 'No results' : 'Loading…'}</li>}
+				{entries.length === 0 && <li className="palette-empty muted">{error ? 'Could not load repositories' : repositoryList ? 'No results' : 'Loading…'}</li>}
 				{entries.map((entry, position) => (
 					<li key={entry.key}>
 						{(position === 0 || entries[position - 1].group !== entry.group) && <div className="palette-group">{entry.group}</div>}
 						<button type="button" role="option" aria-selected={position === active} className="palette-item" onMouseMove={() => setActive(position)} onClick={() => open(entry)}>
-							{entry.repository ? <TypeBadge type={entry.repository.type}/> : entry.icon && <Icon name={entry.icon}/>}
+							{entry.type ? <TypeBadge type={entry.type}/> : entry.icon && <Icon name={entry.icon}/>}
 							<span className="palette-label">{entry.label}</span>
 							{entry.detail && <span className="palette-detail muted">{entry.detail}</span>}
 						</button>
