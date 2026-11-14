@@ -12,16 +12,16 @@ import java.util.regex.Pattern;
  * Only the {@link Pepper keyed} hashes of the codes are stored, a code is shown once when the set is generated.<br>
  */
 public final class RecoveryCodes {
-
-	public static final int COUNT = 8;
+	
 	private static final String LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 	private static final Pattern FORMAT = Pattern.compile("[A-Z]{4}-[A-Z]{4}");
 	private static final String PEPPER_PURPOSE = "recovery-code";
 	private static final String SEPARATOR = ",";
 	private static final SecureRandom RANDOM = new SecureRandom();
-
+	public static final int COUNT = 8;
+	
 	private RecoveryCodes() {}
-
+	
 	/**
 	 * Generates a new set of distinct codes.<br>
 	 */
@@ -40,7 +40,7 @@ public final class RecoveryCodes {
 		}
 		return List.copyOf(codes);
 	}
-
+	
 	/**
 	 * Brings user input into the code format: upper case, without spaces, with the dash added if it was left out.<br>
 	 *
@@ -57,11 +57,11 @@ public final class RecoveryCodes {
 		}
 		return FORMAT.matcher(value).matches() ? value : null;
 	}
-
+	
 	public static boolean looksLikeCode(@Nullable String input) {
 		return normalize(input) != null;
 	}
-
+	
 	/**
 	 * Returns the stored form of a set of codes, the joined hashes.<br>
 	 */
@@ -69,11 +69,11 @@ public final class RecoveryCodes {
 	public static String hashAll(@NonNull Pepper pepper, @NonNull List<String> codes) {
 		return String.join(SEPARATOR, codes.stream().map(code -> pepper.hmacHex(PEPPER_PURPOSE, code)).toList());
 	}
-
+	
 	public static int remaining(@Nullable String stored) {
 		return stored == null || stored.isBlank() ? 0 : stored.split(SEPARATOR).length;
 	}
-
+	
 	/**
 	 * Removes the code from the stored set.<br>
 	 *

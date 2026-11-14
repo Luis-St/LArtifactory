@@ -336,6 +336,7 @@ public class AccountSecurityService {
 	//endregion
 	
 	//region Confirming changes with a second factor
+	
 	/**
 	 * Sends a code to the email address of a signed in user with codes by email, it confirms one change of the account security.<br>
 	 */
@@ -512,6 +513,7 @@ public class AccountSecurityService {
 	//endregion
 	
 	//region Email address
+	
 	/**
 	 * @throws HttpError 409 if another account has the email address
 	 */
@@ -521,7 +523,6 @@ public class AccountSecurityService {
 			throw HttpError.conflict("The email address is used by another account");
 		}
 	}
-	
 	
 	/**
 	 * Sends a verification code to a new email address, the address is stored once the code confirms it.<br>

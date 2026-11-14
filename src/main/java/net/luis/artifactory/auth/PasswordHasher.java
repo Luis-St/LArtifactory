@@ -23,7 +23,7 @@ import java.util.Objects;
  * </p>
  */
 public final class PasswordHasher {
-
+	
 	private static final String ALGORITHM = "PBKDF2WithHmacSHA256";
 	private static final String PEPPERED = "pbkdf2p";
 	private static final String LEGACY = "pbkdf2";
@@ -31,20 +31,20 @@ public final class PasswordHasher {
 	private static final int ITERATIONS = 210_000;
 	private static final int KEY_LENGTH = 256;
 	private static final SecureRandom RANDOM = new SecureRandom();
-
+	
 	private final Pepper pepper;
-
+	
 	public PasswordHasher(@NonNull Pepper pepper) {
 		this.pepper = Objects.requireNonNull(pepper, "Pepper must not be null");
 	}
-
+	
 	@NonNull
 	public static String randomSecret(int bytes) {
 		byte[] data = new byte[bytes];
 		RANDOM.nextBytes(data);
 		return Base64.getUrlEncoder().withoutPadding().encodeToString(data);
 	}
-
+	
 	private static byte @NonNull [] pbkdf2(char @NonNull [] password, byte @NonNull [] salt, int iterations) {
 		try {
 			PBEKeySpec spec = new PBEKeySpec(password, salt, iterations, KEY_LENGTH);
@@ -53,21 +53,21 @@ public final class PasswordHasher {
 			throw new IllegalStateException("Failed to hash password", e);
 		}
 	}
-
+	
 	@NonNull
 	public String hash(@NonNull String password) {
 		Objects.requireNonNull(password, "Password must not be null");
-
+		
 		byte[] salt = new byte[16];
 		RANDOM.nextBytes(salt);
 		byte[] hash = pbkdf2(this.peppered(password), salt, ITERATIONS);
 		return PEPPERED + "$" + ITERATIONS + "$" + Base64.getEncoder().encodeToString(salt) + "$" + Base64.getEncoder().encodeToString(hash);
 	}
-
+	
 	public boolean verify(@NonNull String password, @NonNull String stored) {
 		Objects.requireNonNull(password, "Password must not be null");
 		Objects.requireNonNull(stored, "Stored hash must not be null");
-
+		
 		String[] parts = stored.split("\\$");
 		if (parts.length != 4 || (!PEPPERED.equals(parts[0]) && !LEGACY.equals(parts[0]))) {
 			return false;
@@ -85,7 +85,7 @@ public final class PasswordHasher {
 			return false;
 		}
 	}
-
+	
 	/**
 	 * Whether a verified hash should be replaced, because it was created without the pepper or with fewer iterations.<br>
 	 */
@@ -100,7 +100,7 @@ public final class PasswordHasher {
 			return true;
 		}
 	}
-
+	
 	private char @NonNull [] peppered(@NonNull String password) {
 		return Base64.getEncoder().encodeToString(this.pepper.hmac(PEPPER_PURPOSE, password.getBytes(StandardCharsets.UTF_8))).toCharArray();
 	}

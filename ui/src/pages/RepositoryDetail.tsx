@@ -655,7 +655,7 @@ function MemberSettings({repository, onSaved}: { repository: Repository; onSaved
 								<td className="actions">
 									<Button small variant="ghost" className="btn-icon" title="Move up" aria-label={`Move ${member} up`} disabled={index === 0} onClick={() => move(index, -1)}><Icon name="arrow-up" size={15}/></Button>
 									<Button small variant="ghost" className="btn-icon" title="Move down" aria-label={`Move ${member} down`} disabled={index === members.length - 1} onClick={() => move(index, 1)}><Icon name="arrow-down"
-									                                                                                                                                                                                     size={15}/></Button>
+																																																						 size={15}/></Button>
 									<Button small variant="ghost" className="danger-text" onClick={() => setMembers(current => current.filter(entry => entry !== member))}>Remove</Button>
 								</td>
 							</tr>

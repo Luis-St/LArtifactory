@@ -33,7 +33,7 @@ class PepperTest {
 		assertEquals(first.hmacHex("test", "value"), second.hmacHex("test", "value"));
 		assertNotEquals(first.hmacHex("test", "value"), first.hmacHex("other", "value"));
 	}
-
+	
 	@Test
 	void configuredPepperMustMatchGeneratedOne() throws Exception {
 		Pepper generated = Pepper.load(null, this.storage);
@@ -41,14 +41,14 @@ class PepperTest {
 		assertEquals(generated.hmacHex("test", "value"), Pepper.load(content.strip(), this.storage).hmacHex("test", "value"), "the file content moved into the environment keeps the pepper");
 		assertThrows(IllegalStateException.class, () -> Pepper.load("a-different-pepper-of-at-least-32-chars", this.storage));
 	}
-
+	
 	@Test
 	void configuredPepperWithoutFileIsUsedAsIs() {
 		Pepper configured = Pepper.load("a-configured-pepper-of-at-least-32-chars", this.storage);
 		assertEquals(new Pepper("a-configured-pepper-of-at-least-32-chars".getBytes(StandardCharsets.UTF_8)).hmacHex("test", "value"), configured.hmacHex("test", "value"));
 		assertFalse(Files.exists(this.storage.resolve("pepper")), "a configured pepper is not written to the storage");
 	}
-
+	
 	@Test
 	void generatedPepperIsOnlyReadableByTheOwner() throws Exception {
 		Pepper.load(null, this.storage);

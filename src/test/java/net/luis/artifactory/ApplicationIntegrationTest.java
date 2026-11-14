@@ -157,7 +157,7 @@ class ApplicationIntegrationTest {
 		// A confirmation code by email is accepted as the second factor of a change
 		assertEquals(204, this.send("POST", "/api/account/mfa/email/code", session, null).statusCode());
 		String confirmation = this.mailMatching("mfa@example.com", "is: (\\d{6})");
-		String wrong = confirmation.equals("000000") ? "111111" : "000000";
+		String wrong = "000000".equals(confirmation) ? "111111" : "000000";
 		assertEquals(403, this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + wrong + "\"}").statusCode());
 		HttpResponse<String> regenerated = this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + confirmation + "\"}");
 		assertEquals(200, regenerated.statusCode(), regenerated.body());

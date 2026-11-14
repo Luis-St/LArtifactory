@@ -34,13 +34,13 @@ public class UserService {
 	}
 	
 	@NonNull
-	public PasswordHasher hasher() {
-		return this.hasher;
+	public static String hashToken(@NonNull String secret) {
+		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
 	}
 	
 	@NonNull
-	public static String hashToken(@NonNull String secret) {
-		return net.luis.artifactory.storage.BlobStore.sha256Hex(secret);
+	public PasswordHasher hasher() {
+		return this.hasher;
 	}
 	
 	public void bootstrapAdmin(@NonNull String username, @Nullable String password) throws SqlException {
@@ -261,6 +261,7 @@ public class UserService {
 	}
 	
 	//region Email and two-factor settings
+	
 	/**
 	 * Returns the email address and two-factor settings of the user, empty settings if none are stored.<br>
 	 */

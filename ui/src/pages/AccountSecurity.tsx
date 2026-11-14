@@ -290,7 +290,8 @@ function TotpDialog({factors, onClose, onDone}: { factors: SecondFactors; onClos
 				{error && <ErrorBox error={error}/>}
 				<div className="modal-footer">
 					<Button onClick={onClose} disabled={busy}>Cancel</Button>
-					<Button variant="primary" type="submit" disabled={busy || (setup ? code.trim().length !== 6 : password === '' || (factors !== null && factorCode.trim() === ''))}>{busy ? 'Working…' : setup ? 'Turn on' : 'Continue'}</Button>
+					<Button variant="primary" type="submit"
+					        disabled={busy || (setup ? code.trim().length !== 6 : password === '' || (factors !== null && factorCode.trim() === ''))}>{busy ? 'Working…' : setup ? 'Turn on' : 'Continue'}</Button>
 				</div>
 			</form>
 		</Modal>

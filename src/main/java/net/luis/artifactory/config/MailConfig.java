@@ -23,7 +23,7 @@ public record MailConfig(
 	@Nullable String from,
 	@NonNull SmtpSecurity security
 ) {
-
+	
 	public MailConfig {
 		if (port < 1 || port > 65535) {
 			throw new ConfigException(EnvKeys.SMTP_PORT + " must be between 1 and 65535, got: " + port);
@@ -32,12 +32,12 @@ public record MailConfig(
 			throw new ConfigException(EnvKeys.SMTP_FROM + " is required when " + EnvKeys.SMTP_HOST + " is set");
 		}
 	}
-
+	
 	@NonNull
 	public static MailConfig disabled() {
 		return new MailConfig(null, SmtpSecurity.STARTTLS.defaultPort(), null, null, null, SmtpSecurity.STARTTLS);
 	}
-
+	
 	@NonNull
 	public static MailConfig from(@NonNull Env env) {
 		SmtpSecurity security = env.enumeration(SmtpSecurity.class, EnvKeys.SMTP_SECURITY, SmtpSecurity.STARTTLS);
@@ -50,11 +50,11 @@ public record MailConfig(
 			security
 		);
 	}
-
+	
 	public boolean enabled() {
 		return this.host != null;
 	}
-
+	
 	@Override
 	@NonNull
 	public String toString() {
