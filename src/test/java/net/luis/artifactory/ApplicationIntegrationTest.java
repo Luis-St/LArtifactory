@@ -1,6 +1,8 @@
 package net.luis.artifactory;
 
+import net.luis.artifactory.auth.Totp;
 import net.luis.artifactory.config.*;
+import net.luis.artifactory.mail.MailSender;
 import net.luis.artifactory.util.Json;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,6 +22,8 @@ import java.nio.file.Path;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -39,6 +43,7 @@ class ApplicationIntegrationTest {
 	static Path storage;
 	
 	private final HttpClient client = HttpClient.newHttpClient();
+	private final BlockingQueue<Mail> mails = new LinkedBlockingQueue<>();
 	private Application.Server server;
 	private String base;
 	
@@ -73,7 +78,17 @@ class ApplicationIntegrationTest {
 			EnvKeys.LOGIN_MAX_FAILURES, "3",
 			EnvKeys.MAX_BUFFERED_UPLOAD_SIZE, "4"
 		)));
-		this.server = Application.start(config, new DatabaseConfig(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), 4));
+		this.server = Application.start(config, new DatabaseConfig(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword(), 4), new MailSender() {
+			@Override
+			public boolean available() {
+				return true;
+			}
+			
+			@Override
+			public void send(String to, String subject, String text) {
+				ApplicationIntegrationTest.this.mails.add(new Mail(to, subject, text));
+			}
+		});
 		this.base = "http://localhost:" + this.server.port();
 		
 		this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"second-admin\",\"password\":\"second-password-1\",\"admin\":true}");
@@ -88,6 +103,92 @@ class ApplicationIntegrationTest {
 		if (this.server != null) {
 			this.server.stop();
 		}
+	}
+	
+	private String mailMatching(String to, String regex) throws InterruptedException {
+		Mail mail = this.mails.poll(10, TimeUnit.SECONDS);
+		assertNotNull(mail, "no mail was sent");
+		assertEquals(to, mail.to());
+		Matcher matcher = Pattern.compile(regex).matcher(mail.text());
+		assertTrue(matcher.find(), mail.text());
+		return matcher.group(1);
+	}
+	
+	private String password(String password) {
+		return "{\"password\":\"" + password + "\"}";
+	}
+	
+	@Test
+	void twoFactorAuthenticationAndPasswordRecovery() throws Exception {
+		String password = "mfa-password-12";
+		assertEquals(201, this.send("POST", "/api/users", basic("admin", ADMIN_PASSWORD), "{\"username\":\"mfa\",\"password\":\"" + password + "\"}").statusCode());
+		HttpResponse<String> created = this.send("POST", "/api/session", basic("mfa", password), "{}");
+		assertEquals(201, created.statusCode(), created.body());
+		String session = "Bearer " + Json.parse(created.body()).get("token").asString();
+		
+		// Email address, verified with a code
+		assertEquals(403, this.send("POST", "/api/account/email", session, "{\"email\":\"mfa@example.com\",\"password\":\"wrong-password\"}").statusCode());
+		assertEquals(202, this.send("POST", "/api/account/email", session, "{\"email\":\"MFA@example.com\",\"password\":\"" + password + "\"}").statusCode());
+		String verification = this.mailMatching("mfa@example.com", "code is: (\\d{6})");
+		assertEquals(400, this.send("POST", "/api/account/email/verify", session, "{\"code\":\"000000x\"}").statusCode());
+		HttpResponse<String> verified = this.send("POST", "/api/account/email/verify", session, "{\"code\":\"" + verification + "\"}");
+		assertEquals(200, verified.statusCode(), verified.body());
+		assertEquals("mfa@example.com", Json.parse(verified.body()).get("email").asString());
+		
+		// Authenticator app, the first factor returns the recovery codes
+		HttpResponse<String> setup = this.send("POST", "/api/account/mfa/totp/setup", session, this.password(password));
+		assertEquals(200, setup.statusCode(), setup.body());
+		String secret = Json.parse(setup.body()).get("secret").asString();
+		assertTrue(Json.parse(setup.body()).get("uri").asString().startsWith("otpauth://totp/"));
+		HttpResponse<String> enabled = this.send("POST", "/api/account/mfa/totp/enable", session, "{\"code\":\"" + Totp.code(secret, Totp.step(java.time.Instant.now())) + "\"}");
+		assertEquals(200, enabled.statusCode(), enabled.body());
+		List<String> codes = new ArrayList<>();
+		Json.parse(enabled.body()).get("recoveryCodes").forEach(code -> codes.add(code.asString()));
+		assertEquals(8, codes.size());
+		codes.forEach(code -> assertTrue(code.matches("[A-Z]{4}-[A-Z]{4}"), code));
+		HttpResponse<String> emailEnabled = this.send("POST", "/api/account/mfa/email/enable", session, this.password(password));
+		assertEquals(200, emailEnabled.statusCode(), emailEnabled.body());
+		assertTrue(Json.parse(emailEnabled.body()).get("recoveryCodes").isNull(), "the existing recovery codes stay valid");
+		
+		// The password alone no longer authenticates
+		assertEquals(401, this.send("GET", "/api/me", basic("mfa", password), null).statusCode());
+		HttpResponse<String> challenge = this.send("POST", "/api/session", basic("mfa", password), "{}");
+		assertEquals(200, challenge.statusCode(), challenge.body());
+		JsonNode challengeJson = Json.parse(challenge.body());
+		assertTrue(challengeJson.get("mfaRequired").asBoolean());
+		assertEquals("m***@example.com", challengeJson.get("emailHint").asString());
+		String id = challengeJson.get("challenge").asString();
+		assertEquals(401, this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"totp\",\"code\":\"000000\"}").statusCode());
+		HttpResponse<String> completed = this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"recovery\",\"code\":\"" + codes.getFirst().toLowerCase(Locale.ROOT) + "\"}");
+		assertEquals(201, completed.statusCode(), completed.body());
+		assertEquals(200, this.send("GET", "/api/me", "Bearer " + Json.parse(completed.body()).get("token").asString(), null).statusCode());
+		assertEquals(401, this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"recovery\",\"code\":\"" + codes.get(1) + "\"}").statusCode(), "a challenge creates one session");
+		
+		// A used recovery code is spent, a code by email completes a new challenge
+		id = Json.parse(this.send("POST", "/api/session", basic("mfa", password), "{}").body()).get("challenge").asString();
+		assertEquals(401, this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"recovery\",\"code\":\"" + codes.getFirst() + "\"}").statusCode());
+		assertEquals(204, this.send("POST", "/api/session/mfa/email", null, "{\"challenge\":\"" + id + "\"}").statusCode());
+		String emailCode = this.mailMatching("mfa@example.com", "code is: (\\d{6})");
+		assertEquals(201, this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"email\",\"code\":\"" + emailCode + "\"}").statusCode());
+		
+		// Password recovery by email, the authenticator app (or a recovery code) is still required
+		assertEquals(202, this.send("POST", "/api/password-reset", null, "{\"login\":\"nobody@example.com\"}").statusCode());
+		assertEquals(202, this.send("POST", "/api/password-reset", null, "{\"login\":\"mfa@example.com\"}").statusCode());
+		String token = this.mailMatching("mfa@example.com", "reset code:\\s+(\\S+)");
+		HttpResponse<String> check = this.send("POST", "/api/password-reset/check", null, "{\"token\":\"" + token + "\"}");
+		assertEquals(200, check.statusCode(), check.body());
+		assertTrue(Json.parse(check.body()).get("totpRequired").asBoolean());
+		String newPassword = "mfa-password-new";
+		assertEquals(400, this.send("POST", "/api/password-reset/complete", null, "{\"token\":\"" + token + "\",\"password\":\"" + newPassword + "\"}").statusCode());
+		assertEquals(204, this.send("POST", "/api/password-reset/complete", null, "{\"token\":\"" + token + "\",\"password\":\"" + newPassword + "\",\"code\":\"" + codes.get(2) + "\"}").statusCode());
+		assertEquals(401, this.send("GET", "/api/me", session, null).statusCode(), "the reset ends all sessions");
+		assertEquals(400, this.send("POST", "/api/password-reset/check", null, "{\"token\":\"" + token + "\"}").statusCode(), "a reset token is used once");
+		assertEquals(200, this.send("POST", "/api/session", basic("mfa", newPassword), "{}").statusCode());
+		
+		// An administrator turns two-factor authentication off for a user that lost every factor
+		assertEquals(204, this.send("DELETE", "/api/users/mfa/mfa", basic("admin", ADMIN_PASSWORD), null).statusCode());
+		assertEquals(200, this.send("GET", "/api/me", basic("mfa", newPassword), null).statusCode());
+		assertTrue(this.mails.isEmpty(), this.mails.toString());
 	}
 	
 	@Test
@@ -646,6 +747,8 @@ class ApplicationIntegrationTest {
 		assertEquals(201, response.statusCode(), response.body());
 		return Json.parse(response.body()).get("token").asString();
 	}
+	
+	private record Mail(String to, String subject, String text) {}
 	
 	private HttpResponse<String> send(String method, String path, String authorization, String body) throws IOException, InterruptedException {
 		HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(this.base + path))

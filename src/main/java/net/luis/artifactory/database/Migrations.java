@@ -126,7 +126,20 @@ public final class Migrations {
 			builder.dropColumn(SESSION_TOKEN_ID);
 			builder.dropColumn(SESSION_LEVEL);
 			builder.dropTable(REPOSITORY_KINDS);
-		})
+		}),
+		migration(Version.of(1, 5, 0), "Email addresses and two-factor authentication", (builder, _) -> {
+			// A separate table instead of new user columns, the baseline creates the users table with all of its current columns
+			builder.createTable(USER_SECURITY, table -> table
+				.column(SECURITY_USERNAME, SqlTypes.STRING.configure(SqlParameter.length(128)), SqlMigrationColumnBuilder::notNull)
+				.column(SECURITY_EMAIL, SqlTypes.STRING.configure(SqlParameter.length(320)), column -> column.unique())
+				.column(SECURITY_TOTP_SECRET, SqlTypes.STRING.configure(SqlParameter.length(256)))
+				.column(SECURITY_TOTP_ENABLED, SqlTypes.BOOLEAN, SqlMigrationColumnBuilder::notNull)
+				.column(SECURITY_EMAIL_MFA_ENABLED, SqlTypes.BOOLEAN, SqlMigrationColumnBuilder::notNull)
+				.column(SECURITY_TOTP_LAST_STEP, SqlTypes.LONG, SqlMigrationColumnBuilder::notNull)
+				.column(SECURITY_RECOVERY_CODES, SqlTypes.TEXT)
+				.primaryKey(SECURITY_USERNAME)
+			);
+		}, (builder, _) -> builder.dropTable(USER_SECURITY))
 	);
 	
 	private Migrations() {}

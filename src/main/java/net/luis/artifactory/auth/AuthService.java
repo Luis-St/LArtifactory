@@ -39,7 +39,6 @@ public class AuthService {
 	// can not exhaust CPU, and verify a dummy hash for unknown users to keep the timing independent of user existence.
 	private static final Semaphore HASH_SLOTS = new Semaphore(Math.max(2, Runtime.getRuntime().availableProcessors()));
 	private static final long HASH_WAIT_MILLIS = 5_000;
-	private static final String DUMMY_HASH = PasswordHasher.hash(PasswordHasher.randomSecret(24));
 	private static final Duration TICKET_LIFETIME = Duration.ofSeconds(60);
 	private static final int MAX_TICKETS = 10_000;
 	/**
@@ -57,6 +56,7 @@ public class AuthService {
 	private final AuditService audit;
 	private final Map<String, CacheEntry> cache = new ConcurrentHashMap<>();
 	private final Map<String, Ticket> tickets = new ConcurrentHashMap<>();
+	private final String dummyHash;
 	
 	public AuthService(@NonNull UserService userService, @NonNull TokenUsageService tokenUsage, @NonNull ServerConfig config, @NonNull AuditService audit) {
 		this.userService = Objects.requireNonNull(userService, "User service must not be null");
@@ -64,6 +64,35 @@ public class AuthService {
 		this.config = Objects.requireNonNull(config, "Config must not be null");
 		this.audit = Objects.requireNonNull(audit, "Audit service must not be null");
 		this.throttle = new LoginThrottle(config.loginMaxFailures(), Duration.ofMinutes(config.loginLockoutMinutes()));
+		this.dummyHash = userService.hasher().hash(PasswordHasher.randomSecret(24));
+	}
+	
+	/**
+	 * Returns the user name and password of a basic authorization with a password, null for a token, a session or other credentials.<br>
+	 */
+	@Nullable
+	public static Credentials passwordCredentials(@NonNull Context ctx) {
+		String authorization = ctx.header("Authorization");
+		if (authorization == null || !authorization.strip().regionMatches(true, 0, "Basic ", 0, 6)) {
+			return null;
+		}
+		try {
+			String decoded = new String(Base64.getDecoder().decode(authorization.strip().substring(6).strip()), StandardCharsets.UTF_8);
+			int colon = decoded.indexOf(':');
+			if (colon < 0) {
+				return null;
+			}
+			String username = decoded.substring(0, colon);
+			String password = decoded.substring(colon + 1);
+			return "__token__".equals(username) || password.startsWith("lat_") ? null : new Credentials(username, password);
+		} catch (IllegalArgumentException e) {
+			return null;
+		}
+	}
+	
+	@NonNull
+	LoginThrottle throttle() {
+		return this.throttle;
 	}
 	
 	/**
@@ -158,7 +187,7 @@ public class AuthService {
 			throw HttpError.of(503, "Authentication temporarily unavailable");
 		}
 		try {
-			return PasswordHasher.verify(password, storedHash);
+			return this.userService.hasher().verify(password, storedHash);
 		} finally {
 			HASH_SLOTS.release();
 		}
@@ -179,7 +208,7 @@ public class AuthService {
 		UserEntity user = this.userService.get(username);
 		boolean valid;
 		if (user == null) {
-			this.verifyPassword(password, DUMMY_HASH); // keep timing independent of whether the user exists
+			this.verifyPassword(password, this.dummyHash); // keep timing independent of whether the user exists
 			valid = false;
 		} else {
 			valid = this.verifyPassword(password, user.passwordHash());
@@ -193,6 +222,10 @@ public class AuthService {
 			return null;
 		}
 		this.throttle.success(address, username);
+		if (this.userService.hasher().needsRehash(user.passwordHash())) {
+			// Hashes created before the pepper was introduced are replaced while the plain password is at hand
+			this.userService.rehash(user.username(), password, user.passwordHash());
+		}
 		return user;
 	}
 	
@@ -427,6 +460,10 @@ public class AuthService {
 		if (user == null) {
 			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 		}
+		if (this.userService.security(user.username()).mfaEnabled()) {
+			// A password alone is not enough with two-factor authentication, clients use an access token instead
+			throw HttpError.mfaRequired();
+		}
 		Principal principal = new Principal(user.username(), user.admin(), null);
 		this.cache.put(cacheKey, new CacheEntry(principal, System.currentTimeMillis() + CACHE_TTL_MILLIS, null, null));
 		return principal;
@@ -505,6 +542,8 @@ public class AuthService {
 		}
 		return null;
 	}
+	
+	public record Credentials(@NonNull String username, @NonNull String password) {}
 	
 	private record Ticket(@NonNull Principal principal, @NonNull String path, @NonNull Instant expiresAt) {}
 	

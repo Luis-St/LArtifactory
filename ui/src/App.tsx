@@ -7,6 +7,7 @@ import {Audit} from './pages/Audit';
 import {Login} from './pages/Login';
 import {Overview} from './pages/Overview';
 import {PackageDetail} from './pages/PackageDetail';
+import {PasswordReset} from './pages/PasswordReset';
 import {VersionDetail} from './pages/VersionDetail';
 import {Permissions} from './pages/Permissions';
 import {Repositories} from './pages/Repositories';
@@ -19,6 +20,11 @@ import {SessionProvider} from './session';
 import {canAdminister, type Principal, REPOSITORY_TYPES, type RepositoryType} from './types';
 
 export function App() {
+	const {segments} = useRoute();
+	// The link of a reset mail opens this page whether or not someone is signed in on this browser
+	if (segments[0] === 'reset-password') {
+		return <SessionProvider>{() => <PasswordReset/>}</SessionProvider>;
+	}
 	return (
 		<SessionProvider>
 			{({ready, principal, guest, unreachable, retry}) => (unreachable ? <Unreachable error={unreachable} onRetry={retry}/>

@@ -70,6 +70,15 @@ public class HttpError extends RuntimeException {
 		return new HttpError(401, "Unauthorized", "text/plain", "Authentication required", Map.of("WWW-Authenticate", challenge));
 	}
 	
+	/**
+	 * The password of a user with two-factor authentication was used directly, only tokens and web ui sessions are accepted.<br>
+	 */
+	@NonNull
+	public static HttpError mfaRequired() {
+		String message = "Two-factor authentication is enabled for this user, sign in to the web ui or use an access token";
+		return new HttpError(401, message, "text/plain", message, Map.of("WWW-Authenticate", "Basic realm=\"artifactory\""));
+	}
+	
 	@NonNull
 	public static HttpError payloadTooLarge() {
 		return of(413, "Artifact exceeds configured max upload size");

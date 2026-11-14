@@ -29,6 +29,15 @@ const ACTIONS: { id: string; label: string }[] = [
 	{id: 'artifact.delete', label: 'Artifact deleted'},
 	{id: 'login.failed', label: 'Failed login'},
 	{id: 'login.locked', label: 'Login locked'},
+	{id: 'mfa.failed', label: 'Wrong second factor'},
+	{id: 'mfa.enable', label: 'Second factor enabled'},
+	{id: 'mfa.disable', label: 'Second factor disabled'},
+	{id: 'mfa.reset', label: 'Two-factor reset'},
+	{id: 'mfa.recovery.used', label: 'Recovery code used'},
+	{id: 'mfa.recovery.regenerate', label: 'Recovery codes regenerated'},
+	{id: 'email.change', label: 'Email address changed'},
+	{id: 'password.reset.request', label: 'Password reset requested'},
+	{id: 'password.reset', label: 'Password reset'},
 ];
 
 type Range = '' | '24h' | '7d' | '30d' | 'custom';

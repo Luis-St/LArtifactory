@@ -26,6 +26,15 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_SESSION_HOURS`                | `12`                                           | Lifetime of a web ui session                                                               |
 | `ARTIFACTORY_SESSION_REMEMBER_DAYS`        | `30`                                           | Lifetime of a web ui session with "keep me signed in"                                      |
 | `ARTIFACTORY_NPM_TOKEN_DAYS`               | `90`                                           | Lifetime of tokens created by `npm login`, `0` for no expiry                               |
+| `ARTIFACTORY_PASSWORD_PEPPER`              | generated into `<storage>/pepper`              | Server secret mixed into password hashes, at least 32 characters, keep it out of the db    |
+| `ARTIFACTORY_MAIL_CODE_MINUTES`            | `10`                                           | Lifetime of sign in codes and email verification codes sent by mail                        |
+| `ARTIFACTORY_PASSWORD_RESET_MINUTES`       | `30`                                           | Lifetime of a password reset link                                                          |
+| `ARTIFACTORY_SMTP_HOST`                    | mail disabled                                  | SMTP server for codes, email verification and password recovery                            |
+| `ARTIFACTORY_SMTP_PORT`                    | default port of the security mode              | `587` for `STARTTLS`, `465` for `IMPLICIT_TLS`, `25` for `PLAINTEXT`                       |
+| `ARTIFACTORY_SMTP_SECURITY`                | `STARTTLS`                                     | `STARTTLS` (required, not opportunistic), `IMPLICIT_TLS` or `PLAINTEXT`                    |
+| `ARTIFACTORY_SMTP_USERNAME`                |                                                | SMTP user, no authentication without it                                                    |
+| `ARTIFACTORY_SMTP_PASSWORD`                |                                                | SMTP password                                                                              |
+| `ARTIFACTORY_SMTP_FROM`                    | required with `ARTIFACTORY_SMTP_HOST`          | Sender, an address or `Name <address>`                                                     |
 | `ARTIFACTORY_MAINTENANCE_INTERVAL_MINUTES` | `60`                                           | Interval of the cleanup of orphaned blobs, temporary files and expired sessions            |
 | `ARTIFACTORY_REMOTE_METADATA_TTL_MINUTES`  | `30`                                           | Age after which a remote repository fetches Maven metadata and snapshots again, `0` always |
 | `ARTIFACTORY_AUDIT_RETENTION_DAYS`         | `365`                                          | Age after which audit log entries are deleted by the maintenance task, `0` keeps them      |
@@ -270,12 +279,52 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 - The last administrator can not lose the administrator privileges, so the server can not be locked out of its own management.
 - Repositories are private by default, `publicRead` allows anonymous downloads.
 
+### Passwords, two-factor authentication and recovery
+
+- Passwords are hashed with PBKDF2 and a random salt per password, after keying them with a server secret, the pepper (HMAC-SHA256).
+  The salt makes equal passwords hash differently, and the pepper is kept out of the database,
+  so a database dump alone is not enough to guess passwords offline.
+  Without `ARTIFACTORY_PASSWORD_PEPPER` the server generates one into `pepper` in `ARTIFACTORY_STORAGE_PATH` on the first start.
+  Back the pepper up separately from the database, because without it no password, recovery code or authenticator secret verifies.
+  Hashes from before the pepper still verify and are replaced with peppered ones on the next successful login,
+  so existing installations need no migration step.
+- Users add an email address on the account page.
+  It is stored only after a code sent to it is entered, because an unverified address could send recovery mails to a stranger.
+  The old address is told about a change, so a stolen session can not silently redirect the password recovery.
+- Two-factor authentication supports an authenticator app (TOTP, 6 digits, 30 seconds) and codes sent by email.
+  Enabling the first factor creates 8 recovery codes of the format `ABCD-EFGH`, they are shown once and only their hashes are stored.
+  Each recovery code works once and new ones can be generated, which invalidates the old ones.
+  Setting up, turning off and regenerating require the current password, so a stolen session alone can not change the second factors.
+- With a second factor, `POST /api/session` answers the password with a challenge instead of a session,
+  and `POST /api/session/mfa` completes it with a code.
+  The password alone is then rejected for basic auth and `npm login`,
+  because both would otherwise skip the second factor, so clients use access tokens instead.
+  Wrong codes count towards the same login lockout as wrong passwords, and a challenge ends after 5 wrong codes.
+- "Forgot password" on the sign in page sends a reset mail to the verified email address.
+  The answer is the same whether the account exists or not, so the form does not reveal accounts or addresses.
+  With `ARTIFACTORY_BASE_URL` the mail contains a link, otherwise a reset code to enter on the sign in page,
+  because a link built from the request `Host` header could point to an attacker host.
+  A user with an authenticator app also needs a code of it or a recovery code, the mail alone is not enough for that account.
+  A reset ends all sessions of the user.
+- An administrator can turn off two-factor authentication of a user that lost every factor (`DELETE /api/users/{username}/mfa`).
+- Sign in challenges, setups in progress, mail codes and reset links only live in memory,
+  because they are short lived and a restart only means starting over.
+
 ## Management API
 
 | Method                 | Path                                          | Description                                                                               |
 |------------------------|-----------------------------------------------|-------------------------------------------------------------------------------------------|
 | `GET`                  | `/api/me`                                     | The authenticated user                                                                    |
 | `POST` `DELETE`        | `/api/session`                                | Sign in with the password or a token / sign out (web ui session)                          |
+| `POST`                 | `/api/session/mfa`                            | Complete a sign in with a second factor (`totp`, `email`, `recovery`)                     |
+| `POST`                 | `/api/session/mfa/email`                      | Send the sign in code of a challenge by email                                             |
+| `GET`                  | `/api/account/security`                       | Email address and two-factor settings of the caller                                       |
+| `POST`                 | `/api/account/email`                          | Send a verification code to a new email address (`/verify`, `/remove`)                    |
+| `POST`                 | `/api/account/mfa/totp/setup`                 | Start setting up an authenticator app, `/enable` confirms it with a code                  |
+| `POST`                 | `/api/account/mfa/email/enable`               | Turn on codes by email                                                                    |
+| `POST`                 | `/api/account/mfa/{method}/disable`           | Turn off `totp` or `email`                                                                |
+| `POST`                 | `/api/account/mfa/recovery-codes`             | Replace the recovery codes                                                                |
+| `GET` `POST`           | `/api/password-reset`                         | Whether recovery is available / request a reset mail (`/check`, `/complete`)              |
 | `GET` `POST`           | `/api/repositories`                           | List / create repositories                                                                |
 | `GET` `PATCH` `DELETE` | `/api/repositories/{name}`                    | Get / update / delete a repository                                                        |
 | `GET` `DELETE`         | `/api/repositories/{name}/packages`           | List packages and versions (`?q=&offset=&limit=`) / delete a package version              |
@@ -289,6 +338,7 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
 | `POST`                 | `/api/downloads`                              | Single use download ticket for one path                                                   |
 | `GET` `POST`           | `/api/users`                                  | List / create users                                                                       |
 | `PATCH` `DELETE`       | `/api/users/{username}`                       | Update (password, admin, revokeTokens) / delete a user                                    |
+| `DELETE`               | `/api/users/{username}/mfa`                   | Turn off two-factor authentication of a user (admin)                                      |
 | `GET` `PUT` `DELETE`   | `/api/permissions`                            | List / grant / revoke permissions                                                         |
 | `GET` `POST`           | `/api/tokens`                                 | List / create tokens                                                                      |
 | `DELETE`               | `/api/tokens/{id}`                            | Revoke a token                                                                            |

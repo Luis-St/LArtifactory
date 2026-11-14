@@ -44,6 +44,15 @@ public class AuditService {
 	public static final String SESSION_CREATE = "session.create";
 	public static final String LOGIN_FAILED = "login.failed";
 	public static final String LOGIN_LOCKED = "login.locked";
+	public static final String MFA_ENABLE = "mfa.enable";
+	public static final String MFA_DISABLE = "mfa.disable";
+	public static final String MFA_RESET = "mfa.reset";
+	public static final String MFA_FAILED = "mfa.failed";
+	public static final String MFA_RECOVERY_USED = "mfa.recovery.used";
+	public static final String MFA_RECOVERY_REGENERATE = "mfa.recovery.regenerate";
+	public static final String EMAIL_CHANGE = "email.change";
+	public static final String PASSWORD_RESET_REQUEST = "password.reset.request";
+	public static final String PASSWORD_RESET = "password.reset";
 	public static final String ARTIFACT_PUBLISH = "artifact.publish";
 	public static final String ARTIFACT_DELETE = "artifact.delete";
 	//endregion

@@ -22,6 +22,9 @@ public record ServerConfig(
 	int sessionHours,
 	int sessionRememberDays,
 	int npmTokenDays,
+	@Nullable String passwordPepper,
+	int mailCodeMinutes,
+	int passwordResetMinutes,
 	int maintenanceIntervalMinutes,
 	int remoteMetadataTtlMinutes,
 	int auditRetentionDays
@@ -46,6 +49,11 @@ public record ServerConfig(
 		requireAtLeast(EnvKeys.SESSION_HOURS, sessionHours, 1);
 		requireAtLeast(EnvKeys.SESSION_REMEMBER_DAYS, sessionRememberDays, 1);
 		requireAtLeast(EnvKeys.NPM_TOKEN_DAYS, npmTokenDays, 0);
+		requireAtLeast(EnvKeys.MAIL_CODE_MINUTES, mailCodeMinutes, 1);
+		requireAtLeast(EnvKeys.PASSWORD_RESET_MINUTES, passwordResetMinutes, 1);
+		if (passwordPepper != null && passwordPepper.length() < 32) {
+			throw new ConfigException(EnvKeys.PASSWORD_PEPPER + " must have at least 32 characters");
+		}
 		requireAtLeast(EnvKeys.MAINTENANCE_INTERVAL, maintenanceIntervalMinutes, 1);
 		requireAtLeast(EnvKeys.REMOTE_METADATA_TTL, remoteMetadataTtlMinutes, 0);
 		requireAtLeast(EnvKeys.AUDIT_RETENTION_DAYS, auditRetentionDays, 0);
@@ -72,6 +80,9 @@ public record ServerConfig(
 			env.integer(EnvKeys.SESSION_HOURS, 12),
 			env.integer(EnvKeys.SESSION_REMEMBER_DAYS, 30),
 			env.integer(EnvKeys.NPM_TOKEN_DAYS, 90),
+			env.optional(EnvKeys.PASSWORD_PEPPER),
+			env.integer(EnvKeys.MAIL_CODE_MINUTES, 10),
+			env.integer(EnvKeys.PASSWORD_RESET_MINUTES, 30),
 			env.integer(EnvKeys.MAINTENANCE_INTERVAL, 60),
 			env.integer(EnvKeys.REMOTE_METADATA_TTL, 30),
 			env.integer(EnvKeys.AUDIT_RETENTION_DAYS, 365)

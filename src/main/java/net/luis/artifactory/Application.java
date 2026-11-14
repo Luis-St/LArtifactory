@@ -20,6 +20,8 @@ import net.luis.artifactory.handler.admin.*;
 import net.luis.artifactory.handler.format.OciHandler;
 import net.luis.artifactory.handler.format.RepositoryDispatcher;
 import net.luis.artifactory.http.*;
+import net.luis.artifactory.mail.MailSender;
+import net.luis.artifactory.mail.SmtpMailSender;
 import net.luis.artifactory.repository.*;
 import net.luis.artifactory.storage.BlobStore;
 import net.luis.artifactory.util.Json;
@@ -61,7 +63,12 @@ public class Application {
 	
 	static void main() throws SqlException {
 		Env env = Env.ofSystem();
-		Server server = start(ServerConfig.from(env), DatabaseConfig.from(env));
+		MailConfig mailConfig = MailConfig.from(env);
+		MailSender mail = mailConfig.enabled() ? new SmtpMailSender(mailConfig) : MailSender.disabled();
+		if (!mailConfig.enabled()) {
+			LOGGER.info("No smtp server configured ({}), email addresses, codes by email and password recovery are unavailable", EnvKeys.SMTP_HOST);
+		}
+		Server server = start(ServerConfig.from(env), DatabaseConfig.from(env), mail);
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {
 			LOGGER.info("Shutting down LArtifactory");
 			server.stop();
@@ -73,13 +80,14 @@ public class Application {
 	 * Initializes the database and storage and starts the http server.<br>
 	 */
 	@NonNull
-	public static Server start(@NonNull ServerConfig serverConfig, @NonNull DatabaseConfig databaseConfig) throws SqlException {
+	public static Server start(@NonNull ServerConfig serverConfig, @NonNull DatabaseConfig databaseConfig, @NonNull MailSender mail) throws SqlException {
 		DatabaseProvider databaseProvider = new DatabaseProvider(databaseConfig, SqlAuditUserProvider.empty());
 		databaseProvider.initialize();
 		SqlDatabase database = databaseProvider.getDatabase();
 		
 		BlobStore blobStore = new BlobStore(serverConfig.storagePath(), serverConfig.maxUploadSize(), ORPHAN_GRACE_PERIOD);
-		UserService userService = new UserService(database);
+		Pepper pepper = Pepper.load(serverConfig.passwordPepper(), serverConfig.storagePath());
+		UserService userService = new UserService(database, new PasswordHasher(pepper));
 		userService.bootstrapAdmin(serverConfig.adminUsername(), serverConfig.adminPassword());
 		WebhookService webhookService = new WebhookService(database);
 		AuditService auditService = new AuditService(database);
@@ -90,10 +98,12 @@ public class Application {
 		if (backfilled > 0) {
 			LOGGER.info("Stored the class of {} existing repositories", backfilled);
 		}
+		AuthService authService = new AuthService(userService, tokenUsageService, serverConfig, auditService);
 		Services services = new Services(
 			serverConfig,
 			userService,
-			new AuthService(userService, tokenUsageService, serverConfig, auditService),
+			authService,
+			new AccountSecurityService(userService, authService, pepper, mail, serverConfig, auditService),
 			tokenUsageService,
 			repositoryService,
 			artifactService,
@@ -124,6 +134,7 @@ public class Application {
 			int ociBlobs = OciHandler.collectGarbage(services, OCI_BLOB_MIN_AGE);
 			int audit = services.audit().prune(services.config().auditRetentionDays());
 			services.auth().cleanup();
+			services.security().cleanup();
 			if (blobs > 0 || temporary > 0 || sessions > 0 || ociBlobs > 0 || audit > 0) {
 				LOGGER.info("Maintenance removed {} orphaned blobs, {} temporary files, {} expired sessions, {} unreferenced OCI blobs and {} expired audit entries", blobs, temporary, sessions, ociBlobs, audit);
 			}
@@ -140,6 +151,7 @@ public class Application {
 		AtomicBoolean proxyWarned = new AtomicBoolean();
 		var repositoryAdminHandler = new RepositoryAdminHandler(services);
 		var userAdminHandler = new UserAdminHandler(services);
+		var accountHandler = new AccountHandler(services);
 		var auditAdminHandler = new AuditAdminHandler(services);
 		var webhookAdminHandler = new WebhookAdminHandler(services);
 		var dispatcher = new RepositoryDispatcher(services);
@@ -288,6 +300,21 @@ public class Application {
 			config.routes.get("/api/me", userAdminHandler::me);
 			config.routes.post("/api/session", userAdminHandler::createSession);
 			config.routes.delete("/api/session", userAdminHandler::deleteSession);
+			config.routes.post("/api/session/mfa", userAdminHandler::completeMfa);
+			config.routes.post("/api/session/mfa/email", userAdminHandler::sendMfaEmail);
+			config.routes.get("/api/account/security", accountHandler::get);
+			config.routes.post("/api/account/email", accountHandler::requestEmail);
+			config.routes.post("/api/account/email/verify", accountHandler::verifyEmail);
+			config.routes.post("/api/account/email/remove", accountHandler::removeEmail);
+			config.routes.post("/api/account/mfa/totp/setup", accountHandler::setupTotp);
+			config.routes.post("/api/account/mfa/totp/enable", accountHandler::enableTotp);
+			config.routes.post("/api/account/mfa/email/enable", accountHandler::enableEmail);
+			config.routes.post("/api/account/mfa/recovery-codes", accountHandler::regenerateRecoveryCodes);
+			config.routes.post("/api/account/mfa/{method}/disable", accountHandler::disable);
+			config.routes.get("/api/password-reset", accountHandler::resetAvailable);
+			config.routes.post("/api/password-reset", accountHandler::requestReset);
+			config.routes.post("/api/password-reset/check", accountHandler::checkReset);
+			config.routes.post("/api/password-reset/complete", accountHandler::completeReset);
 			config.routes.get("/api/repositories", repositoryAdminHandler::list);
 			config.routes.post("/api/repositories", repositoryAdminHandler::create);
 			config.routes.get("/api/repositories/{name}", repositoryAdminHandler::get);
@@ -307,6 +334,7 @@ public class Application {
 			config.routes.post("/api/users", userAdminHandler::createUser);
 			config.routes.patch("/api/users/{username}", userAdminHandler::updateUser);
 			config.routes.delete("/api/users/{username}", userAdminHandler::deleteUser);
+			config.routes.delete("/api/users/{username}/mfa", userAdminHandler::resetMfa);
 			config.routes.get("/api/permissions", userAdminHandler::listPermissions);
 			config.routes.put("/api/permissions", userAdminHandler::setPermission);
 			config.routes.delete("/api/permissions", userAdminHandler::deletePermission);

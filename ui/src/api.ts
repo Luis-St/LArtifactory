@@ -1,6 +1,12 @@
-import {type AccessLevel, type AuditEntry, type FileEntry, type Health, type Package, type PackageDetail, type PackageSummary, type Page, type Permission, type Principal, type Repository, type SearchResult, sortRepositories, type Summary, type Token, type Tree, type User, type Webhook, type WebhookDelivery} from './types';
+import {type AccessLevel, type AccountSecurity, type AuditEntry, type MfaChallenge, type MfaMethod, type PasswordResetInfo, type FileEntry, type Health, type Package, type PackageDetail, type PackageSummary, type Page, type Permission, type Principal, type Repository, type SearchResult, sortRepositories, type Summary, type Token, type Tree, type User, type Webhook, type WebhookDelivery} from './types';
 
 const STORAGE_KEY = 'lartifactory.auth';
+
+interface CreatedSession {
+	username: string;
+	token: string;
+	expiresAt: string;
+}
 
 export class ApiError extends Error {
 	constructor(readonly status: number, message: string) {
@@ -144,8 +150,26 @@ export const api = {
 	me: () => request<Principal>('GET', '/api/me', undefined, true),
 	// Signs in with the password or an access token once, only the returned session token is kept. A session created from a token
 	// is restricted to the level of the token and ends when the token is revoked, so the token itself never reaches browser storage.
+	// A user with two-factor authentication gets a challenge instead of a session, completeMfa answers it with a code
 	createSession: async (username: string, secret: string, remember: boolean) =>
-		parse<{ username: string; token: string; expiresAt: string }>(await send('POST', '/api/session', {remember}, true, {Authorization: basicAuthorization(username, secret)})),
+		parse<CreatedSession | MfaChallenge>(await send('POST', '/api/session', {remember}, true, {Authorization: basicAuthorization(username, secret)})),
+	completeMfa: (challenge: string, method: MfaMethod, code: string) => request<CreatedSession>('POST', '/api/session/mfa', {challenge, method, code}, true),
+	sendMfaEmail: (challenge: string) => request<void>('POST', '/api/session/mfa/email', {challenge}, true),
+	
+	accountSecurity: () => request<AccountSecurity>('GET', '/api/account/security'),
+	requestEmailChange: (email: string, password: string) => request<void>('POST', '/api/account/email', {email, password}),
+	verifyEmail: (code: string) => request<AccountSecurity>('POST', '/api/account/email/verify', {code}),
+	removeEmail: (password: string) => request<AccountSecurity>('POST', '/api/account/email/remove', {password}),
+	setupTotp: (password: string) => request<{ secret: string; uri: string }>('POST', '/api/account/mfa/totp/setup', {password}),
+	enableTotp: (code: string) => request<{ recoveryCodes: string[] | null }>('POST', '/api/account/mfa/totp/enable', {code}),
+	enableEmailMfa: (password: string) => request<{ recoveryCodes: string[] | null }>('POST', '/api/account/mfa/email/enable', {password}),
+	disableMfa: (method: 'totp' | 'email', password: string) => request<AccountSecurity>('POST', `/api/account/mfa/${method}/disable`, {password}),
+	regenerateRecoveryCodes: (password: string) => request<{ recoveryCodes: string[] }>('POST', '/api/account/mfa/recovery-codes', {password}),
+	
+	passwordResetAvailable: () => request<PasswordResetInfo>('GET', '/api/password-reset', undefined, true),
+	requestPasswordReset: (login: string) => request<void>('POST', '/api/password-reset', {login}, true),
+	checkPasswordReset: (token: string) => request<PasswordResetInfo>('POST', '/api/password-reset/check', {token}, true),
+	completePasswordReset: (token: string, password: string, code?: string) => request<void>('POST', '/api/password-reset/complete', {token, password, code}, true),
 	deleteSession: () => request<void>('DELETE', '/api/session', undefined, true),
 	
 	// Sorted by type in the order of REPOSITORY_TYPES, then by name, so every page lists them the same way
@@ -182,6 +206,7 @@ export const api = {
 	createUser: (body: { username: string; password: string; admin: boolean }) => request<User>('POST', '/api/users', body),
 	updateUser: (username: string, body: { password?: string; currentPassword?: string; admin?: boolean; revokeTokens?: boolean }) => request<User>('PATCH', `/api/users/${enc(username)}`, body),
 	deleteUser: (username: string) => request<void>('DELETE', `/api/users/${enc(username)}`),
+	resetUserMfa: (username: string) => request<void>('DELETE', `/api/users/${enc(username)}/mfa`),
 	
 	permissions: (filter: { repository?: string; username?: string } = {}) => request<Permission[]>('GET', `/api/permissions${query(filter)}`),
 	setPermission: (body: { repository: string; username: string; level: AccessLevel }) => request<Permission>('PUT', '/api/permissions', body),

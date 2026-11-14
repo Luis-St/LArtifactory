@@ -109,6 +109,35 @@ export interface User {
 	username: string;
 	admin: boolean;
 	createdAt: string;
+	email: string | null;
+	mfaEnabled: boolean;
+}
+
+/** Second factors that complete a sign in. */
+export type MfaMethod = 'totp' | 'email' | 'recovery';
+
+/** Answer of a correct password of a user with two-factor authentication, a code completes the sign in. */
+export interface MfaChallenge {
+	mfaRequired: true;
+	challenge: string;
+	methods: MfaMethod[];
+	emailHint: string | null;
+	expiresAt: string;
+}
+
+export interface AccountSecurity {
+	email: string | null;
+	totpEnabled: boolean;
+	emailMfaEnabled: boolean;
+	recoveryCodesLeft: number;
+	/** Whether the server can send mails, email addresses and codes by email need it. */
+	mailAvailable: boolean;
+}
+
+export interface PasswordResetInfo {
+	available: boolean;
+	username: string | null;
+	totpRequired: boolean;
 }
 
 export interface Permission {

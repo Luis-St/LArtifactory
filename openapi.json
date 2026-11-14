@@ -6,6 +6,272 @@
     "description" : "Artifact repository management API"
   },
   "paths" : {
+    "/api/account/email" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Send a verification code to a new email address, requires the current password",
+        "operationId" : "requestEmailChange",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/EmailChangeRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "202" : {
+            "description" : "Accepted"
+          },
+          "409" : {
+            "description" : "The address is used by another account",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503" : {
+            "description" : "Mail is not configured",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/email/remove" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Remove the email address, requires the current password",
+        "operationId" : "removeEmail",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountSecurityResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/email/verify" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Verify the new email address with the code sent to it",
+        "operationId" : "verifyEmail",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CodeRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountSecurityResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/mfa/email/enable" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Enable sign in codes by email, requires a verified email address and the current password",
+        "operationId" : "enableEmailMfa",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/mfa/recovery-codes" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Replace the recovery codes with 8 new ones, requires the current password",
+        "operationId" : "regenerateRecoveryCodes",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/mfa/totp/enable" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Enable the authenticator app with a code of it, returns recovery codes if the account had none",
+        "operationId" : "enableTotp",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/CodeRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/RecoveryCodesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/mfa/totp/setup" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Start setting up an authenticator app, requires the current password",
+        "description" : "Returns the secret and the otpauth uri for the qr code, POST /api/account/mfa/totp/enable confirms the setup with a code of the app",
+        "operationId" : "setupTotp",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TotpSetupResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/mfa/{method}/disable" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Disable a second factor (totp or email), requires the current password",
+        "operationId" : "disableMfa",
+        "parameters" : [ {
+          "name" : "method",
+          "in" : "path",
+          "description" : "totp or email",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordConfirmRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountSecurityResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/account/security" : {
+      "get" : {
+        "tags" : [ "Account" ],
+        "summary" : "Get the email address and two-factor settings of the caller",
+        "operationId" : "getAccountSecurity",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountSecurityResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/audit" : {
       "get" : {
         "tags" : [ "Audit" ],
@@ -330,6 +596,104 @@
                 "schema" : {
                   "type" : "integer",
                   "format" : "int64"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/password-reset" : {
+      "get" : {
+        "tags" : [ "Account" ],
+        "summary" : "Whether password recovery by email is available",
+        "operationId" : "passwordResetAvailable",
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PasswordResetResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Request a password reset mail for a user name or email address",
+        "description" : "Always answers 202, so the response does not tell whether the account exists or has an email address",
+        "operationId" : "requestPasswordReset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "202" : {
+            "description" : "Accepted"
+          }
+        }
+      }
+    },
+    "/api/password-reset/check" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Check a password reset token, tells whether completing it needs a code of the authenticator app",
+        "operationId" : "checkPasswordReset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordResetCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/PasswordResetResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/password-reset/complete" : {
+      "post" : {
+        "tags" : [ "Account" ],
+        "summary" : "Set a new password with a reset token, ends all sessions of the user",
+        "operationId" : "completePasswordReset",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/PasswordResetCompleteRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "400" : {
+            "description" : "Bad Request",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -857,7 +1221,7 @@
       "post" : {
         "tags" : [ "Users" ],
         "summary" : "Sign in to the web ui with the user password or an access token (basic auth), returns a session token for bearer authentication",
-        "description" : "A session created with an access token is restricted to the level of the token, it never grants administration or token management, ends when the token is revoked or expires and is subject to the ip allowlist and rate limit of the token",
+        "description" : "A session created with an access token is restricted to the level of the token, it never grants administration or token management, ends when the token is revoked or expires and is subject to the ip allowlist and rate limit of the token. For a user with two-factor authentication the password answers 200 with a challenge instead, POST /api/session/mfa completes it with a code.",
         "operationId" : "createSession",
         "requestBody" : {
           "content" : {
@@ -869,6 +1233,16 @@
           }
         },
         "responses" : {
+          "200" : {
+            "description" : "Two-factor authentication required",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MfaChallengeResponse"
+                }
+              }
+            }
+          },
           "201" : {
             "description" : "Created",
             "content" : {
@@ -901,6 +1275,81 @@
         "responses" : {
           "204" : {
             "description" : "No Content"
+          }
+        }
+      }
+    },
+    "/api/session/mfa" : {
+      "post" : {
+        "tags" : [ "Users" ],
+        "summary" : "Complete a sign in with two-factor authentication, returns the session",
+        "operationId" : "completeMfa",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Created",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "401" : {
+            "description" : "Wrong code or expired challenge",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429" : {
+            "description" : "Too many failed logins"
+          }
+        }
+      }
+    },
+    "/api/session/mfa/email" : {
+      "post" : {
+        "tags" : [ "Users" ],
+        "summary" : "Send the sign in code of a two-factor challenge to the email address of the user",
+        "operationId" : "sendMfaEmail",
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MfaVerifyRequest"
+              }
+            }
+          }
+        },
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          },
+          "401" : {
+            "description" : "Unauthorized",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429" : {
+            "description" : "A code was sent moments ago"
           }
         }
       }
@@ -1105,6 +1554,26 @@
         "tags" : [ "Users" ],
         "summary" : "Delete a user with its tokens and permissions",
         "operationId" : "deleteUser",
+        "parameters" : [ {
+          "name" : "username",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "204" : {
+            "description" : "No Content"
+          }
+        }
+      }
+    },
+    "/api/users/{username}/mfa" : {
+      "delete" : {
+        "tags" : [ "Users" ],
+        "summary" : "Turn off two-factor authentication of a user that lost access to every second factor",
+        "operationId" : "resetUserMfa",
         "parameters" : [ {
           "name" : "username",
           "in" : "path",
@@ -1428,6 +1897,14 @@
       }
     },
     "schemas" : {
+      "CodeRequest" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          }
+        }
+      },
       "CreateRepositoryRequest" : {
         "type" : "object",
         "properties" : {
@@ -1544,6 +2021,61 @@
           }
         }
       },
+      "EmailChangeRequest" : {
+        "type" : "object",
+        "properties" : {
+          "email" : {
+            "type" : "string"
+          },
+          "password" : {
+            "type" : "string"
+          }
+        }
+      },
+      "MfaVerifyRequest" : {
+        "type" : "object",
+        "properties" : {
+          "challenge" : {
+            "type" : "string"
+          },
+          "method" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PasswordConfirmRequest" : {
+        "type" : "object",
+        "properties" : {
+          "password" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PasswordResetCompleteRequest" : {
+        "type" : "object",
+        "properties" : {
+          "token" : {
+            "type" : "string"
+          },
+          "password" : {
+            "type" : "string"
+          },
+          "code" : {
+            "type" : "string"
+          }
+        }
+      },
+      "PasswordResetRequest" : {
+        "type" : "object",
+        "properties" : {
+          "login" : {
+            "type" : "string"
+          }
+        }
+      },
       "PermissionRequest" : {
         "type" : "object",
         "properties" : {
@@ -1620,6 +2152,28 @@
             "type" : "string"
           }
         }
+      },
+      "AccountSecurityResponse" : {
+        "type" : "object",
+        "properties" : {
+          "email" : {
+            "type" : "string"
+          },
+          "totpEnabled" : {
+            "type" : "boolean"
+          },
+          "emailMfaEnabled" : {
+            "type" : "boolean"
+          },
+          "recoveryCodesLeft" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "mailAvailable" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "totpEnabled", "emailMfaEnabled", "recoveryCodesLeft", "mailAvailable" ]
       },
       "AuditResponse" : {
         "type" : "object",
@@ -1726,6 +2280,31 @@
           }
         }
       },
+      "MfaChallengeResponse" : {
+        "type" : "object",
+        "properties" : {
+          "mfaRequired" : {
+            "type" : "boolean"
+          },
+          "challenge" : {
+            "type" : "string"
+          },
+          "methods" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          },
+          "emailHint" : {
+            "type" : "string"
+          },
+          "expiresAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        },
+        "required" : [ "mfaRequired" ]
+      },
       "PackageDetailResponse" : {
         "type" : "object",
         "properties" : {
@@ -1830,6 +2409,21 @@
         },
         "required" : [ "files", "size" ]
       },
+      "PasswordResetResponse" : {
+        "type" : "object",
+        "properties" : {
+          "available" : {
+            "type" : "boolean"
+          },
+          "username" : {
+            "type" : "string"
+          },
+          "totpRequired" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "available", "totpRequired" ]
+      },
       "PermissionResponse" : {
         "type" : "object",
         "properties" : {
@@ -1858,6 +2452,17 @@
           }
         },
         "required" : [ "admin" ]
+      },
+      "RecoveryCodesResponse" : {
+        "type" : "object",
+        "properties" : {
+          "recoveryCodes" : {
+            "type" : "array",
+            "items" : {
+              "type" : "string"
+            }
+          }
+        }
       },
       "RepositoryResponse" : {
         "type" : "object",
@@ -2102,6 +2707,17 @@
         },
         "required" : [ "rateLimit" ]
       },
+      "TotpSetupResponse" : {
+        "type" : "object",
+        "properties" : {
+          "secret" : {
+            "type" : "string"
+          },
+          "uri" : {
+            "type" : "string"
+          }
+        }
+      },
       "TreeResponse" : {
         "type" : "object",
         "properties" : {
@@ -2134,9 +2750,15 @@
           "createdAt" : {
             "type" : "string",
             "format" : "date-time"
+          },
+          "email" : {
+            "type" : "string"
+          },
+          "mfaEnabled" : {
+            "type" : "boolean"
           }
         },
-        "required" : [ "admin" ]
+        "required" : [ "admin", "mfaEnabled" ]
       },
       "WebhookDeliveryResponse" : {
         "type" : "object",

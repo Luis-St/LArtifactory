@@ -1,4 +1,3 @@
-import {useState} from 'react';
 import {api} from '../api';
 import {Icon} from '../components/icons';
 import {Avatar, Badge, Button, Card, Empty, PageHeader, Segmented, Spinner} from '../components/ui';
@@ -7,7 +6,8 @@ import {useAsync} from '../hooks';
 import {href} from '../router';
 import {useSession} from '../session';
 import {ACCENTS, type Density, type ThemePreference, useAccent, useDensity, useTheme} from '../theme';
-import {levelTone, PasswordDialog} from './Users';
+import {SecurityCard} from './AccountSecurity';
+import {levelTone} from './Users';
 import {canAdminister} from '../types';
 
 export function Account() {
@@ -15,7 +15,6 @@ export function Account() {
 	const {preference, setPreference} = useTheme();
 	const [accent, setAccent] = useAccent();
 	const [density, setDensity] = useDensity();
-	const [changing, setChanging] = useState(false);
 	const signedInWithToken = principal?.tokenLevel != null;
 	// A token can not list tokens, the list is only loaded for password sessions
 	const tokens = useAsync(() => (principal && !signedInWithToken ? api.tokens(principal.username) : Promise.resolve(null)), [principal?.username, signedInWithToken]);
@@ -106,15 +105,7 @@ export function Account() {
 							/>
 						</div>
 					</Card>
-					<Card title="Security">
-						<div className="setting-row">
-							<div>
-								<span>Password</span>
-								<span className="muted small">{signedInWithToken ? 'Sign in with your password to change it.' : 'Change the password you use to sign in to the web ui.'}</span>
-							</div>
-							<Button onClick={() => setChanging(true)} disabled={signedInWithToken}>Change password</Button>
-						</div>
-					</Card>
+					<SecurityCard username={principal.username} signedInWithToken={signedInWithToken}/>
 				</div>
 				
 				<Card title="Access tokens">
@@ -145,7 +136,6 @@ export function Account() {
 					)}
 				</Card>
 			</div>
-			{changing && <PasswordDialog username={principal.username} onClose={() => setChanging(false)}/>}
 		</>
 	);
 }

@@ -25,6 +25,17 @@ public final class EnvKeys {
 	public static final String SESSION_HOURS = "ARTIFACTORY_SESSION_HOURS";
 	public static final String SESSION_REMEMBER_DAYS = "ARTIFACTORY_SESSION_REMEMBER_DAYS";
 	public static final String NPM_TOKEN_DAYS = "ARTIFACTORY_NPM_TOKEN_DAYS";
+	public static final String PASSWORD_PEPPER = "ARTIFACTORY_PASSWORD_PEPPER";
+	public static final String MAIL_CODE_MINUTES = "ARTIFACTORY_MAIL_CODE_MINUTES";
+	public static final String PASSWORD_RESET_MINUTES = "ARTIFACTORY_PASSWORD_RESET_MINUTES";
+	
+	// Mail
+	public static final String SMTP_HOST = "ARTIFACTORY_SMTP_HOST";
+	public static final String SMTP_PORT = "ARTIFACTORY_SMTP_PORT";
+	public static final String SMTP_USERNAME = "ARTIFACTORY_SMTP_USERNAME";
+	public static final String SMTP_PASSWORD = "ARTIFACTORY_SMTP_PASSWORD";
+	public static final String SMTP_FROM = "ARTIFACTORY_SMTP_FROM";
+	public static final String SMTP_SECURITY = "ARTIFACTORY_SMTP_SECURITY";
 	
 	// Database
 	public static final String DB_URL = "ARTIFACTORY_DB_URL";

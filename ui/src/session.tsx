@@ -1,13 +1,15 @@
 import {createContext, type ReactNode, useCallback, useContext, useEffect, useState} from 'react';
 import {api, ApiError, hasAuthorization, hasSession, onUnauthorized, setAuthorization} from './api';
-import type {Principal} from './types';
+import type {MfaChallenge, MfaMethod, Principal} from './types';
 
 interface Session {
 	principal: Principal | null;
 	/** Browsing without credentials, only public repositories are visible. */
 	guest: boolean;
 	continueAsGuest: () => void;
-	login: (username: string, secret: string, remember: boolean) => Promise<void>;
+	/** Signs in, returns the challenge if the user has two-factor authentication and a code is still needed. */
+	login: (username: string, secret: string, remember: boolean) => Promise<MfaChallenge | null>;
+	completeMfa: (challenge: MfaChallenge, method: MfaMethod, code: string, remember: boolean) => Promise<void>;
 	logout: () => void;
 	notify: (message: string, kind?: ToastKind) => void;
 }
@@ -118,11 +120,8 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 		);
 	}, [attempt]);
 	
-	const login = useCallback(async (username: string, secret: string, remember: boolean) => {
-		// The password or token is only sent once to create a session, it is never stored in the browser.
-		// A session created from a token has the level of the token and ends when the token is revoked.
-		const session = await api.createSession(username || '__token__', secret, remember);
-		setAuthorization(`Bearer ${session.token}`, remember);
+	const start = useCallback(async (token: string, remember: boolean) => {
+		setAuthorization(`Bearer ${token}`, remember);
 		try {
 			setPrincipal(await api.me());
 			storeGuest(false);
@@ -133,8 +132,24 @@ export function SessionProvider({children}: { children: (state: { ready: boolean
 		}
 	}, []);
 	
+	const login = useCallback(async (username: string, secret: string, remember: boolean) => {
+		// The password or token is only sent once to create a session, it is never stored in the browser.
+		// A session created from a token has the level of the token and ends when the token is revoked.
+		const session = await api.createSession(username || '__token__', secret, remember);
+		if ('mfaRequired' in session) {
+			return session;
+		}
+		await start(session.token, remember);
+		return null;
+	}, [start]);
+	
+	const completeMfa = useCallback(async (challenge: MfaChallenge, method: MfaMethod, code: string, remember: boolean) => {
+		const session = await api.completeMfa(challenge.challenge, method, code);
+		await start(session.token, remember);
+	}, [start]);
+	
 	return (
-		<SessionContext.Provider value={{principal, guest, continueAsGuest, login, logout, notify}}>
+		<SessionContext.Provider value={{principal, guest, continueAsGuest, login, completeMfa, logout, notify}}>
 			{children({ready, principal, guest, unreachable, retry})}
 			<div className="toasts" role="status" aria-live="polite">
 				{toasts.map(toast => (

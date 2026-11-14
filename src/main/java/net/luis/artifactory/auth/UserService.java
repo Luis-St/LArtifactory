@@ -26,9 +26,16 @@ public class UserService {
 	public static final String SESSION_PREFIX = "las_";
 	
 	private final SqlDatabase database;
+	private final PasswordHasher hasher;
 	
-	public UserService(@NonNull SqlDatabase database) {
+	public UserService(@NonNull SqlDatabase database, @NonNull PasswordHasher hasher) {
 		this.database = Objects.requireNonNull(database, "Database must not be null");
+		this.hasher = Objects.requireNonNull(hasher, "Password hasher must not be null");
+	}
+	
+	@NonNull
+	public PasswordHasher hasher() {
+		return this.hasher;
 	}
 	
 	@NonNull
@@ -62,7 +69,7 @@ public class UserService {
 	
 	@NonNull
 	public UserEntity create(@NonNull String username, @NonNull String password, boolean admin) throws SqlException {
-		UserEntity user = new UserEntity(username, PasswordHasher.hash(password), admin, Instant.now());
+		UserEntity user = new UserEntity(username, this.hasher.hash(password), admin, Instant.now());
 		this.database.from(USERS).insert(user).execute();
 		return user;
 	}
@@ -73,12 +80,20 @@ public class UserService {
 		}
 		var update = this.database.from(USERS).update();
 		if (password != null) {
-			update = update.set(USER_PASSWORD_HASH, PasswordHasher.hash(password));
+			update = update.set(USER_PASSWORD_HASH, this.hasher.hash(password));
 		}
 		if (admin != null) {
 			update = update.set(USER_ADMIN, admin);
 		}
 		update.where(Sql.equalTo(USER_NAME, username)).execute();
+	}
+	
+	/**
+	 * Replaces the stored hash of a verified password, used to upgrade hashes created without the pepper on login.<br>
+	 */
+	public void rehash(@NonNull String username, @NonNull String password, @NonNull String verifiedHash) throws SqlException {
+		this.database.from(USERS).update().set(USER_PASSWORD_HASH, this.hasher.hash(password))
+			.where(SqlCondition.allOf(Sql.equalTo(USER_NAME, username), Sql.equalTo(USER_PASSWORD_HASH, verifiedHash))).execute();
 	}
 	
 	public long countAdmins() throws SqlException {
@@ -93,7 +108,7 @@ public class UserService {
 	}
 	
 	/**
-	 * Deletes a user with its tokens, sessions and permissions.<br>
+	 * Deletes a user with its tokens, sessions, permissions, email address and two-factor settings.<br>
 	 *
 	 * @return The ids of the deleted tokens
 	 */
@@ -107,6 +122,7 @@ public class UserService {
 			transaction.from(TOKENS).delete().where(Sql.equalTo(TOKEN_USERNAME, username)).execute();
 			transaction.from(SESSIONS).delete().where(Sql.equalTo(SESSION_USERNAME, username)).execute();
 			transaction.from(PERMISSIONS).delete().where(Sql.equalTo(PERMISSION_USERNAME, username)).execute();
+			transaction.from(USER_SECURITY).delete().where(Sql.equalTo(SECURITY_USERNAME, username)).execute();
 			for (TokenEntity token : tokens) {
 				transaction.from(SESSIONS).delete().where(Sql.equalTo(SESSION_TOKEN_ID, token.id())).execute();
 			}
@@ -243,6 +259,107 @@ public class UserService {
 		this.deleteToken(token.id());
 		return token.id();
 	}
+	
+	//region Email and two-factor settings
+	/**
+	 * Returns the email address and two-factor settings of the user, empty settings if none are stored.<br>
+	 */
+	@NonNull
+	public UserSecurityEntity security(@NonNull String username) throws SqlException {
+		UserSecurityEntity security = this.database.from(USER_SECURITY).select().where(Sql.equalTo(SECURITY_USERNAME, username)).fetchOneOrNull();
+		return security == null ? UserSecurityEntity.empty(username) : security;
+	}
+	
+	@NonNull
+	public Map<String, UserSecurityEntity> allSecurity() throws SqlException {
+		Map<String, UserSecurityEntity> result = new HashMap<>();
+		for (UserSecurityEntity security : this.database.from(USER_SECURITY).select().fetch()) {
+			result.put(security.username(), security);
+		}
+		return result;
+	}
+	
+	/**
+	 * Returns the settings of the user with the given (verified) email address, null if no user has it.<br>
+	 */
+	@Nullable
+	public UserSecurityEntity findByEmail(@NonNull String email) throws SqlException {
+		return this.database.from(USER_SECURITY).select().where(Sql.equalTo(SECURITY_EMAIL, email.strip().toLowerCase(Locale.ROOT))).fetchOneOrNull();
+	}
+	
+	private void ensureSecurity(@NonNull String username) throws SqlException {
+		if (!this.database.from(USER_SECURITY).select().where(Sql.equalTo(SECURITY_USERNAME, username)).exists()) {
+			this.database.from(USER_SECURITY).insert(UserSecurityEntity.empty(username)).execute();
+		}
+	}
+	
+	/**
+	 * Sets the verified email address of the user, null removes it.<br>
+	 */
+	public void setEmail(@NonNull String username, @Nullable String email) throws SqlException {
+		this.ensureSecurity(username);
+		this.database.from(USER_SECURITY).update().set(SECURITY_EMAIL, email == null ? null : email.strip().toLowerCase(Locale.ROOT))
+			.where(Sql.equalTo(SECURITY_USERNAME, username)).execute();
+	}
+	
+	/**
+	 * Enables the authenticator app with the given encrypted secret, or disables it if the secret is null.<br>
+	 */
+	public void setTotp(@NonNull String username, @Nullable String encryptedSecret, long lastStep) throws SqlException {
+		this.ensureSecurity(username);
+		this.database.from(USER_SECURITY).update()
+			.set(SECURITY_TOTP_SECRET, encryptedSecret)
+			.set(SECURITY_TOTP_ENABLED, encryptedSecret != null)
+			.set(SECURITY_TOTP_LAST_STEP, lastStep)
+			.where(Sql.equalTo(SECURITY_USERNAME, username)).execute();
+	}
+	
+	public void setEmailMfa(@NonNull String username, boolean enabled) throws SqlException {
+		this.ensureSecurity(username);
+		this.database.from(USER_SECURITY).update().set(SECURITY_EMAIL_MFA_ENABLED, enabled).where(Sql.equalTo(SECURITY_USERNAME, username)).execute();
+	}
+	
+	/**
+	 * Replaces the recovery codes of the user, null removes them.<br>
+	 */
+	public void setRecoveryCodes(@NonNull String username, @Nullable String hashes) throws SqlException {
+		this.ensureSecurity(username);
+		this.database.from(USER_SECURITY).update().set(SECURITY_RECOVERY_CODES, hashes).where(Sql.equalTo(SECURITY_USERNAME, username)).execute();
+	}
+	
+	/**
+	 * Records the time step of an accepted app code if it is still the newest one.<br>
+	 *
+	 * @return false if a concurrent request used a code of the same or a later step first
+	 */
+	public boolean advanceTotpStep(@NonNull String username, long expected, long step) throws SqlException {
+		return this.database.from(USER_SECURITY).update().set(SECURITY_TOTP_LAST_STEP, step)
+			.where(SqlCondition.allOf(Sql.equalTo(SECURITY_USERNAME, username), Sql.equalTo(SECURITY_TOTP_LAST_STEP, expected))).execute() == 1;
+	}
+	
+	/**
+	 * Replaces the recovery codes if they were not changed concurrently, used to consume a code exactly once.<br>
+	 *
+	 * @return false if a concurrent request changed the codes first
+	 */
+	public boolean replaceRecoveryCodes(@NonNull String username, @NonNull String expected, @NonNull String hashes) throws SqlException {
+		return this.database.from(USER_SECURITY).update().set(SECURITY_RECOVERY_CODES, hashes)
+			.where(SqlCondition.allOf(Sql.equalTo(SECURITY_USERNAME, username), Sql.equalTo(SECURITY_RECOVERY_CODES, expected))).execute() == 1;
+	}
+	
+	/**
+	 * Turns off every second factor of the user and removes the recovery codes, the email address is kept.<br>
+	 */
+	public void resetMfa(@NonNull String username) throws SqlException {
+		this.ensureSecurity(username);
+		this.database.from(USER_SECURITY).update()
+			.set(SECURITY_TOTP_SECRET, (String) null)
+			.set(SECURITY_TOTP_ENABLED, false)
+			.set(SECURITY_EMAIL_MFA_ENABLED, false)
+			.set(SECURITY_RECOVERY_CODES, (String) null)
+			.where(Sql.equalTo(SECURITY_USERNAME, username)).execute();
+	}
+	//endregion
 	
 	//region Token metadata
 	@Nullable

@@ -17,6 +17,7 @@ export function Users() {
 	const [creating, setCreating] = useState(false);
 	const [editing, setEditing] = useState<User | null>(null);
 	const [deleting, setDeleting] = useState<User | null>(null);
+	const [resettingMfa, setResettingMfa] = useState<User | null>(null);
 	const [expanded, setExpanded] = useState<Set<string>>(new Set());
 	const toggleExpanded = (username: string) => setExpanded(current => {
 		const next = new Set(current);
@@ -80,6 +81,8 @@ export function Users() {
 											<Avatar name={user.username} size="small"/>
 											<strong>{user.username}</strong>
 											{self && <Badge>you</Badge>}
+											{user.mfaEnabled && <Badge tone="success" title="Signs in with a second factor">2FA</Badge>}
+											{user.email && <span className="muted small">{user.email}</span>}
 										</span>
 									</td>
 									<td className="shrink">{user.admin ? <Badge tone="accent">Administrator</Badge> : <Badge>User</Badge>}</td>
@@ -107,6 +110,7 @@ export function Users() {
 											{label: self ? 'Change password' : 'Set password', icon: 'tokens', onSelect: () => setEditing(user)},
 											{label: 'Manage permissions', icon: 'permissions', onSelect: () => navigate(`${href('permissions')}?username=${encodeURIComponent(user.username)}`), hidden: user.admin},
 											{label: user.admin ? 'Revoke administrator' : 'Make administrator', icon: 'users', onSelect: () => toggleAdmin(user), hidden: self},
+											{label: 'Reset two-factor', icon: 'permissions', onSelect: () => setResettingMfa(user), hidden: self || !user.mfaEnabled},
 											{label: 'Delete user', icon: 'trash', onSelect: () => setDeleting(user), danger: true, hidden: self},
 										]}/>
 									</td>
@@ -123,6 +127,19 @@ export function Users() {
 				users.reload();
 			}}/>}
 			{editing && <PasswordDialog username={editing.username} onClose={() => setEditing(null)}/>}
+			{resettingMfa && (
+				<ConfirmDialog
+					title="Reset two-factor authentication"
+					message={<>Turn off every second factor of <strong>{resettingMfa.username}</strong> and remove the recovery codes? Only do this after confirming who asks, the password alone then signs in again.</>}
+					confirmLabel="Reset"
+					onConfirm={async () => {
+						await api.resetUserMfa(resettingMfa.username);
+						notify(`Two-factor authentication of ${resettingMfa.username} turned off`);
+						users.reload();
+					}}
+					onClose={() => setResettingMfa(null)}
+				/>
+			)}
 			{deleting && (
 				<ConfirmDialog
 					title="Delete user"

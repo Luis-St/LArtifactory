@@ -13,6 +13,7 @@ public record Services(
 	@NonNull ServerConfig config,
 	@NonNull UserService users,
 	@NonNull AuthService auth,
+	@NonNull AccountSecurityService security,
 	@NonNull TokenUsageService tokenUsage,
 	@NonNull RepositoryService repositories,
 	@NonNull ArtifactService artifacts,
@@ -28,6 +29,7 @@ public record Services(
 		Objects.requireNonNull(config, "Config must not be null");
 		Objects.requireNonNull(users, "User service must not be null");
 		Objects.requireNonNull(auth, "Auth service must not be null");
+		Objects.requireNonNull(security, "Account security service must not be null");
 		Objects.requireNonNull(tokenUsage, "Token usage service must not be null");
 		Objects.requireNonNull(repositories, "Repository service must not be null");
 		Objects.requireNonNull(artifacts, "Artifact service must not be null");

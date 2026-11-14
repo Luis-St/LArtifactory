@@ -31,7 +31,7 @@ public class UserAdminHandler {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
 	}
 	
-	private static void validatePassword(String password) {
+	static void validatePassword(String password) {
 		if (password == null || password.length() < 12) {
 			throw HttpError.badRequest("Password must have at least 12 characters");
 		}
@@ -58,7 +58,8 @@ public class UserAdminHandler {
 	
 	@OpenApi(
 		summary = "Sign in to the web ui with the user password or an access token (basic auth), returns a session token for bearer authentication",
-		description = "A session created with an access token is restricted to the level of the token, it never grants administration or token management, ends when the token is revoked or expires and is subject to the ip allowlist and rate limit of the token",
+		description = "A session created with an access token is restricted to the level of the token, it never grants administration or token management, ends when the token is revoked or expires and is subject to the ip allowlist and rate limit of the token. " +
+			"For a user with two-factor authentication the password answers 200 with a challenge instead, POST /api/session/mfa completes it with a code.",
 		operationId = "createSession",
 		path = "/api/session",
 		methods = HttpMethod.POST,
@@ -66,6 +67,7 @@ public class UserAdminHandler {
 		requestBody = @OpenApiRequestBody(content = @OpenApiContent(from = CreateSessionRequest.class)),
 		responses = {
 			@OpenApiResponse(status = "201", content = @OpenApiContent(from = SessionResponse.class)),
+			@OpenApiResponse(status = "200", description = "Two-factor authentication required", content = @OpenApiContent(from = MfaChallengeResponse.class)),
 			@OpenApiResponse(status = "401", content = @OpenApiContent(from = ErrorResponse.class)),
 			@OpenApiResponse(status = "429", description = "Too many failed logins")
 		}
@@ -75,29 +77,99 @@ public class UserAdminHandler {
 		if (AuthService.sessionSecret(ctx) != null) {
 			throw HttpError.forbidden("A session can only be created with the user password or an access token");
 		}
-		Principal principal = this.services.auth().requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
 		String body = ctx.body();
 		CreateSessionRequest request = body.isBlank() ? new CreateSessionRequest(null) : ctx.bodyAsClass(CreateSessionRequest.class);
-		Duration lifetime = Boolean.TRUE.equals(request.remember())
-			? Duration.ofDays(this.services.config().sessionRememberDays())
-			: Duration.ofHours(this.services.config().sessionHours());
-		Instant expiresAt = Instant.now().plus(lifetime);
-		UserService.CreatedSession session;
-		if (principal.tokenLevel() == null) {
-			session = this.services.users().createSession(principal.username(), lifetime);
-		} else {
-			// The browser keeps a session that expires and is revoked on sign out instead of the token itself
-			String secret = AuthService.tokenSecret(ctx);
-			TokenEntity token = secret == null ? null : this.services.users().findTokenBySecret(secret);
-			if (token == null) {
+		boolean remember = Boolean.TRUE.equals(request.remember());
+		AuthService.Credentials credentials = AuthService.passwordCredentials(ctx);
+		if (credentials != null) {
+			UserEntity user = this.services.auth().login(ctx, credentials.username(), credentials.password());
+			if (user == null) {
 				throw HttpError.unauthorized("Basic realm=\"artifactory\"");
 			}
-			if (token.expiresAt() != null && token.expiresAt().isBefore(expiresAt)) {
-				expiresAt = token.expiresAt();
+			if (this.services.users().security(user.username()).mfaEnabled()) {
+				ctx.status(200).json(MfaChallengeResponse.of(this.services.security().startChallenge(user, remember)));
+				return;
 			}
-			session = this.services.users().createSession(principal.username(), expiresAt, principal.tokenLevel(), token.id());
+			ctx.status(201).json(SessionResponse.of(this.services.users().createSession(user.username(), this.sessionLifetime(remember))));
+			return;
 		}
-		ctx.status(201).json(SessionResponse.of(session));
+		Principal principal = this.services.auth().requireAuthenticated(ctx, "Basic realm=\"artifactory\"");
+		// Only a token remains, the browser keeps a session that expires and is revoked on sign out instead of the token itself
+		String secret = AuthService.tokenSecret(ctx);
+		TokenEntity token = principal.tokenLevel() == null || secret == null ? null : this.services.users().findTokenBySecret(secret);
+		if (token == null) {
+			throw HttpError.unauthorized("Basic realm=\"artifactory\"");
+		}
+		Instant expiresAt = Instant.now().plus(this.sessionLifetime(remember));
+		if (token.expiresAt() != null && token.expiresAt().isBefore(expiresAt)) {
+			expiresAt = token.expiresAt();
+		}
+		ctx.status(201).json(SessionResponse.of(this.services.users().createSession(principal.username(), expiresAt, principal.tokenLevel(), token.id())));
+	}
+	
+	@NonNull
+	private Duration sessionLifetime(boolean remember) {
+		return remember ? Duration.ofDays(this.services.config().sessionRememberDays()) : Duration.ofHours(this.services.config().sessionHours());
+	}
+	
+	@OpenApi(
+		summary = "Complete a sign in with two-factor authentication, returns the session",
+		operationId = "completeMfa",
+		path = "/api/session/mfa",
+		methods = HttpMethod.POST,
+		tags = "Users",
+		security = {},
+		requestBody = @OpenApiRequestBody(content = @OpenApiContent(from = MfaVerifyRequest.class)),
+		responses = {
+			@OpenApiResponse(status = "201", content = @OpenApiContent(from = SessionResponse.class)),
+			@OpenApiResponse(status = "401", description = "Wrong code or expired challenge", content = @OpenApiContent(from = ErrorResponse.class)),
+			@OpenApiResponse(status = "429", description = "Too many failed logins")
+		}
+	)
+	public void completeMfa(@NonNull Context ctx) throws Exception {
+		MfaVerifyRequest request = ctx.bodyAsClass(MfaVerifyRequest.class);
+		String address = Requests.clientIp(ctx, this.services.config());
+		AccountSecurityService.Challenge challenge = this.services.security().completeChallenge(address, request.challenge(), request.method(), request.code());
+		ctx.status(201).json(SessionResponse.of(this.services.users().createSession(challenge.username(), this.sessionLifetime(challenge.remember()))));
+	}
+	
+	@OpenApi(
+		summary = "Send the sign in code of a two-factor challenge to the email address of the user",
+		operationId = "sendMfaEmail",
+		path = "/api/session/mfa/email",
+		methods = HttpMethod.POST,
+		tags = "Users",
+		security = {},
+		requestBody = @OpenApiRequestBody(content = @OpenApiContent(from = MfaVerifyRequest.class)),
+		responses = {
+			@OpenApiResponse(status = "204"),
+			@OpenApiResponse(status = "401", content = @OpenApiContent(from = ErrorResponse.class)),
+			@OpenApiResponse(status = "429", description = "A code was sent moments ago")
+		}
+	)
+	public void sendMfaEmail(@NonNull Context ctx) throws Exception {
+		this.services.security().sendChallengeCode(ctx.bodyAsClass(MfaVerifyRequest.class).challenge());
+		ctx.status(204);
+	}
+	
+	@OpenApi(
+		summary = "Turn off two-factor authentication of a user that lost access to every second factor",
+		operationId = "resetUserMfa",
+		path = "/api/users/{username}/mfa",
+		methods = HttpMethod.DELETE,
+		tags = "Users",
+		pathParams = @OpenApiParam(name = "username", required = true),
+		responses = @OpenApiResponse(status = "204")
+	)
+	public void resetMfa(@NonNull Context ctx) throws Exception {
+		Principal admin = this.services.auth().requireAdmin(ctx);
+		String username = ctx.pathParam("username");
+		if (this.services.users().get(username) == null) {
+			throw HttpError.notFound("No such user: " + username);
+		}
+		this.services.security().reset(username);
+		this.services.audit().record(admin.username(), AuditService.MFA_RESET, null, username, Requests.clientIp(ctx, this.services.config()), null);
+		ctx.status(204);
 	}
 	
 	@OpenApi(
@@ -127,7 +199,8 @@ public class UserAdminHandler {
 	)
 	public void listUsers(@NonNull Context ctx) throws Exception {
 		this.services.auth().requireAdmin(ctx);
-		ctx.json(this.services.users().list().stream().map(UserResponse::of).toList());
+		Map<String, UserSecurityEntity> security = this.services.users().allSecurity();
+		ctx.json(this.services.users().list().stream().map(user -> UserResponse.of(user, security.get(user.username()))).toList());
 	}
 	
 	@OpenApi(
@@ -155,7 +228,7 @@ public class UserAdminHandler {
 		}
 		UserEntity user = this.services.users().create(request.username(), request.password(), Boolean.TRUE.equals(request.admin()));
 		this.services.audit().record(admin.username(), AuditService.USER_CREATE, null, user.username(), Requests.clientIp(ctx, this.services.config()), user.admin() ? "admin" : null);
-		ctx.status(201).json(UserResponse.of(user));
+		ctx.status(201).json(UserResponse.of(user, null));
 	}
 	
 	@OpenApi(
@@ -210,7 +283,7 @@ public class UserAdminHandler {
 			detail.append(detail.isEmpty() ? "" : ", ").append("tokens revoked");
 		}
 		this.services.audit().record(principal.username(), AuditService.USER_UPDATE, null, username, Requests.clientIp(ctx, this.services.config()), detail.isEmpty() ? null : detail.toString());
-		ctx.json(UserResponse.of(Objects.requireNonNull(this.services.users().get(username))));
+		ctx.json(UserResponse.of(Objects.requireNonNull(this.services.users().get(username)), this.services.users().security(username)));
 	}
 	
 	@OpenApi(

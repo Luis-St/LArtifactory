@@ -16,6 +16,15 @@ public final class Tables {
 	public static final SqlColumn<UserEntity, Boolean> USER_ADMIN = USERS.column("admin", SqlTypes.BOOLEAN, UserEntity::admin, SqlColumnBuilder::notNull);
 	public static final SqlColumn<UserEntity, Instant> USER_CREATED_AT = USERS.column("created_at", SqlTypes.INSTANT.configure(SqlParameter.fractional(6)), UserEntity::createdAt, SqlColumnBuilder::notNull);
 	
+	public static final SqlTable<UserSecurityEntity> USER_SECURITY = SqlTable.create(UserSecurityEntity.class, "user_security");
+	public static final SqlColumn<UserSecurityEntity, String> SECURITY_USERNAME = USER_SECURITY.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), UserSecurityEntity::username, col -> col.primaryKey().notNull());
+	public static final SqlColumn<UserSecurityEntity, String> SECURITY_EMAIL = USER_SECURITY.column("email", SqlTypes.STRING.configure(SqlParameter.length(320)), UserSecurityEntity::email);
+	public static final SqlColumn<UserSecurityEntity, String> SECURITY_TOTP_SECRET = USER_SECURITY.column("totp_secret", SqlTypes.STRING.configure(SqlParameter.length(256)), UserSecurityEntity::totpSecret);
+	public static final SqlColumn<UserSecurityEntity, Boolean> SECURITY_TOTP_ENABLED = USER_SECURITY.column("totp_enabled", SqlTypes.BOOLEAN, UserSecurityEntity::totpEnabled, SqlColumnBuilder::notNull);
+	public static final SqlColumn<UserSecurityEntity, Boolean> SECURITY_EMAIL_MFA_ENABLED = USER_SECURITY.column("email_mfa_enabled", SqlTypes.BOOLEAN, UserSecurityEntity::emailMfaEnabled, SqlColumnBuilder::notNull);
+	public static final SqlColumn<UserSecurityEntity, Long> SECURITY_TOTP_LAST_STEP = USER_SECURITY.column("totp_last_step", SqlTypes.LONG, UserSecurityEntity::totpLastStep, SqlColumnBuilder::notNull);
+	public static final SqlColumn<UserSecurityEntity, String> SECURITY_RECOVERY_CODES = USER_SECURITY.column("recovery_codes", SqlTypes.TEXT, UserSecurityEntity::recoveryCodes);
+	
 	public static final SqlTable<TokenEntity> TOKENS = SqlTable.create(TokenEntity.class, "tokens");
 	public static final SqlColumn<TokenEntity, String> TOKEN_ID = TOKENS.column("id", SqlTypes.STRING.configure(SqlParameter.length(36)), TokenEntity::id, col -> col.primaryKey().notNull());
 	public static final SqlColumn<TokenEntity, String> TOKEN_USERNAME = TOKENS.column("username", SqlTypes.STRING.configure(SqlParameter.length(128)), TokenEntity::username, SqlColumnBuilder::notNull);

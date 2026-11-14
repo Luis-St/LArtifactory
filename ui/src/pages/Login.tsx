@@ -3,15 +3,18 @@ import {api, ApiError} from '../api';
 import {Icon} from '../components/icons';
 import {ThemeToggle} from '../components/Layout';
 import {Button, Field, Tabs, TYPE_INFO} from '../components/ui';
+import {href} from '../router';
 import {useSession} from '../session';
-import {REPOSITORY_TYPES} from '../types';
+import {type MfaChallenge, type MfaMethod, REPOSITORY_TYPES} from '../types';
 
 type Method = 'password' | 'token';
 
 /** Access tokens are issued with this prefix, a pasted token is recognized even in the password tab. */
 const TOKEN_PREFIX = 'lat_';
 
-interface LoginError {
+const METHOD_LABELS: Record<MfaMethod, string> = {totp: 'Authenticator app', email: 'Email code', recovery: 'Recovery code'};
+
+export interface LoginError {
 	title: string;
 	detail: string;
 }
@@ -40,9 +43,49 @@ function describeError(error: unknown, withToken: boolean): LoginError {
 	return {title: 'The server can not be reached', detail: 'Check your connection, or whether the server is running.'};
 }
 
+/** The frame of the sign in pages: the brand panel next to the card with the form. */
+export function LoginShell({children}: { children: React.ReactNode }) {
+	return (
+		<div className="login">
+			<div className="login-theme"><ThemeToggle/></div>
+			<div className="login-shell">
+				<section className="login-brand" aria-hidden>
+					<div className="brand brand-large">
+						<img src="./favicon.svg" alt="" width={40} height={40}/>
+						<span>LArtifactory</span>
+					</div>
+					<p className="login-tagline">One place for your packages, images and build artifacts.</p>
+					<ul className="login-formats">
+						{REPOSITORY_TYPES.map(type => (
+							<li key={type} style={{'--badge': TYPE_INFO[type].color} as React.CSSProperties}>
+								<span className="dot" style={{background: TYPE_INFO[type].color}}/>
+								<span>{TYPE_INFO[type].label}</span>
+								<span className="login-format-hint">{TYPE_INFO[type].ecosystem}</span>
+							</li>
+						))}
+					</ul>
+				</section>
+				{children}
+			</div>
+		</div>
+	);
+}
+
+export function LoginErrorBox({error}: { error: LoginError | undefined }) {
+	return error ? (
+		<div className="login-error" role="alert">
+			<strong>{error.title}</strong>
+			<span>{error.detail}</span>
+		</div>
+	) : null;
+}
+
 export function Login() {
 	const {login, continueAsGuest} = useSession();
 	const [publicCount, setPublicCount] = useState(0);
+	const [resetAvailable, setResetAvailable] = useState(false);
+	const [challenge, setChallenge] = useState<MfaChallenge | null>(null);
+	const [forgot, setForgot] = useState(false);
 	const [method, setMethod] = useState<Method>('password');
 	const [username, setUsername] = useState('');
 	const [secret, setSecret] = useState('');
@@ -65,6 +108,7 @@ export function Login() {
 	useEffect(() => {
 		// Without credentials the server lists only the public repositories, guest access is offered when there are any
 		api.repositories().then(repositories => setPublicCount(repositories.length), () => setPublicCount(0));
+		api.passwordResetAvailable().then(info => setResetAvailable(info.available), () => setResetAvailable(false));
 	}, []);
 	
 	const submit = async (event: FormEvent) => {
@@ -72,82 +116,200 @@ export function Login() {
 		setBusy(true);
 		setError(undefined);
 		try {
-			await login(withToken ? '' : username.trim(), withToken ? secret.trim() : secret, remember);
+			const pending = await login(withToken ? '' : username.trim(), withToken ? secret.trim() : secret, remember);
+			if (pending) {
+				// The password was right, a second factor completes the sign in
+				setChallenge(pending);
+				setSecret('');
+				setBusy(false);
+			}
 		} catch (e) {
 			setError(describeError(e, withToken));
 			setBusy(false);
 		}
 	};
 	
+	if (challenge) {
+		return <LoginShell><MfaForm challenge={challenge} remember={remember} onCancel={() => setChallenge(null)}/></LoginShell>;
+	}
+	if (forgot) {
+		return <LoginShell><ForgotPasswordForm initial={username.trim()} onBack={() => setForgot(false)}/></LoginShell>;
+	}
+	
 	return (
-		<div className="login">
-			<div className="login-theme"><ThemeToggle/></div>
-			<div className="login-shell">
-				<section className="login-brand" aria-hidden>
-					<div className="brand brand-large">
-						<img src="./favicon.svg" alt="" width={40} height={40}/>
-						<span>LArtifactory</span>
-					</div>
-					<p className="login-tagline">One place for your packages, images and build artifacts.</p>
-					<ul className="login-formats">
-						{REPOSITORY_TYPES.map(type => (
-							<li key={type} style={{'--badge': TYPE_INFO[type].color} as React.CSSProperties}>
-								<span className="dot" style={{background: TYPE_INFO[type].color}}/>
-								<span>{TYPE_INFO[type].label}</span>
-								<span className="login-format-hint">{TYPE_INFO[type].ecosystem}</span>
-							</li>
-						))}
-					</ul>
-				</section>
-				<form className="login-card" onSubmit={submit} noValidate>
-					<div>
-						<h1>Sign in</h1>
-						<p className="muted">{method === 'password' ? 'Enter your username and password to start a session.' : 'Enter one of your access tokens.'}</p>
-					</div>
-					<Tabs<Method>
-						tabs={[{id: 'password', label: 'Password'}, {id: 'token', label: 'Access token'}]}
-						active={method}
-						onChange={changeMethod}
-					/>
-					{method === 'password' && (
-						<Field label="Username">
-							<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus disabled={detectedToken}/>
-						</Field>
-					)}
-					<Field label={method === 'password' ? 'Password' : 'Access token'}
-						   hint={detectedToken ? 'This is an access token, it is used as one and the username is not needed' : method === 'token' ? `Starts with ${TOKEN_PREFIX}, the token identifies its owner` : undefined}>
-						<span className="password-field">
-							<input type={showSecret ? 'text' : 'password'} value={secret} onChange={event => setSecret(event.target.value)}
-								   autoComplete={method === 'token' ? 'off' : 'current-password'} autoFocus={method === 'token'} aria-invalid={error ? true : undefined}/>
-							<button type="button" className="password-toggle" onClick={() => setShowSecret(value => !value)} aria-label={showSecret ? 'Hide' : 'Show'} title={showSecret ? 'Hide' : 'Show'}>
-								<Icon name={showSecret ? 'eye-off' : 'eye'} size={16}/>
-							</button>
-						</span>
+		<LoginShell>
+			<form className="login-card" onSubmit={submit} noValidate>
+				<div>
+					<h1>Sign in</h1>
+					<p className="muted">{method === 'password' ? 'Enter your username and password to start a session.' : 'Enter one of your access tokens.'}</p>
+				</div>
+				<Tabs<Method>
+					tabs={[{id: 'password', label: 'Password'}, {id: 'token', label: 'Access token'}]}
+					active={method}
+					onChange={changeMethod}
+				/>
+				{method === 'password' && (
+					<Field label="Username">
+						<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="username" autoFocus disabled={detectedToken}/>
 					</Field>
-					<label className="checkbox">
-						<input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/>
-						Keep me signed in on this device
-					</label>
-					{error && (
-						<div className="login-error" role="alert">
-							<strong>{error.title}</strong>
-							<span>{error.detail}</span>
-						</div>
-					)}
-					<Button variant="primary" type="submit" className="login-submit" disabled={busy || !canSubmit}>{busy ? 'Signing in…' : withToken ? 'Sign in with token' : 'Sign in'}</Button>
-					{publicCount > 0 && (
-						<>
-							<div className="login-divider"><span>or</span></div>
-							<Button variant="ghost" className="login-submit" onClick={continueAsGuest} disabled={busy}>
-								Continue without signing in
-							</Button>
-							<p className="muted small login-guest-hint">
-								Browse and download from {publicCount === 1 ? 'the public repository' : `${publicCount} public repositories`}.
-							</p>
-						</>
-					)}
-				</form>
+				)}
+				<Field label={method === 'password' ? 'Password' : 'Access token'}
+					   hint={detectedToken ? 'This is an access token, it is used as one and the username is not needed' : method === 'token' ? `Starts with ${TOKEN_PREFIX}, the token identifies its owner` : undefined}>
+					<span className="password-field">
+						<input type={showSecret ? 'text' : 'password'} value={secret} onChange={event => setSecret(event.target.value)}
+							   autoComplete={method === 'token' ? 'off' : 'current-password'} autoFocus={method === 'token'} aria-invalid={error ? true : undefined}/>
+						<button type="button" className="password-toggle" onClick={() => setShowSecret(value => !value)} aria-label={showSecret ? 'Hide' : 'Show'} title={showSecret ? 'Hide' : 'Show'}>
+							<Icon name={showSecret ? 'eye-off' : 'eye'} size={16}/>
+						</button>
+					</span>
+				</Field>
+				<label className="checkbox">
+					<input type="checkbox" checked={remember} onChange={event => setRemember(event.target.checked)}/>
+					Keep me signed in on this device
+				</label>
+				<LoginErrorBox error={error}/>
+				<Button variant="primary" type="submit" className="login-submit" disabled={busy || !canSubmit}>{busy ? 'Signing in…' : withToken ? 'Sign in with token' : 'Sign in'}</Button>
+				{method === 'password' && resetAvailable && (
+					<button type="button" className="link small login-forgot" onClick={() => setForgot(true)}>Forgot password?</button>
+				)}
+				{publicCount > 0 && (
+					<>
+						<div className="login-divider"><span>or</span></div>
+						<Button variant="ghost" className="login-submit" onClick={continueAsGuest} disabled={busy}>
+							Continue without signing in
+						</Button>
+						<p className="muted small login-guest-hint">
+							Browse and download from {publicCount === 1 ? 'the public repository' : `${publicCount} public repositories`}.
+						</p>
+					</>
+				)}
+			</form>
+		</LoginShell>
+	);
+}
+
+/**
+ * Second step of a sign in with two-factor authentication: a code of the authenticator app, a code sent by email or a recovery code.
+ */
+function MfaForm({challenge, remember, onCancel}: { challenge: MfaChallenge; remember: boolean; onCancel: () => void }) {
+	const {completeMfa} = useSession();
+	const [method, setMethod] = useState<MfaMethod>(challenge.methods[0] ?? 'recovery');
+	const [code, setCode] = useState('');
+	const [busy, setBusy] = useState(false);
+	const [sent, setSent] = useState(false);
+	const [error, setError] = useState<LoginError>();
+	
+	const changeMethod = (value: MfaMethod) => {
+		setMethod(value);
+		setCode('');
+		setError(undefined);
+	};
+	
+	const sendCode = async () => {
+		setBusy(true);
+		setError(undefined);
+		try {
+			await api.sendMfaEmail(challenge.challenge);
+			setSent(true);
+		} catch (e) {
+			setError(describeMfaError(e));
+		}
+		setBusy(false);
+	};
+	
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		setBusy(true);
+		setError(undefined);
+		try {
+			await completeMfa(challenge, method, code.trim(), remember);
+		} catch (e) {
+			setError(describeMfaError(e));
+			setCode('');
+			setBusy(false);
+		}
+	};
+	
+	return (
+		<form className="login-card" onSubmit={submit} noValidate>
+			<div>
+				<h1>Two-factor authentication</h1>
+				<p className="muted">
+					{method === 'totp' ? 'Enter the 6 digit code of your authenticator app.'
+						: method === 'email' ? `We send a 6 digit code to ${challenge.emailHint ?? 'your email address'}.`
+							: 'Enter one of your recovery codes, each code works once.'}
+				</p>
 			</div>
-		</div>
+			{challenge.methods.length > 1 && (
+				<Tabs<MfaMethod> tabs={challenge.methods.map(id => ({id, label: METHOD_LABELS[id]}))} active={method} onChange={changeMethod}/>
+			)}
+			{method === 'email' && (
+				<Button onClick={sendCode} disabled={busy}>{sent ? 'Send a new code' : 'Send code'}</Button>
+			)}
+			<Field label={METHOD_LABELS[method]} hint={method === 'recovery' ? 'Format ABCD-EFGH' : sent && method === 'email' ? 'The code is on its way, check your inbox' : undefined}>
+				<input key={method} value={code} onChange={event => setCode(event.target.value)} autoFocus autoComplete="one-time-code"
+					   inputMode={method === 'recovery' ? 'text' : 'numeric'} placeholder={method === 'recovery' ? 'ABCD-EFGH' : '123456'}
+					   maxLength={method === 'recovery' ? 9 : 6} aria-invalid={error ? true : undefined} className="mono"/>
+			</Field>
+			<LoginErrorBox error={error}/>
+			<Button variant="primary" type="submit" className="login-submit" disabled={busy || code.trim() === ''}>{busy ? 'Checking…' : 'Verify'}</Button>
+			<button type="button" className="link small login-forgot" onClick={onCancel}>Back to sign in</button>
+		</form>
+	);
+}
+
+function describeMfaError(error: unknown): LoginError {
+	if (error instanceof ApiError) {
+		if (error.status === 401) {
+			return {title: 'Not accepted', detail: error.message};
+		}
+		if (error.status === 429) {
+			return {title: 'Too many attempts', detail: error.message.startsWith('Too many failed') ? 'Sign in is paused after several failed attempts. Wait a few minutes and try again.' : error.message};
+		}
+		return {title: 'Verification failed', detail: error.message};
+	}
+	return {title: 'The server can not be reached', detail: 'Check your connection, or whether the server is running.'};
+}
+
+/**
+ * Asks for a password reset mail, the answer is the same whether the account exists or not.
+ */
+function ForgotPasswordForm({initial, onBack}: { initial: string; onBack: () => void }) {
+	const [login, setLogin] = useState(initial);
+	const [busy, setBusy] = useState(false);
+	const [sent, setSent] = useState(false);
+	const [error, setError] = useState<LoginError>();
+	
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		setBusy(true);
+		setError(undefined);
+		try {
+			await api.requestPasswordReset(login.trim());
+			setSent(true);
+		} catch (e) {
+			setError(e instanceof ApiError ? {title: 'Request failed', detail: e.message} : {title: 'The server can not be reached', detail: 'Check your connection, or whether the server is running.'});
+		}
+		setBusy(false);
+	};
+	
+	return (
+		<form className="login-card" onSubmit={submit} noValidate>
+			<div>
+				<h1>Reset password</h1>
+				<p className="muted">{sent
+					? 'If an account with a verified email address matches, a reset mail is on its way. It contains a link or a reset code.'
+					: 'Enter your username or the email address of your account.'}</p>
+			</div>
+			{!sent && (
+				<Field label="Username or email">
+					<input value={login} onChange={event => setLogin(event.target.value)} autoComplete="username" autoFocus/>
+				</Field>
+			)}
+			<LoginErrorBox error={error}/>
+			{!sent && <Button variant="primary" type="submit" className="login-submit" disabled={busy || login.trim() === ''}>{busy ? 'Sending…' : 'Send reset mail'}</Button>}
+			{sent && <a className="btn btn-primary login-submit" href={href('reset-password')}>Enter reset code</a>}
+			<button type="button" className="link small login-forgot" onClick={onBack}>Back to sign in</button>
+		</form>
 	);
 }

@@ -297,6 +297,10 @@ public class NpmHandler extends FormatHandler {
 		if (user == null) {
 			throw npmError(401, "Invalid username or password");
 		}
+		if (this.services.users().security(user.username()).mfaEnabled()) {
+			// npm login would turn the password alone into a token, which skips the second factor
+			throw npmError(401, "Two-factor authentication is enabled for this user, create a token in the web ui and add it to .npmrc");
+		}
 		int days = this.services.config().npmTokenDays();
 		Instant expiresAt = days == 0 ? null : Instant.now().plus(days, ChronoUnit.DAYS);
 		// Publishing needs WRITE, unpublishing still works with a token of the DELETE level created on the tokens page
