@@ -1,6 +1,6 @@
 plugins {
 	java
-	id("com.gradleup.shadow") version "9.4.1"
+	id("com.gradleup.shadow") version "9.6.1"
 }
 
 group = "net.luis"
@@ -59,7 +59,7 @@ dependencies {
 	implementation(libs.jspecify)
 	
 	// Testing
-	testImplementation(platform("org.junit:junit-bom:6.0.0"))
+	testImplementation(platform("org.junit:junit-bom:6.1.3"))
 	testImplementation("org.junit.jupiter:junit-jupiter")
 	// Integration tests against a real PostgreSQL, skipped when no docker daemon is available
 	testImplementation(libs.testcontainers.postgresql)
