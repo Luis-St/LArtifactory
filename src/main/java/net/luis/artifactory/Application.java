@@ -177,7 +177,7 @@ public class Application {
 				config.registerPlugin(new OpenApiPlugin(pluginConfig ->
 					pluginConfig.withDefinitionConfiguration((_, definition) ->
 						definition.info(info ->
-								info.title("LArtifactory").version("1.1.1").description("Artifact repository management API")
+								info.title("LArtifactory").version("1.1.2").description("Artifact repository management API")
 							)
 							// Administration and token management require a password (basic) or a session from POST /api/session (bearer),
 							// the read endpoints also accept access tokens as bearer token or as basic password with the user __token__
