@@ -32,6 +32,11 @@ public final class Pepper {
 	
 	private static final Logger LOGGER = LoggerFactory.getLogger(Pepper.class);
 	private static final String FILE_NAME = "pepper";
+	/**
+	 * Marks a configured pepper as base64, the format of the generated file.<br>
+	 * Without it a configured value is used as its UTF-8 bytes, so a plain text pepper that happens to be valid base64 keeps working.<br>
+	 */
+	public static final String BASE64_PREFIX = "base64:";
 	private static final String ENCRYPTED_PREFIX = "v1:";
 	private static final int IV_LENGTH = 12;
 	private static final int TAG_BITS = 128;
@@ -50,9 +55,11 @@ public final class Pepper {
 	/**
 	 * Returns the configured pepper, or the pepper stored in the storage directory, which is generated on the first start.<br>
 	 * <p>
-	 *     A configured pepper is used as its UTF-8 bytes. If the storage directory already holds a generated pepper, the configured
-	 *     value must be the content of that file (it is then decoded like the file), any other value would silently invalidate every
-	 *     stored hash, so the server refuses to start instead.
+	 *     A configured pepper is used as its UTF-8 bytes, or decoded like the generated file if it starts with {@link #BASE64_PREFIX}.
+	 *     {@code base64:<content of the file>} is therefore the same pepper as the file, with or without the file, and is the way
+	 *     to move a generated pepper into the environment. If the storage directory already holds a generated pepper, the configured
+	 *     value must resolve to the same secret (the bare content of the file is accepted as well), any other value would silently
+	 *     invalidate every stored hash, so the server refuses to start instead.
 	 * </p>
 	 *
 	 * @throws IllegalStateException If a pepper is configured that differs from the generated one
@@ -63,24 +70,43 @@ public final class Pepper {
 		try {
 			if (Files.exists(file)) {
 				String stored = Files.readString(file, StandardCharsets.US_ASCII).strip();
-				if (configured != null && !configured.strip().equals(stored)) {
+				byte[] secret = Base64.getDecoder().decode(stored);
+				if (configured != null && !configured.strip().equals(stored) && !MessageDigest.isEqual(decodeConfigured(configured), secret)) {
 					throw new IllegalStateException("The configured password pepper differs from the generated one in " + file + ", every password, recovery code and two-factor secret would stop verifying. " +
-						"Configure the content of that file as the pepper, or delete the file if the pepper is meant to change");
+						"Configure '" + BASE64_PREFIX + "' followed by the content of that file as the pepper, or delete the file if the pepper is meant to change");
 				}
-				return new Pepper(Base64.getDecoder().decode(stored));
+				return new Pepper(secret);
 			}
 			if (configured != null) {
-				return new Pepper(configured.getBytes(StandardCharsets.UTF_8));
+				return new Pepper(decodeConfigured(configured));
 			}
 			byte[] secret = new byte[32];
 			RANDOM.nextBytes(secret);
 			Files.createDirectories(storagePath);
 			write(file, Base64.getEncoder().encodeToString(secret) + "\n");
-			LOGGER.warn("No password pepper configured, generated one in {}. Back it up separately from the database, without it no password, recovery code or two-factor secret can be verified", file);
+			LOGGER.warn("No password pepper configured, generated one in {}. Back it up separately from the database, without it no password, recovery code or two-factor secret can be verified. " +
+				"To keep it in the environment instead, set {} to '{}' followed by the content of that file", file, "ARTIFACTORY_PASSWORD_PEPPER", BASE64_PREFIX);
 			return new Pepper(secret);
 		} catch (IOException e) {
 			throw new UncheckedIOException("Failed to load the password pepper from " + file, e);
 		}
+	}
+	
+	/**
+	 * Returns the secret of a configured pepper, decoded if it carries the {@link #BASE64_PREFIX}, otherwise its UTF-8 bytes.<br>
+	 *
+	 * @throws IllegalArgumentException If the value after the prefix is not valid base64
+	 */
+	public static byte @NonNull [] decodeConfigured(@NonNull String configured) {
+		String value = configured.strip();
+		if (value.startsWith(BASE64_PREFIX)) {
+			try {
+				return Base64.getDecoder().decode(value.substring(BASE64_PREFIX.length()).strip());
+			} catch (IllegalArgumentException e) {
+				throw new IllegalArgumentException("The password pepper after '" + BASE64_PREFIX + "' is not valid base64", e);
+			}
+		}
+		return configured.getBytes(StandardCharsets.UTF_8);
 	}
 	
 	/**

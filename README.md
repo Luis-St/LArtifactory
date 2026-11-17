@@ -26,7 +26,7 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_SESSION_HOURS`                | `12`                                           | Lifetime of a web ui session                                                               |
 | `ARTIFACTORY_SESSION_REMEMBER_DAYS`        | `30`                                           | Lifetime of a web ui session with "keep me signed in"                                      |
 | `ARTIFACTORY_NPM_TOKEN_DAYS`               | `90`                                           | Lifetime of tokens created by `npm login`, `0` for no expiry                               |
-| `ARTIFACTORY_PASSWORD_PEPPER`              | generated into `<storage>/pepper`              | Server secret mixed into password hashes, at least 32 characters, keep it out of the db    |
+| `ARTIFACTORY_PASSWORD_PEPPER`              | generated into `<storage>/pepper`              | Server secret mixed into password hashes, at least 32 characters (or `base64:` + 32 bytes) |
 | `ARTIFACTORY_MAIL_CODE_MINUTES`            | `10`                                           | Lifetime of sign in codes and email verification codes sent by mail                        |
 | `ARTIFACTORY_PASSWORD_RESET_MINUTES`       | `30`                                           | Lifetime of a password reset link                                                          |
 | `ARTIFACTORY_SMTP_HOST`                    | mail disabled                                  | SMTP server for codes, email verification and password recovery                            |
@@ -286,7 +286,9 @@ set `ARTIFACTORY_TRUST_PROXY=true` so that header is used.
   so a database dump alone is not enough to guess passwords offline.
   Without `ARTIFACTORY_PASSWORD_PEPPER` the server generates one into `pepper` in `ARTIFACTORY_STORAGE_PATH` on the first start.
   Back the pepper up separately from the database, because without it no password, recovery code or authenticator secret verifies.
-  To move a generated pepper into the environment, set `ARTIFACTORY_PASSWORD_PEPPER` to the content of that file.
+  To move a generated pepper into the environment, set `ARTIFACTORY_PASSWORD_PEPPER` to `base64:` followed by the content of that file,
+  because the prefix decodes the value like the file, so it stays the same pepper even after the file is lost.
+  Without the prefix a configured pepper is used as plain text, so a plain pepper that happens to be valid base64 keeps working.
   Any other value while the file exists stops the start, because it would silently invalidate every stored hash.
   Hashes from before the pepper still verify and are replaced with peppered ones on the next successful login,
   so existing installations need no migration step.

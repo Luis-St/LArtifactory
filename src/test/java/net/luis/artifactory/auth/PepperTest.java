@@ -43,6 +43,21 @@ class PepperTest {
 	}
 	
 	@Test
+	void prefixedFileContentKeepsThePepperWithAndWithoutFile() throws Exception {
+		Pepper generated = Pepper.load(null, this.storage);
+		String configured = Pepper.BASE64_PREFIX + Files.readString(this.storage.resolve("pepper")).strip();
+		assertEquals(generated.hmacHex("test", "value"), Pepper.load(configured, this.storage).hmacHex("test", "value"), "accepted while the file exists");
+		Files.delete(this.storage.resolve("pepper"));
+		assertEquals(generated.hmacHex("test", "value"), Pepper.load(configured, this.storage).hmacHex("test", "value"), "the same pepper after the file is lost");
+		assertFalse(Files.exists(this.storage.resolve("pepper")), "a configured pepper is not written to the storage");
+	}
+	
+	@Test
+	void prefixedPepperMustBeValidBase64() {
+		assertThrows(IllegalArgumentException.class, () -> Pepper.load(Pepper.BASE64_PREFIX + "not base64 !!!!!!!!!!!!!!!!!!!!!!!!!", this.storage));
+	}
+	
+	@Test
 	void configuredPepperWithoutFileIsUsedAsIs() {
 		Pepper configured = Pepper.load("a-configured-pepper-of-at-least-32-chars", this.storage);
 		assertEquals(new Pepper("a-configured-pepper-of-at-least-32-chars".getBytes(StandardCharsets.UTF_8)).hmacHex("test", "value"), configured.hmacHex("test", "value"));

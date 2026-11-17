@@ -1,5 +1,6 @@
 package net.luis.artifactory.config;
 
+import net.luis.artifactory.auth.Pepper;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -51,8 +52,20 @@ public record ServerConfig(
 		requireAtLeast(EnvKeys.NPM_TOKEN_DAYS, npmTokenDays, 0);
 		requireAtLeast(EnvKeys.MAIL_CODE_MINUTES, mailCodeMinutes, 1);
 		requireAtLeast(EnvKeys.PASSWORD_RESET_MINUTES, passwordResetMinutes, 1);
-		if (passwordPepper != null && passwordPepper.length() < 32) {
-			throw new ConfigException(EnvKeys.PASSWORD_PEPPER + " must have at least 32 characters");
+		if (passwordPepper != null) {
+			if (passwordPepper.strip().startsWith(Pepper.BASE64_PREFIX)) {
+				byte[] secret;
+				try {
+					secret = Pepper.decodeConfigured(passwordPepper);
+				} catch (IllegalArgumentException e) {
+					throw new ConfigException(EnvKeys.PASSWORD_PEPPER + " is not valid base64 after '" + Pepper.BASE64_PREFIX + "'");
+				}
+				if (secret.length < 32) {
+					throw new ConfigException(EnvKeys.PASSWORD_PEPPER + " must decode to at least 32 bytes, got: " + secret.length);
+				}
+			} else if (passwordPepper.length() < 32) {
+				throw new ConfigException(EnvKeys.PASSWORD_PEPPER + " must have at least 32 characters");
+			}
 		}
 		requireAtLeast(EnvKeys.MAINTENANCE_INTERVAL, maintenanceIntervalMinutes, 1);
 		requireAtLeast(EnvKeys.REMOTE_METADATA_TTL, remoteMetadataTtlMinutes, 0);
