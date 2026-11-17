@@ -450,4 +450,8 @@ The container runs as the unprivileged user `artifactory` (uid and gid `10001`) 
 A data volume created by an older image belongs to root and has to be handed over once,
 for example with `docker run --rm -v lartifactory-data:/data alpine chown -R 10001:10001 /data`.
 The database password has no default and is required.
-The heap is sized to 75 % of the container memory limit (`JAVA_TOOL_OPTIONS`), override it to change the heap size.
+The heap may grow to 75 % of the container memory limit (`JAVA_TOOL_OPTIONS`), override it to change the heap size.
+The image uses G1 with a periodic collection after 30 seconds without a collection,
+so unused heap is returned to the system after a load peak instead of staying reserved until the next restart.
+Without it the JVM picks the serial collector in a container with less than 2 CPUs or 2 GB of memory,
+which keeps its peak heap for good.

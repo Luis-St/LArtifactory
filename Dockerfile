@@ -37,8 +37,12 @@ ENV ARTIFACTORY_DB_URL=jdbc:postgresql://localhost:5432/artifactory
 ENV ARTIFACTORY_DB_USERNAME=artifactory
 ENV ARTIFACTORY_DB_POOL_SIZE=10
 ENV ARTIFACTORY_STORAGE_PATH=/data
-# Size the heap from the container memory limit instead of the host memory
-ENV JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+# Cap the heap at 75 % of the container memory limit, but only keep what is in use:
+# below 2 cpus or 2 GB the jvm picks the serial gc, which never returns heap after a load peak,
+# g1 with a periodic gc returns unused heap to the os after 30 s idle (like a jvm on a desktop)
+ENV JAVA_TOOL_OPTIONS="-XX:+UseG1GC -XX:MaxRAMPercentage=75.0 -XX:G1PeriodicGCInterval=30000 -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30 -XX:+ExitOnOutOfMemoryError"
+# Limits the glibc malloc arenas, one arena per jetty thread otherwise keeps native memory reserved
+ENV MALLOC_ARENA_MAX=2
 
 USER artifactory
 VOLUME /data
