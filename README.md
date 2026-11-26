@@ -1,6 +1,6 @@
 # LArtifactory
 Artifact repository server built with Java 25, Javalin, HikariCP, Log4j2 and LUtils.
-It hosts packages for Maven/Gradle, PyPI, npm, NuGet, Cargo, Docker/OCI images and generic files with token based authentication.
+It hosts packages for Maven/Gradle, PyPI, npm, NuGet, Cargo, Docker/OCI images, Debian (apt) and generic files with token based authentication.
 ## Requirements
 
 - JDK 25
@@ -29,6 +29,8 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_PASSWORD_PEPPER`              | generated into `<storage>/pepper`              | Server secret mixed into password hashes, at least 32 characters (or `base64:` + 32 bytes) |
 | `ARTIFACTORY_MAIL_CODE_MINUTES`            | `10`                                           | Lifetime of sign in codes and email verification codes sent by mail                        |
 | `ARTIFACTORY_PASSWORD_RESET_MINUTES`       | `30`                                           | Lifetime of a password reset link                                                          |
+| `ARTIFACTORY_DEBIAN_SIGNING_KEY`           | generated into `<storage>`                     | Armored OpenPGP secret key or the path of a file, signs the Debian indexes                 |
+| `ARTIFACTORY_DEBIAN_SIGNING_PASSPHRASE`    |                                                | Passphrase of `ARTIFACTORY_DEBIAN_SIGNING_KEY` if it is protected                          |
 | `ARTIFACTORY_SMTP_HOST`                    | mail disabled                                  | SMTP server for codes, email verification and password recovery                            |
 | `ARTIFACTORY_SMTP_PORT`                    | default port of the security mode              | `587` for `STARTTLS`, `465` for `IMPLICIT_TLS`, `25` for `PLAINTEXT`                       |
 | `ARTIFACTORY_SMTP_SECURITY`                | `STARTTLS`                                     | `STARTTLS` (required, not opportunistic), `IMPLICIT_TLS` or `PLAINTEXT`                    |
@@ -99,6 +101,7 @@ Repositories are created with the management api, every repository has one of th
 | `nuget`   | `{base}/nuget/{repo}/v3/index.json`                               | V3 feed: flat container, registrations, search, push, unlist/relist  |
 | `cargo`   | `sparse+{base}/cargo/{repo}/index/`                               | Sparse index: publish, download, yank/unyank, search, owners         |
 | `oci`     | `{host}/{repo}/{image}` (docker), `{base}/v2/`                    | OCI distribution api: push, pull, tags, referrers, catalog, delete   |
+| `debian`  | `deb {base}/debian/{repo} {distribution} {component}`             | Signed APT repository: upload, `Packages`, `InRelease`, by-hash      |
 
 Released versions are immutable: uploading a different file over an existing release returns `409 Conflict`
 (Maven snapshots can always be redeployed, repositories can allow redeploys with `allowRedeploy`).
@@ -210,6 +213,15 @@ docker tag my-image:1.0 repo.example.com/oci-local/team/my-image:1.0
 docker push repo.example.com/oci-local/team/my-image:1.0
 ```
 
+**Debian / apt** (the token goes into `auth.conf`, so it never appears in the sources list)
+
+```bash
+curl -fsSL -u ci:<token> https://repo.example.com/debian/debian-local/public.key | sudo tee /etc/apt/keyrings/lartifactory.asc > /dev/null
+echo "deb [signed-by=/etc/apt/keyrings/lartifactory.asc] https://repo.example.com/debian/debian-local stable main" | sudo tee /etc/apt/sources.list.d/lartifactory.list
+printf 'machine https://repo.example.com/debian/debian-local\nlogin ci\npassword <token>\n' | sudo tee /etc/apt/auth.conf.d/lartifactory.conf > /dev/null
+curl -u ci:<token> -T ./my-package_1.0-1_amd64.deb https://repo.example.com/debian/debian-local/pool/stable/main/
+```
+
 ### OCI images
 Docker only talks to `/v2/` at the root of a host and knows no path prefix,
 so the OCI distribution api is served at `{base}/v2/{repo}/{image}/...` and the repository is the first component of the image name.
@@ -236,6 +248,33 @@ With credentials it returns the access token itself or, for a password, a sessio
 That session grants repository access like a token of the `DELETE` level but no administration,
 because a credential stored by the Docker engine should not be able to manage the server.
 Basic auth on the api endpoints keeps working for clients such as `curl`.
+
+### Debian packages
+A package is uploaded with `PUT {base}/debian/{repo}/pool/{distribution}/{component}/{file}.deb`.
+Distribution and component are created by the first upload to them, so a repository needs no further setup.
+The server reads name, version and architecture from the control file of the package and ignores the uploaded file name,
+because apt resolves the control file and a mistyped file name would otherwise list a package under a wrong version.
+The package is stored at `pool/{distribution}/{component}/{initial}/{package}/{package}_{version}_{architecture}.deb`,
+which the response returns.
+The distribution is part of the pool path, so one distribution can be cleaned up without touching the same package version in another.
+Control archives compressed with gzip, xz or zstd (the Ubuntu default) and uncompressed ones are supported, the data archive is never unpacked.
+
+The indexes below `dists/{distribution}/` are generated from the stored packages and kept in memory.
+These are `InRelease`, `Release`, `Release.gpg`, and `Packages` and `Packages.gz` per component and architecture.
+They are regenerated on the next request once a package of the distribution was added or deleted, whichever api changed it,
+so deleting a version in the web ui or with `DELETE /api/repositories/{name}/packages` updates the indexes as well.
+`Date` and the signature time are the time of the newest package,
+which makes the indexes a function of the stored packages and keeps them stable across restarts.
+Packages of the architecture `all` are listed in `binary-all` and in every `binary-{arch}`, as in the Debian archive.
+`Acquire-By-Hash` is enabled and the previous indexes stay reachable by hash,
+so an `apt update` that runs while a package is published does not fail with a hash sum mismatch.
+A file is deleted with `DELETE` on its pool path and the `DELETE` level, the version disappears with its last file.
+
+apt refuses unsigned repositories unless they are marked `trusted=yes`, so every Debian repository is signed.
+One key signs all repositories, and it is served at `{base}/debian/{repo}/public.key`.
+Without `ARTIFACTORY_DEBIAN_SIGNING_KEY` the server generates an RSA 3072 key into `debian-signing-key.asc` in `ARTIFACTORY_STORAGE_PATH` on first use.
+Back it up, because a new key makes every client fail until it imports the new public key.
+apt sends credentials only from `/etc/apt/auth.conf.d`, and over plain http only if the `machine` entry includes the `http://` scheme.
 
 ### One host per ecosystem
 With `ARTIFACTORY_HOST_REPOSITORIES` a repository can be served at the root of its own host, which allows urls like

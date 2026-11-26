@@ -10,6 +10,9 @@ postgresql = "42.7.14"
 apache-commons-lang3 = "3.22.0"
 google-guava = "33.8.0-jre"
 testcontainers = "2.0.5"
+bouncycastle = "1.87"
+xz = "1.12"
+aircompressor = "2.0.3"
 
 [libraries]
 lutils = { module = "net.luis:LUtils", version.ref = "lutils" }
@@ -27,5 +30,8 @@ hikaricp = { module = "com.zaxxer:HikariCP", version.ref = "hikari" }
 postgresql = { module = "org.postgresql:postgresql", version.ref = "postgresql" }
 apache-commons-lang3 = { module = "org.apache.commons:commons-lang3", version.ref = "apache-commons-lang3" }
 google-guava = { module = "com.google.guava:guava", version.ref = "google-guava" }
+bouncycastle-bcpg = { module = "org.bouncycastle:bcpg-jdk18on", version.ref = "bouncycastle" }
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
+aircompressor = { module = "io.airlift:aircompressor", version.ref = "aircompressor" }
 testcontainers-postgresql = { module = "org.testcontainers:testcontainers-postgresql", version.ref = "testcontainers" }
 testcontainers-junit-jupiter = { module = "org.testcontainers:testcontainers-junit-jupiter", version.ref = "testcontainers" }

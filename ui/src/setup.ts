@@ -90,6 +90,13 @@ function allSetupSnippets(repository: Repository, username: string): Snippet[] {
 				{title: 'Other OCI artifacts (oras)', code: `oras push ${image}:1.0 ./artifact.tar.gz`},
 			];
 		}
+		case 'debian':
+			return [
+				{title: 'Signing key', code: `curl -fsSL -u ${username}:<token> ${url}/public.key | sudo tee /etc/apt/keyrings/${id}.asc > /dev/null`},
+				{title: 'Source list', code: `echo "deb [signed-by=/etc/apt/keyrings/${id}.asc] ${url} stable main" | sudo tee /etc/apt/sources.list.d/${id}.list`},
+				{title: `/etc/apt/auth.conf.d/${id}.conf`, code: `machine ${url}\nlogin ${username}\npassword <token>`},
+				{title: 'Upload', code: `curl -u ${username}:<token> -T ./package.deb ${url}/pool/stable/main/`},
+			];
 	}
 }
 
@@ -154,6 +161,10 @@ export function installSnippets(repository: Repository, name: string, version: s
 				{title: 'Dockerfile', code: `FROM ${image}${tag ? `:${tag}` : `@${version}`}`},
 			];
 		}
+		case 'debian':
+			return [
+				{title: 'apt', code: `sudo apt-get update\nsudo apt-get install ${name}=${version}`},
+			];
 		case 'generic':
 			return [];
 	}

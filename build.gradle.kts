@@ -58,6 +58,11 @@ dependencies {
 	// Nullability
 	implementation(libs.jspecify)
 	
+	// Debian packages: OpenPGP signing of the repository indexes, xz and zstd compressed control archives
+	implementation(libs.bouncycastle.bcpg)
+	implementation(libs.xz)
+	implementation(libs.aircompressor)
+	
 	// Testing
 	testImplementation(platform("org.junit:junit-bom:6.1.3"))
 	testImplementation("org.junit.jupiter:junit-jupiter")

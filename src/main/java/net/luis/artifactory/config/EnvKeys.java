@@ -28,6 +28,8 @@ public final class EnvKeys {
 	public static final String PASSWORD_PEPPER = "ARTIFACTORY_PASSWORD_PEPPER";
 	public static final String MAIL_CODE_MINUTES = "ARTIFACTORY_MAIL_CODE_MINUTES";
 	public static final String PASSWORD_RESET_MINUTES = "ARTIFACTORY_PASSWORD_RESET_MINUTES";
+	public static final String DEBIAN_SIGNING_KEY = "ARTIFACTORY_DEBIAN_SIGNING_KEY";
+	public static final String DEBIAN_SIGNING_PASSPHRASE = "ARTIFACTORY_DEBIAN_SIGNING_PASSPHRASE";
 	
 	// Mail
 	public static final String SMTP_HOST = "ARTIFACTORY_SMTP_HOST";

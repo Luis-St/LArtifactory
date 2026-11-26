@@ -159,7 +159,7 @@ public class RepositoryAdminHandler {
 	
 	@OpenApi(
 		summary = "Create a repository",
-		description = "Types: maven, generic, pypi, npm, nuget, cargo, oci",
+		description = "Types: maven, generic, pypi, npm, nuget, cargo, oci, debian",
 		operationId = "createRepository",
 		path = "/api/repositories",
 		methods = HttpMethod.POST,

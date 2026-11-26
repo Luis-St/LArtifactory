@@ -27,7 +27,7 @@ public class RepositoryDispatcher {
 	
 	public RepositoryDispatcher(@NonNull Services services) {
 		this.services = Objects.requireNonNull(services, "Services must not be null");
-		for (FormatHandler handler : List.of(new MavenHandler(services), new GenericHandler(services), new PypiHandler(services), new NpmHandler(services), new NugetHandler(services), new CargoHandler(services), new OciHandler(services))) {
+		for (FormatHandler handler : List.of(new MavenHandler(services), new GenericHandler(services), new PypiHandler(services), new NpmHandler(services), new NugetHandler(services), new CargoHandler(services), new OciHandler(services), new DebianHandler(services))) {
 			this.handlers.put(handler.type(), handler);
 		}
 	}

@@ -40,6 +40,7 @@
 	--type-nuget: #7c3aed;
 	--type-cargo: #a85a07;
 	--type-oci: #0e7490;
+	--type-debian: #be185d;
 	--font: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
 	--mono: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, 'Cascadia Code', 'Fira Code', 'SF Mono', 'Source Code Pro', 'Ubuntu Mono', Menlo, Consolas, monospace;
 	color-scheme: light;
@@ -82,6 +83,7 @@
 	--type-nuget: #a78bfa;
 	--type-cargo: #fbbf24;
 	--type-oci: #22d3ee;
+	--type-debian: #f472b6;
 	color-scheme: dark;
 }
 

@@ -28,7 +28,9 @@ public record ServerConfig(
 	int passwordResetMinutes,
 	int maintenanceIntervalMinutes,
 	int remoteMetadataTtlMinutes,
-	int auditRetentionDays
+	int auditRetentionDays,
+	@Nullable String debianSigningKey,
+	@Nullable String debianSigningPassphrase
 ) {
 	
 	public ServerConfig {
@@ -98,7 +100,9 @@ public record ServerConfig(
 			env.integer(EnvKeys.PASSWORD_RESET_MINUTES, 30),
 			env.integer(EnvKeys.MAINTENANCE_INTERVAL, 60),
 			env.integer(EnvKeys.REMOTE_METADATA_TTL, 30),
-			env.integer(EnvKeys.AUDIT_RETENTION_DAYS, 365)
+			env.integer(EnvKeys.AUDIT_RETENTION_DAYS, 365),
+			env.optional(EnvKeys.DEBIAN_SIGNING_KEY),
+			env.optional(EnvKeys.DEBIAN_SIGNING_PASSPHRASE)
 		);
 	}
 	

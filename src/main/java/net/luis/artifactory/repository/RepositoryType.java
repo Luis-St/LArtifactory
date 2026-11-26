@@ -13,7 +13,8 @@ public enum RepositoryType {
 	NPM("npm"),
 	NUGET("nuget"),
 	CARGO("cargo"),
-	OCI("oci");
+	OCI("oci"),
+	DEBIAN("debian");
 	
 	private final String id;
 	

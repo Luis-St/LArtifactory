@@ -11,6 +11,7 @@ export const TYPE_INFO: Record<RepositoryType, { label: string; ecosystem: strin
 	nuget: {label: 'NuGet', ecosystem: 'dotnet & nuget', color: 'var(--type-nuget)'},
 	cargo: {label: 'Cargo', ecosystem: 'Rust crates', color: 'var(--type-cargo)'},
 	oci: {label: 'OCI', ecosystem: 'Docker & OCI images', color: 'var(--type-oci)'},
+	debian: {label: 'Debian', ecosystem: 'apt & dpkg', color: 'var(--type-debian)'},
 };
 
 export function TypeBadge({type}: { type: RepositoryType }) {

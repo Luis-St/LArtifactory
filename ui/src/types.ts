@@ -1,5 +1,5 @@
 /** The order types are listed in everywhere in the ui */
-export const REPOSITORY_TYPES = ['generic', 'maven', 'nuget', 'cargo', 'npm', 'pypi', 'oci'] as const;
+export const REPOSITORY_TYPES = ['generic', 'maven', 'nuget', 'cargo', 'npm', 'pypi', 'oci', 'debian'] as const;
 export type RepositoryType = (typeof REPOSITORY_TYPES)[number];
 
 /**
