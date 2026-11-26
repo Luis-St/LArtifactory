@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "net.luis"
-version = "1.1.2"
+version = "1.2.0"
 
 java {
 	toolchain {
