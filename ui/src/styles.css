@@ -1421,7 +1421,7 @@ input:disabled {
 }
 
 .card-browser .browser.with-details > .card {
-	margin: 14px;
+	margin: 14px 14px 0;
 }
 
 .card-browser .details-stacked {
