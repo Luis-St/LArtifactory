@@ -4,7 +4,7 @@ import net.luis.artifactory.config.ServerConfig;
 import net.luis.artifactory.database.entity.UserEntity;
 import net.luis.artifactory.database.entity.UserSecurityEntity;
 import net.luis.artifactory.http.HttpError;
-import net.luis.artifactory.mail.MailSender;
+import net.luis.artifactory.mail.*;
 import net.luis.artifactory.repository.AuditService;
 import net.luis.utils.io.database.exception.SqlException;
 import org.jspecify.annotations.NonNull;
@@ -53,6 +53,7 @@ public class AccountSecurityService {
 	private final AuthService auth;
 	private final Pepper pepper;
 	private final MailSender mail;
+	private final AccountMails mails;
 	private final ServerConfig config;
 	private final AuditService audit;
 	private final TokenUsageService tokenUsage;
@@ -71,6 +72,7 @@ public class AccountSecurityService {
 		this.pepper = Objects.requireNonNull(pepper, "Pepper must not be null");
 		this.mail = Objects.requireNonNull(mail, "Mail sender must not be null");
 		this.config = Objects.requireNonNull(config, "Config must not be null");
+		this.mails = new AccountMails(config.baseUrl());
 		this.audit = Objects.requireNonNull(audit, "Audit service must not be null");
 		this.tokenUsage = Objects.requireNonNull(tokenUsage, "Token usage service must not be null");
 		this.throttle = auth.throttle();
@@ -129,11 +131,11 @@ public class AccountSecurityService {
 		}
 	}
 	
-	private void send(@NonNull String to, @NonNull String subject, @NonNull String text) {
+	private void send(@NonNull String to, @NonNull Mail mail) {
 		try {
-			this.mail.send(to, subject, text);
+			this.mail.send(to, mail);
 		} catch (MailSender.MailException e) {
-			LOGGER.warn("Failed to send mail '{}'", subject, e);
+			LOGGER.warn("Failed to send mail '{}'", mail.subject(), e);
 			throw HttpError.of(502, "The mail could not be sent, try again later");
 		}
 	}
@@ -279,13 +281,7 @@ public class AccountSecurityService {
 			challenge.emailCodeHash = this.hashCode(code);
 			challenge.emailCodeExpiresAt = now.plus(this.codeLifetime());
 		}
-		this.send(security.email(), "Your LArtifactory sign in code", """
-			Hello %s,
-			
-			your sign in code is: %s
-			
-			It is valid for %d minutes. If you did not try to sign in, someone knows your password: change it right away.
-			""".formatted(challenge.username(), code, this.config.mailCodeMinutes()));
+		this.send(security.email(), this.mails.signInCode(challenge.username(), code, this.config.mailCodeMinutes()));
 	}
 	
 	/**
@@ -354,13 +350,7 @@ public class AccountSecurityService {
 		this.limitEntries(this.stepUpCodes);
 		String code = sixDigits();
 		this.stepUpCodes.put(username, new StepUpCode(this.hashCode(code), now, now.plus(this.codeLifetime()), new int[1]));
-		this.send(security.email(), "Your LArtifactory confirmation code", """
-			Hello %s,
-			
-			your code to confirm a change of your account security is: %s
-			
-			It is valid for %d minutes. If you did not change your account security, someone is signed in to your account: change your password right away.
-			""".formatted(username, code, this.config.mailCodeMinutes()));
+		this.send(security.email(), this.mails.confirmationCode(username, code, this.config.mailCodeMinutes()));
 	}
 	
 	/**
@@ -543,13 +533,7 @@ public class AccountSecurityService {
 		this.limitEntries(this.pendingEmails);
 		String code = sixDigits();
 		this.pendingEmails.put(username, new PendingEmail(normalized, this.hashCode(code), now, now.plus(this.codeLifetime()), new int[1]));
-		this.send(normalized, "Verify your email address for LArtifactory", """
-			Hello %s,
-			
-			your verification code is: %s
-			
-			It is valid for %d minutes. If you did not add this address to an account, ignore this mail.
-			""".formatted(username, code, this.config.mailCodeMinutes()));
+		this.send(normalized, this.mails.emailVerification(username, code, this.config.mailCodeMinutes()));
 	}
 	
 	/**
@@ -587,12 +571,7 @@ public class AccountSecurityService {
 		this.audit.record(username, AuditService.EMAIL_CHANGE, null, username, address, previous == null ? "added" : "changed");
 		if (previous != null && !previous.equals(pending.email()) && this.mail.available()) {
 			// Tell the old address, a stolen session must not silently redirect the password recovery
-			this.mailExecutor.execute(() -> this.sendQuietly(previous, "Your LArtifactory email address was changed", """
-				Hello %s,
-				
-				the email address of your account was changed to %s.
-				If you did not do this, contact an administrator right away.
-				""".formatted(username, maskEmail(pending.email()))));
+			this.mailExecutor.execute(() -> this.sendQuietly(previous, this.mails.emailChanged(username, maskEmail(pending.email()))));
 		}
 		return pending.email();
 	}
@@ -612,11 +591,11 @@ public class AccountSecurityService {
 	//endregion
 	
 	//region Password recovery
-	private void sendQuietly(@NonNull String to, @NonNull String subject, @NonNull String text) {
+	private void sendQuietly(@NonNull String to, @NonNull Mail mail) {
 		try {
-			this.mail.send(to, subject, text);
+			this.mail.send(to, mail);
 		} catch (MailSender.MailException e) {
-			LOGGER.warn("Failed to send mail '{}'", subject, e);
+			LOGGER.warn("Failed to send mail '{}'", mail.subject(), e);
 		}
 	}
 	
@@ -660,17 +639,9 @@ public class AccountSecurityService {
 		this.resets.put(UserService.hashToken(token), new PasswordReset(username, now.plus(Duration.ofMinutes(this.config.passwordResetMinutes())), new int[1]));
 		this.audit.record(null, AuditService.PASSWORD_RESET_REQUEST, null, username, address, null);
 		
-		String instructions = this.config.baseUrl() == null
-			? "Open the sign in page, choose \"Forgot password\" and enter this reset code:\n\n" + token
-			: "Open this link to choose a new password:\n\n" + this.config.baseUrl() + "/ui/#/reset-password?token=" + token;
+		Mail mail = this.mails.passwordReset(username, token, this.config.passwordResetMinutes());
 		String to = security.email();
-		this.mailExecutor.execute(() -> this.sendQuietly(to, "Reset your LArtifactory password", """
-			Hello %s,
-			
-			someone asked to reset the password of your account. %s
-			
-			It is valid for %d minutes and can be used once. If you did not ask for this, ignore this mail, your password stays unchanged.
-			""".formatted(username, instructions, this.config.passwordResetMinutes())));
+		this.mailExecutor.execute(() -> this.sendQuietly(to, mail));
 	}
 	
 	@NonNull

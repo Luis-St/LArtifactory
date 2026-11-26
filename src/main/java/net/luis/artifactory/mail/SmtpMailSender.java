@@ -42,14 +42,14 @@ public class SmtpMailSender implements MailSender {
 	}
 	
 	@Override
-	public void send(@NonNull String to, @NonNull String subject, @NonNull String text) throws MailException {
+	public void send(@NonNull String to, @NonNull Mail mail) throws MailException {
 		MailMessage message;
 		try {
 			message = MailMessage.builder()
 				.from(this.from)
 				.to(Mailbox.of(MailAddress.parse(to)))
-				.subject(subject)
-				.content(TextContent.of(text))
+				.subject(mail.subject())
+				.content(MultipartContent.alternative(TextContent.of(mail.text()), HtmlContent.of(mail.html())))
 				.date(Instant.now())
 				.build();
 		} catch (IllegalArgumentException e) {

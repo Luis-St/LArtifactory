@@ -85,8 +85,8 @@ class ApplicationIntegrationTest {
 			}
 			
 			@Override
-			public void send(String to, String subject, String text) {
-				ApplicationIntegrationTest.this.mails.add(new Mail(to, subject, text));
+			public void send(String to, net.luis.artifactory.mail.Mail mail) {
+				ApplicationIntegrationTest.this.mails.add(new Mail(to, mail.subject(), mail.text()));
 			}
 		});
 		this.base = "http://localhost:" + this.server.port();
@@ -130,7 +130,7 @@ class ApplicationIntegrationTest {
 		// Email address, verified with a code
 		assertEquals(403, this.send("POST", "/api/account/email", session, "{\"email\":\"mfa@example.com\",\"password\":\"wrong-password\"}").statusCode());
 		assertEquals(202, this.send("POST", "/api/account/email", session, "{\"email\":\"MFA@example.com\",\"password\":\"" + password + "\"}").statusCode());
-		String verification = this.mailMatching("mfa@example.com", "code is: (\\d{6})");
+		String verification = this.mailMatching("mfa@example.com", "code is:\\s+(\\d{6})");
 		assertEquals(400, this.send("POST", "/api/account/email/verify", session, "{\"code\":\"000000x\"}").statusCode());
 		HttpResponse<String> verified = this.send("POST", "/api/account/email/verify", session, "{\"code\":\"" + verification + "\"}");
 		assertEquals(200, verified.statusCode(), verified.body());
@@ -156,7 +156,7 @@ class ApplicationIntegrationTest {
 		
 		// A confirmation code by email is accepted as the second factor of a change
 		assertEquals(204, this.send("POST", "/api/account/mfa/email/code", session, null).statusCode());
-		String confirmation = this.mailMatching("mfa@example.com", "is: (\\d{6})");
+		String confirmation = this.mailMatching("mfa@example.com", "is:\\s+(\\d{6})");
 		String wrong = "000000".equals(confirmation) ? "111111" : "000000";
 		assertEquals(403, this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + wrong + "\"}").statusCode());
 		HttpResponse<String> regenerated = this.send("POST", "/api/account/mfa/recovery-codes", session, "{\"password\":\"" + password + "\",\"code\":\"" + confirmation + "\"}");
@@ -184,7 +184,7 @@ class ApplicationIntegrationTest {
 		id = Json.parse(this.send("POST", "/api/session", basic("mfa", password), "{}").body()).get("challenge").asString();
 		assertEquals(401, this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"recovery\",\"code\":\"" + codes.getFirst() + "\"}").statusCode());
 		assertEquals(204, this.send("POST", "/api/session/mfa/email", null, "{\"challenge\":\"" + id + "\"}").statusCode());
-		String emailCode = this.mailMatching("mfa@example.com", "code is: (\\d{6})");
+		String emailCode = this.mailMatching("mfa@example.com", "code is:\\s+(\\d{6})");
 		assertEquals(201, this.send("POST", "/api/session/mfa", null, "{\"challenge\":\"" + id + "\",\"method\":\"email\",\"code\":\"" + emailCode + "\"}").statusCode());
 		
 		// Password recovery by email, the authenticator app (or a recovery code) is still required

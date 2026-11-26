@@ -24,17 +24,17 @@ class SmtpMailSenderTest {
 	@Test
 	void sendsMail() throws Exception {
 		MailConfig config = new MailConfig(MAILPIT.getHost(), MAILPIT.getMappedPort(1025), null, null, "LArtifactory <noreply@example.com>", SmtpSecurity.PLAINTEXT);
-		new SmtpMailSender(config).send("jane@example.com", "Your sign in code", "your sign in code is: 123456");
+		new SmtpMailSender(config).send("jane@example.com", new AccountMails("https://artifacts.example.com").signInCode("jane", "123456", 10));
 		
 		HttpResponse<String> response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://" + MAILPIT.getHost() + ":" + MAILPIT.getMappedPort(8025) + "/api/v1/messages")).build(), HttpResponse.BodyHandlers.ofString());
 		assertEquals(200, response.statusCode());
 		assertTrue(response.body().contains("jane@example.com"), response.body());
-		assertTrue(response.body().contains("Your sign in code"), response.body());
+		assertTrue(response.body().contains("Your LArtifactory sign in code"), response.body());
 	}
 	
 	@Test
 	void refusesServerWithoutStartTls() {
 		MailConfig config = new MailConfig(MAILPIT.getHost(), MAILPIT.getMappedPort(1025), null, null, "noreply@example.com", SmtpSecurity.STARTTLS);
-		assertThrows(MailSender.MailException.class, () -> new SmtpMailSender(config).send("jane@example.com", "Subject", "text"));
+		assertThrows(MailSender.MailException.class, () -> new SmtpMailSender(config).send("jane@example.com", new Mail("Subject", "text", "<p>text</p>")));
 	}
 }

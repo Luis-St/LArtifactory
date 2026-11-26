@@ -3,7 +3,7 @@ package net.luis.artifactory.mail;
 import org.jspecify.annotations.NonNull;
 
 /**
- * Sends plain text mails, used for two-factor codes, email verification and password recovery.<br>
+ * Sends mails, used for two-factor codes, email verification and password recovery.<br>
  */
 public interface MailSender {
 	
@@ -19,7 +19,7 @@ public interface MailSender {
 			}
 			
 			@Override
-			public void send(@NonNull String to, @NonNull String subject, @NonNull String text) throws MailException {
+			public void send(@NonNull String to, @NonNull Mail mail) throws MailException {
 				throw new MailException("Mail is not configured");
 			}
 		};
@@ -30,7 +30,10 @@ public interface MailSender {
 	 */
 	boolean available();
 	
-	void send(@NonNull String to, @NonNull String subject, @NonNull String text) throws MailException;
+	/**
+	 * Sends the plain text and the html version of the mail as alternatives, the client shows the best one it supports.<br>
+	 */
+	void send(@NonNull String to, @NonNull Mail mail) throws MailException;
 	
 	class MailException extends Exception {
 		
