@@ -90,13 +90,29 @@ function allSetupSnippets(repository: Repository, username: string): Snippet[] {
 				{title: 'Other OCI artifacts (oras)', code: `oras push ${image}:1.0 ./artifact.tar.gz`},
 			];
 		}
-		case 'debian':
-			return [
-				{title: 'Signing key', code: `curl -fsSL -u ${username}:<token> ${url}/public.key | sudo tee /etc/apt/keyrings/${id}.asc > /dev/null`},
-				{title: 'Source list', code: `echo "deb [signed-by=/etc/apt/keyrings/${id}.asc] ${url} stable main" | sudo tee /etc/apt/sources.list.d/${id}.list`},
-				{title: `/etc/apt/auth.conf.d/${id}.conf`, code: `machine ${url}\nlogin ${username}\npassword <token>`},
-				{title: 'Upload', code: `curl -u ${username}:<token> -T ./package.deb ${url}/pool/stable/main/`},
+		case 'debian': {
+			// A public repository is read without credentials, apt then needs no auth.conf entry and the key no login
+			const credentials = repository.publicRead ? '' : ` -u ${username}:<token>`;
+			const snippets: Snippet[] = [
+				{title: 'Signing key', code: `sudo mkdir -p /etc/apt/keyrings\ncurl -fsSL${credentials} ${url}/public.key | sudo tee /etc/apt/keyrings/${id}.asc > /dev/null`},
+				{
+					title: 'Source list',
+					code: `sudo tee /etc/apt/sources.list.d/${id}.sources > /dev/null <<'EOF'\nTypes: deb\nURIs: ${url}\nSuites: stable\nComponents: main\nSigned-By: /etc/apt/keyrings/${id}.asc\nEOF`,
+				},
+				{title: 'Source list (one line)', code: `echo "deb [signed-by=/etc/apt/keyrings/${id}.asc] ${url} stable main" | sudo tee /etc/apt/sources.list.d/${id}.list`},
 			];
+			if (!repository.publicRead) {
+				snippets.push({
+					title: 'Credentials',
+					code: `sudo tee /etc/apt/auth.conf.d/${id}.conf > /dev/null <<'EOF'\nmachine ${url}\nlogin ${username}\npassword <token>\nEOF\nsudo chmod 600 /etc/apt/auth.conf.d/${id}.conf`,
+				});
+			}
+			snippets.push(
+				{title: 'Install', code: `sudo apt update\nsudo apt install my-package`},
+				{title: 'Upload', code: `curl -u ${username}:<token> -T ./package.deb ${url}/pool/stable/main/`},
+			);
+			return snippets;
+		}
 	}
 }
 
