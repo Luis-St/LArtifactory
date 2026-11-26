@@ -8,8 +8,12 @@ export interface Snippet {
 /** Snippets that publish, upload or delete, a remote or virtual repository is read only and leaves them out. */
 const WRITE_SNIPPETS = new Set(['Gradle publishing (build.gradle.kts)', 'Upload', 'Delete', 'twine upload', 'Publish', 'Push', 'Login & publish', 'Other OCI artifacts (oras)']);
 
+/** Snippets that only store credentials, a public repository needs them for publishing only. */
+const CREDENTIAL_SNIPPETS = new Set(['Maven (~/.m2/settings.xml)', 'Login', 'Credentials']);
+
 /**
  * Client configuration snippets for a repository, the token placeholder has to be replaced with an access token.
+ * A public repository is read without credentials, so its snippets only carry them where they publish, upload or delete.
  * The url comes from the server, it is the root of the host when the repository is mapped to one with ARTIFACTORY_HOST_REPOSITORIES.
  */
 export function setupSnippets(repository: Repository, username: string): Snippet[] {
@@ -19,6 +23,8 @@ export function setupSnippets(repository: Repository, username: string): Snippet
 	}
 	return snippets
 		.filter(snippet => !WRITE_SNIPPETS.has(snippet.title))
+		// Without publishing, the credentials of a public repository are not needed at all
+		.filter(snippet => !(repository.publicRead && CREDENTIAL_SNIPPETS.has(snippet.title)))
 		.map(snippet => snippet.title === 'Maven (pom.xml)'
 			? {...snippet, code: snippet.code.replace(/\n<distributionManagement>[\s\S]*<\/distributionManagement>/, '')}
 			: snippet.title === 'Login & publish' ? {...snippet, code: snippet.code.split('\n')[0]} : snippet);
@@ -28,12 +34,18 @@ function allSetupSnippets(repository: Repository, username: string): Snippet[] {
 	const url = repository.url;
 	const host = url.replace(/^https?:/, '');
 	const id = repository.name;
+	const open = repository.publicRead;
+	// The login of read only commands, empty for a public repository
+	const curlLogin = open ? '' : ` -u ${username}:<token>`;
+	const indexUrl = open ? url : url.replace('://', `://${username}:<token>@`);
 	switch (repository.type) {
 		case 'maven':
 			return [
 				{
 					title: 'Gradle (build.gradle.kts)',
-					code: `repositories {\n\tmaven {\n\t\turl = uri("${url}")\n\t\tcredentials {\n\t\t\tusername = "${username}"\n\t\t\tpassword = "<token>"\n\t\t}\n\t}\n}`,
+					code: open
+						? `repositories {\n\tmaven {\n\t\turl = uri("${url}")\n\t}\n}`
+						: `repositories {\n\tmaven {\n\t\turl = uri("${url}")\n\t\tcredentials {\n\t\t\tusername = "${username}"\n\t\t\tpassword = "<token>"\n\t\t}\n\t}\n}`,
 				},
 				{
 					title: 'Gradle publishing (build.gradle.kts)',
@@ -51,27 +63,30 @@ function allSetupSnippets(repository: Repository, username: string): Snippet[] {
 		case 'generic':
 			return [
 				{title: 'Upload', code: `curl -u ${username}:<token> -T ./file.zip ${url}/path/to/file.zip`},
-				{title: 'Download', code: `curl -u ${username}:<token> -O ${url}/path/to/file.zip`},
+				{title: 'Download', code: `curl${curlLogin} -O ${url}/path/to/file.zip`},
 				{title: 'Delete', code: `curl -u ${username}:<token> -X DELETE ${url}/path/to/file.zip`},
 			];
 		case 'pypi':
 			return [
-				{title: 'pip install', code: `pip install --index-url ${url.replace('://', `://${username}:<token>@`)}/simple/ my-package`},
-				{title: 'pip.conf', code: `[global]\nindex-url = ${url.replace('://', `://${username}:<token>@`)}/simple/`},
+				{title: 'pip install', code: `pip install --index-url ${indexUrl}/simple/ my-package`},
+				{title: 'pip.conf', code: `[global]\nindex-url = ${indexUrl}/simple/`},
 				{title: 'twine upload', code: `twine upload --repository-url ${url}/ -u __token__ -p <token> dist/*`},
 				{title: '~/.pypirc', code: `[distutils]\nindex-servers = ${id}\n\n[${id}]\nrepository = ${url}/\nusername = __token__\npassword = <token>`},
 			];
 		case 'npm':
 			return [
-				{title: '.npmrc', code: `registry=${url}/\n${host}/:_authToken=<token>`},
-				{title: '.npmrc (scoped)', code: `@my-scope:registry=${url}/\n${host}/:_authToken=<token>`},
-				{title: 'Publish', code: `npm publish --registry ${url}/`},
+				{title: '.npmrc', code: open ? `registry=${url}/` : `registry=${url}/\n${host}/:_authToken=<token>`},
+				{title: '.npmrc (scoped)', code: open ? `@my-scope:registry=${url}/` : `@my-scope:registry=${url}/\n${host}/:_authToken=<token>`},
+				// The token of a public repository is not in the .npmrc above, publishing stores it in the user config
+				{title: 'Publish', code: open ? `npm config set "${host}/:_authToken" "<token>"\nnpm publish --registry ${url}/` : `npm publish --registry ${url}/`},
 			];
 		case 'nuget':
 			return [
 				{
 					title: 'nuget.config',
-					code: `<configuration>\n\t<packageSources>\n\t\t<add key="${id}" value="${url}/v3/index.json" />\n\t</packageSources>\n\t<packageSourceCredentials>\n\t\t<${id}>\n\t\t\t<add key="Username" value="${username}" />\n\t\t\t<add key="ClearTextPassword" value="<token>" />\n\t\t</${id}>\n\t</packageSourceCredentials>\n</configuration>`,
+					code: open
+						? `<configuration>\n\t<packageSources>\n\t\t<add key="${id}" value="${url}/v3/index.json" />\n\t</packageSources>\n</configuration>`
+						: `<configuration>\n\t<packageSources>\n\t\t<add key="${id}" value="${url}/v3/index.json" />\n\t</packageSources>\n\t<packageSourceCredentials>\n\t\t<${id}>\n\t\t\t<add key="Username" value="${username}" />\n\t\t\t<add key="ClearTextPassword" value="<token>" />\n\t\t</${id}>\n\t</packageSourceCredentials>\n</configuration>`,
 				},
 				{title: 'Push', code: `dotnet nuget push package.nupkg --source ${url}/v3/index.json --api-key <token>`},
 			];
@@ -92,16 +107,15 @@ function allSetupSnippets(repository: Repository, username: string): Snippet[] {
 		}
 		case 'debian': {
 			// A public repository is read without credentials, apt then needs no auth.conf entry and the key no login
-			const credentials = repository.publicRead ? '' : ` -u ${username}:<token>`;
 			const snippets: Snippet[] = [
-				{title: 'Signing key', code: `sudo mkdir -p /etc/apt/keyrings\ncurl -fsSL${credentials} ${url}/public.key | sudo tee /etc/apt/keyrings/${id}.asc > /dev/null`},
+				{title: 'Signing key', code: `sudo mkdir -p /etc/apt/keyrings\ncurl -fsSL${curlLogin} ${url}/public.key | sudo tee /etc/apt/keyrings/${id}.asc > /dev/null`},
 				{
 					title: 'Source list',
 					code: `sudo tee /etc/apt/sources.list.d/${id}.sources > /dev/null <<'EOF'\nTypes: deb\nURIs: ${url}\nSuites: stable\nComponents: main\nSigned-By: /etc/apt/keyrings/${id}.asc\nEOF`,
 				},
 				{title: 'Source list (one line)', code: `echo "deb [signed-by=/etc/apt/keyrings/${id}.asc] ${url} stable main" | sudo tee /etc/apt/sources.list.d/${id}.list`},
 			];
-			if (!repository.publicRead) {
+			if (!open) {
 				snippets.push({
 					title: 'Credentials',
 					code: `sudo tee /etc/apt/auth.conf.d/${id}.conf > /dev/null <<'EOF'\nmachine ${url}\nlogin ${username}\npassword <token>\nEOF\nsudo chmod 600 /etc/apt/auth.conf.d/${id}.conf`,
