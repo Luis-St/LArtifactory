@@ -74,6 +74,8 @@ dependencies {
 
 tasks.test {
 	useJUnitPlatform()
+	// See the ENTRYPOINT in the Dockerfile, the zstd decoder of aircompressor uses sun.misc.Unsafe
+	jvmArgs("--sun-misc-unsafe-memory-access=allow")
 }
 
 // Web ui, built with npm into ui/dist and packaged below /ui in the jar (skip with -PskipUi, e.g. if ui/dist was built separately)
@@ -120,6 +122,7 @@ tasks.register<JavaExec>("run") {
 	classpath = sourceSets["main"].runtimeClasspath
 	
 	enableAssertions = true
+	jvmArgs("--sun-misc-unsafe-memory-access=allow")
 	standardInput = System.`in`
 	args = listOf()
 	environment("ARTIFACTORY_PORT", "8080")

@@ -18,7 +18,7 @@ import java.util.zip.GZIPInputStream;
  * </p>
  */
 public final class DebianPackage {
-
+	
 	/**
 	 * Maximum number of decompressed bytes read from the control archive, guards against a compression bomb.<br>
 	 */
@@ -27,10 +27,15 @@ public final class DebianPackage {
 	 * Maximum size of the control file itself.<br>
 	 */
 	private static final int MAX_CONTROL_FILE = 1024 * 1024;
+	/**
+	 * Memory limit of the xz decoder in KiB, xz allocates the dictionary size declared by the stream before decompressing,
+	 * so a stream of a few bytes could otherwise allocate gigabytes.<br>
+	 */
+	private static final int XZ_MEMORY_LIMIT_KIB = 64 * 1024;
 	private static final byte[] AR_MAGIC = "!<arch>\n".getBytes(StandardCharsets.US_ASCII);
-
+	
 	private DebianPackage() {}
-
+	
 	/**
 	 * Extracts the control file from the package.<br>
 	 *
@@ -45,7 +50,7 @@ public final class DebianPackage {
 		if (!Arrays.equals(magic, AR_MAGIC)) {
 			throw new InvalidPackageException("Not a Debian package (missing ar header)");
 		}
-		boolean versionSeen = false;
+		boolean first = true;
 		while (true) {
 			byte[] header = in.readNBytes(60);
 			if (header.length == 0) {
@@ -67,40 +72,60 @@ public final class DebianPackage {
 			if (size < 0) {
 				throw new InvalidPackageException("Malformed ar member size");
 			}
-			if ("debian-binary".equals(name)) {
+			if (first && !"debian-binary".equals(name)) {
+				throw new InvalidPackageException("Debian package does not start with debian-binary");
+			}
+			if (first) {
+				first = false;
 				String version = new String(readFully(in, Math.min(size, 64)), StandardCharsets.US_ASCII).strip();
 				skipFully(in, size - Math.min(size, 64));
 				if (!version.startsWith("2.")) {
 					throw new InvalidPackageException("Unsupported Debian package format: " + version);
 				}
-				versionSeen = true;
 			} else if (name.startsWith("control.tar")) {
-				if (!versionSeen) {
-					throw new InvalidPackageException("Debian package does not start with debian-binary");
-				}
-				InputStream member = new BoundedStream(in, size);
-				InputStream tar = new BoundedStream(decompress(name, member), MAX_CONTROL_ARCHIVE);
-				return Control.parse(readControlFile(tar));
-			} else {
+				return readControlArchive(name, new BoundedStream(in, size));
+			} else if (name.startsWith("_")) {
+				// dpkg ignores members starting with an underscore between debian-binary and the control archive
 				skipFully(in, size);
+			} else {
+				// dpkg-deb rejects any other member before the control archive (e.g. data.tar first), apt could not install it
+				throw new InvalidPackageException("Unexpected member " + name + " before the control archive");
 			}
 			if (size % 2 == 1) {
 				skipFully(in, 1);
 			}
 		}
 	}
-
+	
+	/**
+	 * Reads the control file from the control archive, every failure of the decompressor or of the tar format is a broken package.<br>
+	 */
+	@NonNull
+	private static Control readControlArchive(@NonNull String name, @NonNull InputStream member) throws InvalidPackageException {
+		String content;
+		try {
+			content = readControlFile(new BoundedStream(decompress(name, member), MAX_CONTROL_ARCHIVE));
+		} catch (InvalidPackageException e) {
+			throw e;
+		} catch (IOException | RuntimeException e) {
+			throw new InvalidPackageException("Invalid control archive " + name + ": " + Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()));
+		}
+		Control control = Control.parse(content);
+		control.requireUniqueFields();
+		return control;
+	}
+	
 	@NonNull
 	private static InputStream decompress(@NonNull String name, @NonNull InputStream member) throws IOException {
 		return switch (name) {
 			case "control.tar" -> member;
 			case "control.tar.gz" -> new GZIPInputStream(member);
-			case "control.tar.xz" -> new XZInputStream(member);
+			case "control.tar.xz" -> new XZInputStream(member, XZ_MEMORY_LIMIT_KIB);
 			case "control.tar.zst" -> new ZstdInputStream(member);
 			default -> throw new InvalidPackageException("Unsupported control archive compression: " + name);
 		};
 	}
-
+	
 	/**
 	 * Reads the {@code control} entry of a tar archive.<br>
 	 */
@@ -114,6 +139,9 @@ public final class DebianPackage {
 			}
 			char type = (char) header[156];
 			long size = parseOctal(header, 124, 12);
+			if (size < 0) {
+				throw new InvalidPackageException("Malformed tar header");
+			}
 			String name = longName != null ? longName : entryName(header);
 			longName = null;
 			long padded = (size + 511) / 512 * 512;
@@ -140,7 +168,7 @@ public final class DebianPackage {
 			skipFully(tar, padded);
 		}
 	}
-
+	
 	@NonNull
 	private static String entryName(byte @NonNull [] header) {
 		String name = cString(header, 0, 100);
@@ -153,7 +181,7 @@ public final class DebianPackage {
 		}
 		return name;
 	}
-
+	
 	@Nullable
 	private static String paxPath(@NonNull String records) {
 		for (String record : records.split("\n")) {
@@ -168,7 +196,7 @@ public final class DebianPackage {
 		}
 		return null;
 	}
-
+	
 	@NonNull
 	private static String cString(byte @NonNull [] buffer, int offset, int length) {
 		int end = offset;
@@ -177,7 +205,7 @@ public final class DebianPackage {
 		}
 		return new String(buffer, offset, end - offset, StandardCharsets.UTF_8);
 	}
-
+	
 	private static long parseOctal(byte @NonNull [] buffer, int offset, int length) throws InvalidPackageException {
 		if ((buffer[offset] & 0x80) != 0) {
 			// Base-256 encoding of large sizes, never used for a control file
@@ -193,7 +221,7 @@ public final class DebianPackage {
 			throw new InvalidPackageException("Malformed tar header");
 		}
 	}
-
+	
 	private static boolean isZero(byte @NonNull [] block) {
 		for (byte b : block) {
 			if (b != 0) {
@@ -202,7 +230,7 @@ public final class DebianPackage {
 		}
 		return true;
 	}
-
+	
 	private static byte @NonNull [] readFully(@NonNull InputStream in, long size) throws IOException {
 		byte[] data = in.readNBytes((int) size);
 		if (data.length < size) {
@@ -210,7 +238,7 @@ public final class DebianPackage {
 		}
 		return data;
 	}
-
+	
 	private static void skipFully(@NonNull InputStream in, long size) throws IOException {
 		try {
 			in.skipNBytes(size);
@@ -218,21 +246,22 @@ public final class DebianPackage {
 			throw new InvalidPackageException("Debian package is truncated");
 		}
 	}
-
+	
 	/**
 	 * A control paragraph: fields in the order of the file, names compared without regard to case.<br>
 	 *
 	 * @param text The paragraph as written in the package, normalized to end with a single newline
 	 * @param fields The field values, continuation lines joined with newlines
 	 */
-	public record Control(@NonNull String text, @NonNull Map<String, String> fields) {
-
+	public record Control(@NonNull String text, @NonNull Map<String, String> fields, @NonNull Set<String> duplicates) {
+		
 		/**
 		 * Parses the first paragraph of a control file.<br>
 		 */
 		@NonNull
 		public static Control parse(@NonNull String content) throws InvalidPackageException {
 			Map<String, String> fields = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+			Set<String> duplicates = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
 			StringBuilder text = new StringBuilder();
 			String current = null;
 			for (String line : content.replace("\r\n", "\n").split("\n", -1)) {
@@ -256,6 +285,9 @@ public final class DebianPackage {
 						throw new InvalidPackageException("Malformed control file: " + line);
 					}
 					current = line.substring(0, colon).strip();
+					if (fields.containsKey(current)) {
+						duplicates.add(current);
+					}
 					fields.put(current, line.substring(colon + 1).strip());
 				}
 				text.append(line).append('\n');
@@ -263,14 +295,23 @@ public final class DebianPackage {
 			if (fields.isEmpty()) {
 				throw new InvalidPackageException("Control file is empty");
 			}
-			return new Control(text.toString(), Collections.unmodifiableMap(fields));
+			return new Control(text.toString(), Collections.unmodifiableMap(fields), Collections.unmodifiableSet(duplicates));
 		}
-
+		
+		/**
+		 * Rejects a paragraph that sets a field twice, dpkg refuses such a package and the index would list both values.<br>
+		 */
+		public void requireUniqueFields() throws InvalidPackageException {
+			if (!this.duplicates.isEmpty()) {
+				throw new InvalidPackageException("Control file contains duplicate fields: " + String.join(", ", this.duplicates));
+			}
+		}
+		
 		@Nullable
 		public String get(@NonNull String field) {
 			return this.fields.get(field);
 		}
-
+		
 		/**
 		 * Returns the paragraph without the given fields (and their continuation lines).<br>
 		 */
@@ -295,26 +336,26 @@ public final class DebianPackage {
 			return builder.toString();
 		}
 	}
-
+	
 	public static final class InvalidPackageException extends IOException {
-
+		
 		public InvalidPackageException(@NonNull String message) {
 			super(message);
 		}
 	}
-
+	
 	/**
 	 * Reads at most a number of bytes from a stream without closing it, so the rest of the archive stays readable.<br>
 	 */
 	private static final class BoundedStream extends FilterInputStream {
-
+		
 		private long remaining;
-
+		
 		private BoundedStream(@NonNull InputStream input, long limit) {
 			super(input);
 			this.remaining = limit;
 		}
-
+		
 		@Override
 		public int read() throws IOException {
 			if (this.remaining <= 0) {
@@ -326,7 +367,7 @@ public final class DebianPackage {
 			}
 			return value;
 		}
-
+		
 		@Override
 		public int read(byte @NonNull [] buffer, int offset, int length) throws IOException {
 			if (this.remaining <= 0) {
@@ -338,14 +379,14 @@ public final class DebianPackage {
 			}
 			return read;
 		}
-
+		
 		@Override
 		public long skip(long n) throws IOException {
 			long skipped = super.skip(Math.min(n, this.remaining));
 			this.remaining -= skipped;
 			return skipped;
 		}
-
+		
 		@Override
 		public void close() {}
 	}

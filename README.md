@@ -31,6 +31,7 @@ All configuration is read from environment variables:
 | `ARTIFACTORY_PASSWORD_RESET_MINUTES`       | `30`                                           | Lifetime of a password reset link                                                          |
 | `ARTIFACTORY_DEBIAN_SIGNING_KEY`           | generated into `<storage>`                     | Armored OpenPGP secret key or the path of a file, signs the Debian indexes                 |
 | `ARTIFACTORY_DEBIAN_SIGNING_PASSPHRASE`    |                                                | Passphrase of `ARTIFACTORY_DEBIAN_SIGNING_KEY` if it is protected                          |
+| `ARTIFACTORY_DEBIAN_ARCHITECTURES`         | `amd64,arm64,armhf,i386,ppc64el,riscv64,s390x` | Architectures every Debian distribution has an index for                                   |
 | `ARTIFACTORY_SMTP_HOST`                    | mail disabled                                  | SMTP server for codes, email verification and password recovery                            |
 | `ARTIFACTORY_SMTP_PORT`                    | default port of the security mode              | `587` for `STARTTLS`, `465` for `IMPLICIT_TLS`, `25` for `PLAINTEXT`                       |
 | `ARTIFACTORY_SMTP_SECURITY`                | `STARTTLS`                                     | `STARTTLS` (required, not opportunistic), `IMPLICIT_TLS` or `PLAINTEXT`                    |
@@ -258,22 +259,34 @@ The package is stored at `pool/{distribution}/{component}/{initial}/{package}/{p
 which the response returns.
 The distribution is part of the pool path, so one distribution can be cleaned up without touching the same package version in another.
 Control archives compressed with gzip, xz or zstd (the Ubuntu default) and uncompressed ones are supported, the data archive is never unpacked.
+A package that dpkg would refuse, such as a broken archive, members in the wrong order or a field set twice, is rejected with `400`,
+because apt would list it and only fail when installing it.
+With `allowRedeploy`, a version with an epoch replaces the file of the same version without epoch (`1:1.0` and `1.0` share `_1.0_`),
+and the replaced version is deleted with it, because the Debian archive leaves the epoch out of file names as well.
 
 The indexes below `dists/{distribution}/` are generated from the stored packages and kept in memory.
 These are `InRelease`, `Release`, `Release.gpg`, and `Packages` and `Packages.gz` per component and architecture.
 They are regenerated on the next request once a package of the distribution was added or deleted, whichever api changed it,
 so deleting a version in the web ui or with `DELETE /api/repositories/{name}/packages` updates the indexes as well.
-`Date` and the signature time are the time of the newest package,
-which makes the indexes a function of the stored packages and keeps them stable across restarts.
-Packages of the architecture `all` are listed in `binary-all` and in every `binary-{arch}`, as in the Debian archive.
-`Acquire-By-Hash` is enabled and the previous indexes stay reachable by hash,
-so an `apt update` that runs while a package is published does not fail with a hash sum mismatch.
+`Date`, `Last-Modified` and the signature time are the time of the generation and move forward with every change,
+because apt revalidates `InRelease` with `If-Modified-Since` and ignores a `Release` that is not newer than the one it has.
+A restart therefore makes clients download the indexes once more, even if nothing changed.
+Every distribution has an index for each architecture in `ARTIFACTORY_DEBIAN_ARCHITECTURES` and for each architecture of its packages,
+because apt ignores a repository whose `Release` does not list the architecture of the client.
+Packages of the architecture `all` are listed in `binary-all` and in every `binary-{arch}`, as in the Debian archive,
+so a repository with architecture independent packages only works on every architecture.
+`Acquire-By-Hash` is enabled and the indexes of the last 10 generations stay reachable by hash,
+so an `apt update` that runs while packages are published does not fail with a hash sum mismatch.
+They are kept in memory, so a client that fetched `InRelease` right before a restart has to run `apt update` again.
 A file is deleted with `DELETE` on its pool path and the `DELETE` level, the version disappears with its last file.
 
 apt refuses unsigned repositories unless they are marked `trusted=yes`, so every Debian repository is signed.
 One key signs all repositories, and it is served at `{base}/debian/{repo}/public.key`.
 Without `ARTIFACTORY_DEBIAN_SIGNING_KEY` the server generates an RSA 3072 key into `debian-signing-key.asc` in `ARTIFACTORY_STORAGE_PATH` on first use.
 Back it up, because a new key makes every client fail until it imports the new public key.
+A configured or previously generated key is loaded at startup, so a wrong passphrase or a broken key stops the start.
+Of a configured key, the newest subkey that may sign (key flag `S`, not revoked, not expired) signs, otherwise the primary key,
+because apt rejects a signature of a key that is only allowed to certify.
 apt sends credentials only from `/etc/apt/auth.conf.d`, and over plain http only if the `machine` entry includes the `http://` scheme.
 
 ### One host per ecosystem

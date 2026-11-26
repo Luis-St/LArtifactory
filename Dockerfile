@@ -51,4 +51,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 	CMD curl -fsS "http://localhost:${ARTIFACTORY_PORT}/health" > /dev/null || exit 1
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# The zstd decoder for Debian packages (aircompressor) reads memory through sun.misc.Unsafe, allowed explicitly
+# so the jvm does not warn about it, until the library moves to the foreign memory api
+ENTRYPOINT ["java", "--sun-misc-unsafe-memory-access=allow", "-jar", "app.jar"]

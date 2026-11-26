@@ -5,6 +5,7 @@ import net.luis.artifactory.Services;
 import net.luis.artifactory.auth.AccessLevel;
 import net.luis.artifactory.auth.Principal;
 import net.luis.artifactory.database.SqlErrors;
+import net.luis.artifactory.database.UnitOfWork;
 import net.luis.artifactory.database.entity.FileEntity;
 import net.luis.artifactory.database.entity.RepositoryEntity;
 import net.luis.artifactory.handler.format.DebianPackage.Control;
@@ -15,7 +16,10 @@ import net.luis.artifactory.repository.DebianSigningKey;
 import net.luis.artifactory.repository.RepositoryType;
 import net.luis.artifactory.storage.StoredBlob;
 import net.luis.artifactory.util.Json;
+import net.luis.artifactory.repository.ArtifactService.FileState;
 import net.luis.utils.io.database.exception.SqlException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.node.ObjectNode;
@@ -46,11 +50,17 @@ import java.util.zip.GZIPOutputStream;
  * </p>
  */
 public class DebianHandler extends FormatHandler {
-
+	
+	private static final Logger LOGGER = LogManager.getLogger(DebianHandler.class);
+	/**
+	 * Number of earlier index generations whose {@code Packages} files stay reachable by hash.<br>
+	 */
+	private static final int BY_HASH_GENERATIONS = 10;
+	private static final int MAX_VERSION_LENGTH = 128;
 	public static final String CONTENT_TYPE = "application/vnd.debian.binary-package";
 	private static final Pattern NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
 	private static final Pattern PACKAGE = Pattern.compile("[a-z0-9][a-z0-9+.-]{1,127}");
-	private static final Pattern VERSION = Pattern.compile("(?:[0-9]+:)?[0-9A-Za-z][A-Za-z0-9.+~-]{0,127}");
+	private static final Pattern VERSION = Pattern.compile("(?:[0-9]{1,9}:)?[0-9A-Za-z][A-Za-z0-9.+~-]*");
 	private static final Pattern ARCHITECTURE = Pattern.compile("[a-z0-9][a-z0-9-]{0,31}");
 	/**
 	 * Fields of a {@code Packages} entry that describe the stored file, a control file can not set them.<br>
@@ -59,12 +69,15 @@ public class DebianHandler extends FormatHandler {
 	private static final DateTimeFormatter RELEASE_DATE = DateTimeFormatter.ofPattern("EEE, dd MMM yyyy HH:mm:ss 'UTC'", Locale.ROOT).withZone(ZoneOffset.UTC);
 	private final Map<String, Snapshot> snapshots = new ConcurrentHashMap<>();
 	private final Map<String, Object> locks = new ConcurrentHashMap<>();
+	private final Map<String, Object> repositoryLocks = new ConcurrentHashMap<>();
 	private volatile DebianSigningKey signingKey;
-
+	
 	public DebianHandler(@NonNull Services services) {
 		super(services);
+		// An existing key is loaded at startup, so a wrong passphrase or a broken key stops the start instead of failing every index request
+		this.signingKey = DebianSigningKey.loadExisting(services.config().debianSigningKey(), services.config().debianSigningPassphrase(), services.config().storagePath());
 	}
-
+	
 	/**
 	 * Returns the path a package is stored at, the epoch is not part of the file name as in the Debian archive.<br>
 	 */
@@ -75,13 +88,15 @@ public class DebianHandler extends FormatHandler {
 		String fileVersion = colon < 0 ? version : version.substring(colon + 1);
 		return "pool/" + distribution + "/" + component + "/" + initial + "/" + packageName + "/" + packageName + "_" + fileVersion + "_" + architecture + ".deb";
 	}
-
+	
 	/**
 	 * Builds the {@code Packages} entry of a stored package.<br>
 	 */
 	@NonNull
 	static String packagesEntry(@NonNull String control, @NonNull FileEntity file) throws InvalidPackageException {
-		StringBuilder entry = new StringBuilder(Control.parse(control).textWithout(FILE_FIELDS));
+		Control parsed = Control.parse(control);
+		parsed.requireUniqueFields();
+		StringBuilder entry = new StringBuilder(parsed.textWithout(FILE_FIELDS));
 		entry.append("Filename: ").append(file.path()).append('\n');
 		entry.append("Size: ").append(file.size()).append('\n');
 		entry.append("MD5sum: ").append(file.md5()).append('\n');
@@ -92,7 +107,7 @@ public class DebianHandler extends FormatHandler {
 		}
 		return entry.toString();
 	}
-
+	
 	@NonNull
 	private static String hex(@NonNull String algorithm, byte @NonNull [] data) {
 		try {
@@ -101,7 +116,7 @@ public class DebianHandler extends FormatHandler {
 			throw new IllegalStateException(e);
 		}
 	}
-
+	
 	private static byte @NonNull [] gzip(byte @NonNull [] data) {
 		try {
 			ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -114,7 +129,7 @@ public class DebianHandler extends FormatHandler {
 			throw new UncheckedIOException(e);
 		}
 	}
-
+	
 	@NonNull
 	private static String requireName(@NonNull String kind, @NonNull String value) {
 		if (!NAME.matcher(value).matches()) {
@@ -122,31 +137,31 @@ public class DebianHandler extends FormatHandler {
 		}
 		return value;
 	}
-
+	
 	@NonNull
 	private static String required(@NonNull Control control, @NonNull String field, @NonNull Pattern pattern) throws InvalidPackageException {
 		String value = control.get(field);
 		if (value == null || value.isBlank()) {
 			throw new InvalidPackageException("Control file has no " + field + " field");
 		}
-		if (!pattern.matcher(value).matches()) {
+		if (value.length() > MAX_VERSION_LENGTH || !pattern.matcher(value).matches()) {
 			throw new InvalidPackageException("Invalid " + field + " in control file: " + value);
 		}
 		return value;
 	}
-
+	
 	@Override
 	@NonNull
 	public RepositoryType type() {
 		return RepositoryType.DEBIAN;
 	}
-
+	
 	@Override
 	public void handle(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String rawPath) throws Exception {
 		List<String> segments = Requests.decodedSegments(rawPath);
 		String method = Requests.method(ctx);
 		boolean pool = !segments.isEmpty() && "pool".equals(segments.getFirst());
-
+		
 		if (("PUT".equals(method) || "POST".equals(method)) && pool && segments.size() >= 4) {
 			this.upload(ctx, repository, segments);
 			return;
@@ -159,7 +174,7 @@ public class DebianHandler extends FormatHandler {
 			throw HttpError.methodNotAllowed();
 		}
 		this.authorize(ctx, repository, AccessLevel.READ);
-
+		
 		if (segments.equals(List.of("public.key"))) {
 			byte[] key = this.signingKey().armoredPublicKey().getBytes(StandardCharsets.US_ASCII);
 			this.serveBytes(ctx, key, "application/pgp-keys", null);
@@ -175,7 +190,7 @@ public class DebianHandler extends FormatHandler {
 			throw HttpError.notFound();
 		}
 	}
-
+	
 	@NonNull
 	private DebianSigningKey signingKey() {
 		DebianSigningKey key = this.signingKey;
@@ -190,7 +205,7 @@ public class DebianHandler extends FormatHandler {
 		}
 		return key;
 	}
-
+	
 	private void index(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String distribution, @NonNull List<String> rest) throws Exception {
 		if (!NAME.matcher(distribution).matches()) {
 			throw HttpError.notFound();
@@ -205,9 +220,11 @@ public class DebianHandler extends FormatHandler {
 		// the previous generation is kept so a client that fetched the old InRelease still finds its indexes
 		if (content == null && rest.size() == 5 && "by-hash".equals(rest.get(2))) {
 			String key = rest.get(0) + "/" + rest.get(1) + "/" + rest.get(3) + "/" + rest.get(4);
-			content = snapshot.byHash().get(key);
-			if (content == null && snapshot.previous() != null) {
-				content = snapshot.previous().byHash().get(key);
+			for (Map<String, byte[]> generation : snapshot.byHash()) {
+				content = generation.get(key);
+				if (content != null) {
+					break;
+				}
 			}
 		}
 		if (content == null) {
@@ -218,14 +235,16 @@ public class DebianHandler extends FormatHandler {
 		ctx.header("Cache-Control", "no-cache");
 		this.serveBytes(ctx, content, contentType, snapshot.date());
 	}
-
+	
 	private void serveBytes(@NonNull Context ctx, byte @NonNull [] content, @NonNull String contentType, @Nullable Instant lastModified) {
 		String etag = "\"" + hex("SHA-256", content) + "\"";
 		ctx.header("ETag", etag);
 		if (lastModified != null) {
 			ctx.header("Last-Modified", Requests.httpDate(lastModified));
 		}
-		if (etag.equals(ctx.header("If-None-Match")) || (lastModified != null && ctx.header("If-None-Match") == null && this.notModifiedSince(ctx.header("If-Modified-Since"), lastModified))) {
+		String ifNoneMatch = ctx.header("If-None-Match");
+		boolean etagMatches = ifNoneMatch != null && Arrays.stream(ifNoneMatch.split(",")).map(String::strip).anyMatch(value -> value.equals(etag) || value.equals("W/" + etag) || "*".equals(value));
+		if (etagMatches || (lastModified != null && ifNoneMatch == null && this.notModifiedSince(ctx.header("If-Modified-Since"), lastModified))) {
 			ctx.status(304);
 			return;
 		}
@@ -235,7 +254,7 @@ public class DebianHandler extends FormatHandler {
 			ctx.result(content);
 		}
 	}
-
+	
 	private boolean notModifiedSince(@Nullable String header, @NonNull Instant lastModified) {
 		if (header == null) {
 			return false;
@@ -247,46 +266,106 @@ public class DebianHandler extends FormatHandler {
 			return false;
 		}
 	}
-
+	
+	@NonNull
+	private static String fingerprint(@NonNull List<FileState> states) {
+		StringBuilder state = new StringBuilder();
+		for (FileState file : states) {
+			state.append(file.path()).append('\0').append(file.sha256()).append('\0').append(file.createdAt().toEpochMilli()).append('\n');
+		}
+		return hex("SHA-256", state.toString().getBytes(StandardCharsets.UTF_8));
+	}
+	
 	/**
 	 * Returns the indexes of a distribution, regenerated if its packages changed since they were generated.<br>
+	 * The check reads only path, digest and creation time of the packages, the metadata is loaded only to regenerate.<br>
 	 *
 	 * @return The indexes, null if the distribution holds no packages
 	 */
 	@Nullable
 	private Snapshot snapshot(@NonNull RepositoryEntity repository, @NonNull String distribution) throws Exception {
-		List<FileEntity> files = this.services.artifacts().list(repository.name(), "pool/" + distribution + "/");
-		if (files.isEmpty()) {
+		String prefix = "pool/" + distribution + "/";
+		String key = repository.name() + "\0" + distribution;
+		List<FileState> states = this.services.artifacts().states(repository.name(), prefix);
+		if (states.isEmpty()) {
+			this.snapshots.remove(key);
+			this.locks.remove(key);
 			return null;
 		}
-		StringBuilder state = new StringBuilder();
-		for (FileEntity file : files) {
-			state.append(file.path()).append('\0').append(file.sha256()).append('\0').append(file.createdAt().toEpochMilli()).append('\n');
-		}
-		String fingerprint = hex("SHA-256", state.toString().getBytes(StandardCharsets.UTF_8));
-		String key = repository.name() + "\0" + distribution;
 		Snapshot current = this.snapshots.get(key);
-		if (current != null && current.fingerprint().equals(fingerprint)) {
+		if (current != null && current.fingerprint().equals(fingerprint(states))) {
 			return current;
 		}
 		synchronized (this.locks.computeIfAbsent(key, _ -> new Object())) {
+			// Read again inside the lock, so a request that saw an older state can not replace newer indexes with older ones
+			List<FileEntity> files = this.services.artifacts().list(repository.name(), prefix);
+			if (files.isEmpty()) {
+				this.snapshots.remove(key);
+				return null;
+			}
+			String fingerprint = fingerprint(files.stream().map(file -> new FileState(file.path(), file.sha256(), file.createdAt())).toList());
 			current = this.snapshots.get(key);
 			if (current != null && current.fingerprint().equals(fingerprint)) {
 				return current;
 			}
-			Snapshot generated = this.generate(repository, distribution, files, fingerprint, current == null ? null : current.withoutPrevious());
+			Snapshot generated = this.generate(repository, distribution, files, fingerprint, current);
 			this.snapshots.put(key, generated);
+			this.pruneDeletedRepositories();
 			return generated;
 		}
 	}
-
+	
+	/**
+	 * Returns the time of a new generation, in whole seconds and after the previous generation.<br>
+	 * apt revalidates InRelease with If-Modified-Since and ignores a Release whose Date is not newer than the cached one,
+	 * so every change has to move the date forward. It must not be ahead of the clock either, sqv rejects a signature
+	 * created in the future, so a second change within one second waits for the next second instead.<br>
+	 */
 	@NonNull
-	private Snapshot generate(@NonNull RepositoryEntity repository, @NonNull String distribution, @NonNull List<FileEntity> files, @NonNull String fingerprint, @Nullable Snapshot previous) throws Exception {
+	private static Instant generationDate(@Nullable Snapshot previous) {
+		Instant date = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
+		if (previous == null || date.isAfter(previous.date())) {
+			return date;
+		}
+		if (previous.date().isAfter(date.plusSeconds(1))) {
+			// The clock went back, waiting for it would block for as long as it jumped
+			return previous.date().plusSeconds(1);
+		}
+		Instant next = previous.date().plusSeconds(1);
+		try {
+			Thread.sleep(Math.max(1, Duration.between(Instant.now(), next).toMillis() + 1));
+		} catch (InterruptedException e) {
+			Thread.currentThread().interrupt();
+		}
+		return next;
+	}
+	
+	/**
+	 * Drops the indexes of repositories that were deleted, requests to them never reach this handler again.<br>
+	 */
+	private void pruneDeletedRepositories() throws SqlException {
+		Set<String> names = new HashSet<>();
+		for (String key : this.snapshots.keySet()) {
+			names.add(key.substring(0, key.indexOf('\0')));
+		}
+		for (String name : names) {
+			if (this.services.repositories().get(name) == null) {
+				this.snapshots.keySet().removeIf(key -> key.startsWith(name + "\0"));
+				this.locks.keySet().removeIf(key -> key.startsWith(name + "\0"));
+				this.repositoryLocks.remove(name);
+			}
+		}
+	}
+	
+	@NonNull
+	private Snapshot generate(@NonNull RepositoryEntity repository, @NonNull String distribution, @NonNull List<FileEntity> files, @NonNull String fingerprint, @Nullable Snapshot previous) {
 		// component -> architecture -> entries sorted by package, version and architecture
 		Map<String, Map<String, SortedMap<String, String>>> entries = new TreeMap<>();
 		Map<String, SortedMap<String, String>> independent = new TreeMap<>();
-		SortedSet<String> architectures = new TreeSet<>(Set.of("all"));
-		Instant date = Instant.EPOCH;
+		// Every configured architecture gets an index, so a client of an architecture without own packages still finds the
+		// architecture independent ones, apt ignores a repository whose Release does not list the architecture of the client
+		SortedSet<String> architectures = new TreeSet<>(this.services.config().debianArchitectures());
+		architectures.add("all");
 		for (FileEntity file : files) {
 			ObjectNode metadata = Json.parseObject(file.metadata());
 			String component = Json.text(metadata, "component");
@@ -296,7 +375,13 @@ public class DebianHandler extends FormatHandler {
 				continue;
 			}
 			String sortKey = file.packageName() + "\0" + file.version() + "\0" + architecture + "\0" + file.path();
-			String entry = packagesEntry(control, file);
+			String entry;
+			try {
+				entry = packagesEntry(control, file);
+			} catch (InvalidPackageException e) {
+				LOGGER.warn("Skipping {} of repository {} in the Debian index: {}", file.path(), repository.name(), e.getMessage());
+				continue;
+			}
 			entries.computeIfAbsent(component, _ -> new TreeMap<>());
 			if ("all".equals(architecture)) {
 				independent.computeIfAbsent(component, _ -> new TreeMap<>()).put(sortKey, entry);
@@ -304,12 +389,9 @@ public class DebianHandler extends FormatHandler {
 				architectures.add(architecture);
 				entries.get(component).computeIfAbsent(architecture, _ -> new TreeMap<>()).put(sortKey, entry);
 			}
-			if (file.createdAt().isAfter(date)) {
-				date = file.createdAt();
-			}
 		}
-		date = date.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
-
+		Instant date = generationDate(previous);
+		
 		Map<String, byte[]> generated = new LinkedHashMap<>();
 		Map<String, byte[]> byHash = new HashMap<>();
 		for (String component : entries.keySet()) {
@@ -328,7 +410,7 @@ public class DebianHandler extends FormatHandler {
 				}
 			}
 		}
-
+		
 		StringBuilder release = new StringBuilder();
 		release.append("Origin: ").append(repository.name()).append('\n');
 		release.append("Label: ").append(repository.name()).append('\n');
@@ -350,14 +432,19 @@ public class DebianHandler extends FormatHandler {
 		generated.put("Release", releaseText.getBytes(StandardCharsets.UTF_8));
 		generated.put("Release.gpg", key.detachedSignature(releaseText.getBytes(StandardCharsets.UTF_8), date).getBytes(StandardCharsets.US_ASCII));
 		generated.put("InRelease", key.clearSign(releaseText, date).getBytes(StandardCharsets.UTF_8));
-		return new Snapshot(fingerprint, date, Map.copyOf(generated), Map.copyOf(byHash), previous);
+		List<Map<String, byte[]>> generations = new ArrayList<>();
+		generations.add(Map.copyOf(byHash));
+		if (previous != null) {
+			generations.addAll(previous.byHash().subList(0, Math.min(previous.byHash().size(), BY_HASH_GENERATIONS)));
+		}
+		return new Snapshot(fingerprint, date, Map.copyOf(generated), List.copyOf(generations));
 	}
-
+	
 	private void upload(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull List<String> segments) throws Exception {
 		Principal principal = this.authorize(ctx, repository, AccessLevel.WRITE);
 		String distribution = requireName("distribution", segments.get(1));
 		String component = requireName("component", segments.get(2));
-
+		
 		StoredBlob blob;
 		try (InputStream input = ctx.bodyInputStream()) {
 			blob = this.services.artifacts().upload(input);
@@ -371,7 +458,7 @@ public class DebianHandler extends FormatHandler {
 			String version = required(control, "Version", VERSION);
 			String architecture = required(control, "Architecture", ARCHITECTURE);
 			String path = poolPath(distribution, component, packageName, version, architecture);
-
+			
 			ObjectNode fileMetadata = Json.object();
 			fileMetadata.put("distribution", distribution);
 			fileMetadata.put("component", component);
@@ -388,27 +475,22 @@ public class DebianHandler extends FormatHandler {
 					versionMetadata.put(field.toLowerCase(Locale.ROOT), value);
 				}
 			}
-
-			boolean stored = this.services.artifacts().transaction(work -> {
-				FileEntity existing = this.services.artifacts().get(work, repository.name(), path);
-				if (existing != null && existing.sha256().equals(blob.sha256())) {
-					return false;
+			
+			boolean stored;
+			try {
+				stored = this.store(repository, path, blob, packageName, version, Json.write(fileMetadata), Json.write(versionMetadata), username(principal));
+			} catch (SqlException e) {
+				// A concurrent upload of the same path committed first, identical content is not a conflict
+				FileEntity winner = SqlErrors.isUniqueViolation(e) ? this.services.artifacts().get(repository.name(), path) : null;
+				if (winner == null || !winner.sha256().equals(blob.sha256())) {
+					throw e;
 				}
-				if (existing != null && !repository.allowRedeploy()) {
-					throw HttpError.conflict("Package already exists: " + path);
-				}
-				if (existing == null) {
-					this.services.artifacts().insert(work, repository.name(), path, blob, CONTENT_TYPE, packageName, version, Json.write(fileMetadata), username(principal));
-				} else {
-					this.services.artifacts().put(work, repository.name(), path, blob, CONTENT_TYPE, packageName, version, Json.write(fileMetadata), username(principal));
-				}
-				this.services.packages().upsert(work, repository.name(), packageName, version, Json.write(versionMetadata), username(principal));
-				return true;
-			});
+				stored = false;
+			}
 			if (!stored) {
 				this.services.artifacts().releaseBlobs(List.of(PathRepositoryHandler.fakeFile(repository, blob)));
 			}
-
+			
 			ObjectNode response = Json.object();
 			response.put("path", path);
 			response.put("package", packageName);
@@ -428,41 +510,74 @@ public class DebianHandler extends FormatHandler {
 			throw e;
 		}
 	}
-
+	
+	/**
+	 * Stores the package in one transaction.<br>
+	 * Uploads and deletes of a repository are serialized, otherwise deleting the last file of a version could remove the
+	 * version while a concurrent upload adds another architecture of it, leaving a file without version.<br>
+	 *
+	 * @return false if the identical file is already stored
+	 */
+	private boolean store(@NonNull RepositoryEntity repository, @NonNull String path, @NonNull StoredBlob blob, @NonNull String packageName, @NonNull String version, @NonNull String fileMetadata, @NonNull String versionMetadata, @Nullable String createdBy) throws SqlException {
+		synchronized (this.repositoryLocks.computeIfAbsent(repository.name(), _ -> new Object())) {
+			return this.services.artifacts().transaction(work -> {
+				FileEntity existing = this.services.artifacts().get(work, repository.name(), path);
+				if (existing != null && existing.sha256().equals(blob.sha256())) {
+					return false;
+				}
+				if (existing != null && !repository.allowRedeploy()) {
+					throw HttpError.conflict("Package already exists: " + path);
+				}
+				if (existing == null) {
+					this.services.artifacts().insert(work, repository.name(), path, blob, CONTENT_TYPE, packageName, version, fileMetadata, createdBy);
+				} else {
+					this.services.artifacts().put(work, repository.name(), path, blob, CONTENT_TYPE, packageName, version, fileMetadata, createdBy);
+					// The epoch is not part of the file name, a redeploy of 1:1.0 replaces the file of 1.0 and that version goes with it
+					this.deleteVersionWithoutFiles(work, repository, existing);
+				}
+				this.services.packages().upsert(work, repository.name(), packageName, version, versionMetadata, createdBy);
+				return true;
+			});
+		}
+	}
+	
+	/**
+	 * Deletes the version of a removed file once no file of it is left, the version is shared by architectures and distributions.<br>
+	 */
+	private void deleteVersionWithoutFiles(@NonNull UnitOfWork work, @NonNull RepositoryEntity repository, @NonNull FileEntity file) throws SqlException {
+		if (file.packageName() != null && file.version() != null && this.services.artifacts().listByVersion(work, repository.name(), file.packageName(), file.version()).isEmpty()) {
+			this.services.packages().delete(work, repository.name(), file.packageName(), file.version());
+		}
+	}
+	
 	private void delete(@NonNull Context ctx, @NonNull RepositoryEntity repository, @NonNull String path) throws Exception {
 		this.authorize(ctx, repository, AccessLevel.DELETE);
-		boolean deleted = this.services.artifacts().transaction(work -> {
-			FileEntity file = this.services.artifacts().get(work, repository.name(), path);
-			if (file == null) {
-				return false;
-			}
-			this.services.artifacts().delete(work, repository.name(), path);
-			// The version is shared by the architectures and distributions of a package, it goes with its last file
-			if (file.packageName() != null && file.version() != null && this.services.artifacts().listByVersion(work, repository.name(), file.packageName(), file.version()).isEmpty()) {
-				this.services.packages().delete(work, repository.name(), file.packageName(), file.version());
-			}
-			return true;
-		});
+		boolean deleted;
+		synchronized (this.repositoryLocks.computeIfAbsent(repository.name(), _ -> new Object())) {
+			deleted = this.services.artifacts().transaction(work -> {
+				FileEntity file = this.services.artifacts().get(work, repository.name(), path);
+				if (file == null) {
+					return false;
+				}
+				this.services.artifacts().delete(work, repository.name(), path);
+				this.deleteVersionWithoutFiles(work, repository, file);
+				return true;
+			});
+		}
 		if (!deleted) {
 			throw HttpError.notFound();
 		}
 		ctx.status(204);
 	}
-
+	
 	/**
 	 * The generated indexes of one distribution.<br>
 	 *
 	 * @param fingerprint The hash of the stored packages the indexes were generated from
-	 * @param date The time of the newest package, used as {@code Date} and as signature time so equal content gives equal indexes
+	 * @param date The time of the generation, used as {@code Date}, {@code Last-Modified} and signature time, always after the previous generation
 	 * @param files The indexes by their path below {@code dists/{distribution}/}
-	 * @param byHash The {@code Packages} files by {@code {component}/binary-{arch}/{algorithm}/{digest}}
-	 * @param previous The indexes generated before, still served by hash
+	 * @param byHash The {@code Packages} files by {@code {component}/binary-{arch}/{algorithm}/{digest}} of this generation,
+	 * followed by up to {@link #BY_HASH_GENERATIONS} earlier ones, so a client that fetched an older InRelease still finds its indexes
 	 */
-	private record Snapshot(@NonNull String fingerprint, @NonNull Instant date, @NonNull Map<String, byte[]> files, @NonNull Map<String, byte[]> byHash, @Nullable Snapshot previous) {
-
-		@NonNull
-		private Snapshot withoutPrevious() {
-			return new Snapshot(this.fingerprint, this.date, this.files, this.byHash, null);
-		}
-	}
+	private record Snapshot(@NonNull String fingerprint, @NonNull Instant date, @NonNull Map<String, byte[]> files, @NonNull List<Map<String, byte[]>> byHash) {}
 }

@@ -39,6 +39,15 @@ class ServerConfigTest {
 	}
 	
 	@Test
+	void parsesDebianArchitectures() {
+		assertEquals(java.util.List.of("amd64", "arm64", "armhf", "i386", "ppc64el", "riscv64", "s390x"), ServerConfig.from(Env.of(Map.of())).debianArchitectures());
+		assertEquals(java.util.List.of("amd64", "arm64"), ServerConfig.from(Env.of(Map.of(EnvKeys.DEBIAN_ARCHITECTURES, "amd64, arm64 amd64"))).debianArchitectures());
+		assertThrows(ConfigException.class, () -> ServerConfig.from(Env.of(Map.of(EnvKeys.DEBIAN_ARCHITECTURES, "amd64,all"))));
+		assertThrows(ConfigException.class, () -> ServerConfig.from(Env.of(Map.of(EnvKeys.DEBIAN_ARCHITECTURES, "AMD64"))));
+		assertThrows(ConfigException.class, () -> ServerConfig.from(Env.of(Map.of(EnvKeys.DEBIAN_ARCHITECTURES, " , "))));
+	}
+	
+	@Test
 	void rejectsInvalidValues() {
 		assertThrows(ConfigException.class, () -> ServerConfig.from(Env.of(Map.of(EnvKeys.LOGIN_MAX_FAILURES, "0"))));
 		assertThrows(ConfigException.class, () -> ServerConfig.from(Env.of(Map.of(EnvKeys.SESSION_HOURS, "0"))));

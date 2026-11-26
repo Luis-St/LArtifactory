@@ -30,20 +30,20 @@ import java.util.*;
  * </p>
  */
 public final class DebianSigningKey {
-
+	
 	private static final Logger LOGGER = LogManager.getLogger(DebianSigningKey.class);
 	public static final String FILE_NAME = "debian-signing-key.asc";
 	private static final String USER_ID = "LArtifactory Debian repository signing key";
 	private final PGPPrivateKey privateKey;
 	private final PGPPublicKey signingKey;
 	private final PGPPublicKeyRing publicRing;
-
+	
 	private DebianSigningKey(@NonNull PGPPrivateKey privateKey, @NonNull PGPPublicKey signingKey, @NonNull PGPPublicKeyRing publicRing) {
 		this.privateKey = privateKey;
 		this.signingKey = signingKey;
 		this.publicRing = publicRing;
 	}
-
+	
 	/**
 	 * Loads the configured key, or the key stored in the storage directory, which is generated if it does not exist yet.<br>
 	 *
@@ -69,10 +69,24 @@ public final class DebianSigningKey {
 				"To keep it in the environment instead, set {} to the content or the path of that file", file, "ARTIFACTORY_DEBIAN_SIGNING_KEY");
 			return parse(armored, null);
 		} catch (IOException | PGPException e) {
-			throw new IllegalStateException("Failed to load the Debian signing key", e);
+			throw new IllegalStateException("Failed to load the Debian signing key: " + e.getMessage(), e);
 		}
 	}
-
+	
+	/**
+	 * Loads the key at startup if it already exists (configured or generated before), so a wrong passphrase or a broken key
+	 * stops the start instead of failing every index request. A key that still has to be generated is generated on first use.<br>
+	 *
+	 * @return The key, null if it has not been generated yet
+	 */
+	@Nullable
+	public static DebianSigningKey loadExisting(@Nullable String configured, @Nullable String passphrase, @NonNull Path storagePath) {
+		if (configured == null && !Files.exists(storagePath.resolve(FILE_NAME))) {
+			return null;
+		}
+		return load(configured, passphrase, storagePath);
+	}
+	
 	@NonNull
 	private static DebianSigningKey parse(@NonNull String armored, @Nullable String passphrase) throws IOException, PGPException {
 		PGPSecretKeyRingCollection rings;
@@ -81,19 +95,62 @@ public final class DebianSigningKey {
 		}
 		char[] password = passphrase == null ? new char[0] : passphrase.toCharArray();
 		for (PGPSecretKeyRing ring : rings) {
+			PGPSecretKey selected = null;
 			for (PGPSecretKey key : ring) {
-				if (!key.isSigningKey() || key.isPrivateKeyEmpty()) {
+				if (!canSign(key)) {
 					continue;
 				}
-				PGPPrivateKey privateKey = key.extractPrivateKey(new BcPBESecretKeyDecryptorBuilder(new BcPGPDigestCalculatorProvider()).build(password));
+				// Like gpg, the newest signing subkey is preferred over the primary key
+				if (selected == null || (selected.isMasterKey() && !key.isMasterKey()) || (selected.isMasterKey() == key.isMasterKey() && key.getPublicKey().getCreationTime().after(selected.getPublicKey().getCreationTime()))) {
+					selected = key;
+				}
+			}
+			if (selected != null) {
+				PGPPrivateKey privateKey;
+				try {
+					privateKey = selected.extractPrivateKey(new BcPBESecretKeyDecryptorBuilder(new BcPGPDigestCalculatorProvider()).build(password));
+				} catch (PGPException e) {
+					throw new PGPException("Failed to unlock the Debian signing key, check " + "ARTIFACTORY_DEBIAN_SIGNING_PASSPHRASE", e);
+				}
 				List<PGPPublicKey> publicKeys = new ArrayList<>();
 				ring.getPublicKeys().forEachRemaining(publicKeys::add);
-				return new DebianSigningKey(privateKey, key.getPublicKey(), new PGPPublicKeyRing(publicKeys));
+				return new DebianSigningKey(privateKey, selected.getPublicKey(), new PGPPublicKeyRing(publicKeys));
 			}
 		}
-		throw new PGPException("The Debian signing key contains no secret key that can sign");
+		throw new PGPException("The Debian signing key contains no usable secret key that can sign (key flag S, not revoked, not expired)");
 	}
-
+	
+	/**
+	 * Checks whether a key may sign data: its algorithm signs, its secret part is present, it is neither revoked nor expired,
+	 * and its newest self or binding signature carries the sign flag (keys without flags are judged by their algorithm only).<br>
+	 * The algorithm alone is not enough, a certify only primary key with a signing subkey would sign with the wrong key and apt rejects that.<br>
+	 */
+	private static boolean canSign(@NonNull PGPSecretKey key) {
+		PGPPublicKey publicKey = key.getPublicKey();
+		if (!key.isSigningKey() || key.isPrivateKeyEmpty() || publicKey.hasRevocation()) {
+			return false;
+		}
+		long validSeconds = publicKey.getValidSeconds();
+		if (validSeconds > 0 && publicKey.getCreationTime().toInstant().plusSeconds(validSeconds).isBefore(Instant.now())) {
+			return false;
+		}
+		PGPSignature newest = null;
+		Iterator<PGPSignature> signatures = key.isMasterKey() ? publicKey.getSignatures() : publicKey.getSignaturesOfType(PGPSignature.SUBKEY_BINDING);
+		while (signatures.hasNext()) {
+			PGPSignature signature = signatures.next();
+			if (signature.getHashedSubPackets() == null || signature.getHashedSubPackets().getKeyFlags() == 0) {
+				continue;
+			}
+			if (key.isMasterKey() && !signature.isCertification() && signature.getSignatureType() != PGPSignature.DIRECT_KEY) {
+				continue;
+			}
+			if (newest == null || signature.getCreationTime().after(newest.getCreationTime())) {
+				newest = signature;
+			}
+		}
+		return newest == null || (newest.getHashedSubPackets().getKeyFlags() & KeyFlags.SIGN_DATA) != 0;
+	}
+	
 	/**
 	 * Generates an RSA 3072 key that can sign and certify, without passphrase, armored.<br>
 	 */
@@ -103,7 +160,7 @@ public final class DebianSigningKey {
 		generator.init(new RSAKeyGenerationParameters(BigInteger.valueOf(0x10001), new SecureRandom(), 3072, 80));
 		AsymmetricCipherKeyPair pair = generator.generateKeyPair();
 		PGPKeyPair keyPair = new BcPGPKeyPair(PublicKeyPacket.VERSION_4, PublicKeyAlgorithmTags.RSA_GENERAL, pair, new Date());
-
+		
 		PGPSignatureSubpacketGenerator hashed = new PGPSignatureSubpacketGenerator();
 		hashed.setKeyFlags(false, KeyFlags.SIGN_DATA | KeyFlags.CERTIFY_OTHER);
 		hashed.setPreferredHashAlgorithms(false, new int[] { HashAlgorithmTags.SHA512, HashAlgorithmTags.SHA256 });
@@ -119,16 +176,23 @@ public final class DebianSigningKey {
 		}
 		return output.toString(StandardCharsets.US_ASCII);
 	}
-
+	
+	/**
+	 * Writes the key to a temporary file readable only by the owner and moves it into place,
+	 * so a crash while writing never leaves a half written key that breaks every later start.<br>
+	 */
 	private static void write(@NonNull Path file, @NonNull String content) throws IOException {
+		Path temporary = file.resolveSibling(file.getFileName() + ".tmp");
+		Files.deleteIfExists(temporary);
 		if (file.getFileSystem().supportedFileAttributeViews().contains("posix")) {
-			Files.createFile(file, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-			Files.writeString(file, content, StandardCharsets.US_ASCII, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+			Files.createFile(temporary, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
+			Files.writeString(temporary, content, StandardCharsets.US_ASCII, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
 		} else {
-			Files.writeString(file, content, StandardCharsets.US_ASCII, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+			Files.writeString(temporary, content, StandardCharsets.US_ASCII, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
 		}
+		Files.move(temporary, file, StandardCopyOption.ATOMIC_MOVE);
 	}
-
+	
 	private static void escapeLine(@NonNull StringBuilder builder, @NonNull String line) {
 		// Dash escaping of the cleartext signature framework (RFC 4880 7.1)
 		if (line.startsWith("-")) {
@@ -136,7 +200,7 @@ public final class DebianSigningKey {
 		}
 		builder.append(line).append('\n');
 	}
-
+	
 	@NonNull
 	private static String stripTrailingWhitespace(@NonNull String line) {
 		int end = line.length();
@@ -145,7 +209,7 @@ public final class DebianSigningKey {
 		}
 		return line.substring(0, end);
 	}
-
+	
 	/**
 	 * The creation time of the signing key, a signature must not be older than it.<br>
 	 */
@@ -153,7 +217,7 @@ public final class DebianSigningKey {
 	public Instant createdAt() {
 		return this.signingKey.getCreationTime().toInstant();
 	}
-
+	
 	/**
 	 * Returns the public key, armored, for clients to import into their keyring.<br>
 	 */
@@ -169,7 +233,7 @@ public final class DebianSigningKey {
 			throw new UncheckedIOException(e);
 		}
 	}
-
+	
 	/**
 	 * Creates a detached armored signature of the data ({@code Release.gpg}).<br>
 	 *
@@ -181,7 +245,7 @@ public final class DebianSigningKey {
 		generator.update(data);
 		return this.armor(generator);
 	}
-
+	
 	/**
 	 * Creates a cleartext signed document ({@code InRelease}).<br>
 	 */
@@ -205,7 +269,7 @@ public final class DebianSigningKey {
 		builder.append(this.armor(generator));
 		return builder.toString();
 	}
-
+	
 	@NonNull
 	private PGPSignatureGenerator generator(int type, @NonNull Instant time) {
 		try {
@@ -225,7 +289,7 @@ public final class DebianSigningKey {
 			throw new IllegalStateException("Failed to initialize the Debian signing key", e);
 		}
 	}
-
+	
 	@NonNull
 	private String armor(@NonNull PGPSignatureGenerator generator) {
 		try {

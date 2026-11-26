@@ -237,6 +237,20 @@ public class ArtifactService {
 		return new DirectoryListing(new TreeSet<>(directories), files.stream().filter(file -> file.path().startsWith(prefix)).toList());
 	}
 	
+	/**
+	 * Lists path, digest and creation time of the files below the prefix, ordered by path, without loading their metadata.<br>
+	 */
+	@NonNull
+	public List<FileState> states(@NonNull String repository, @NonNull String prefix) throws SqlException {
+		List<FileState> states = new ArrayList<>();
+		for (var row : this.database.from(FILES).select(FILE_PATH, FILE_SHA256, FILE_CREATED_AT).where(prefixCondition(repository, prefix)).orderBy(FILE_PATH.ascending()).fetch()) {
+			if (row.first().startsWith(prefix)) {
+				states.add(new FileState(row.first(), row.second(), row.third()));
+			}
+		}
+		return states;
+	}
+	
 	@NonNull
 	public List<FileEntity> listByPackage(@NonNull String repository, @NonNull String packageName) throws SqlException {
 		return this.database.from(FILES).select()
@@ -440,6 +454,11 @@ public class ArtifactService {
 		ctx.header("Content-Length", String.valueOf(file.size()));
 		ctx.result(this.blobStore.open(file.sha256()));
 	}
+	
+	/**
+	 * The identity of a stored file, enough to detect that the files below a prefix changed.<br>
+	 */
+	public record FileState(@NonNull String path, @NonNull String sha256, @NonNull Instant createdAt) {}
 	
 	/**
 	 * The direct content of a directory.<br>

@@ -30,6 +30,7 @@ public final class EnvKeys {
 	public static final String PASSWORD_RESET_MINUTES = "ARTIFACTORY_PASSWORD_RESET_MINUTES";
 	public static final String DEBIAN_SIGNING_KEY = "ARTIFACTORY_DEBIAN_SIGNING_KEY";
 	public static final String DEBIAN_SIGNING_PASSPHRASE = "ARTIFACTORY_DEBIAN_SIGNING_PASSPHRASE";
+	public static final String DEBIAN_ARCHITECTURES = "ARTIFACTORY_DEBIAN_ARCHITECTURES";
 	
 	// Mail
 	public static final String SMTP_HOST = "ARTIFACTORY_SMTP_HOST";

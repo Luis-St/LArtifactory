@@ -68,24 +68,86 @@ curl -sS -u "lat-ci:$CI_TOKEN" -o "$DEB_DIR/downloaded.deb" "$REPO_URL/pool/stab
 check "downloaded package matches uploaded package" cmp "$DEB_DIR/lat-test-app_2.0.0-1_amd64.deb" "$DEB_DIR/downloaded.deb"
 check_contains "package api lists the package" '"lat-test-app"' "$(curl -sS -u "lat-reader:$READER_TOKEN" "$ARTIFACTORY_URL/api/repositories/debian-local/packages")"
 
+# Packages dpkg can not install are rejected with 400 instead of failing with 500 or being accepted
+head -c 200 "$DEB_DIR/lat-test-lib_1.0.0-1_all.deb" > "$DEB_DIR/truncated.deb"
+check_status "upload of a truncated package is rejected" 400 -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/truncated.deb" "$REPO_URL/pool/stable/main/"
+mkdir -p "$DEB_DIR/order"
+(cd "$DEB_DIR/order" && ar x ../lat-test-lib_1.0.0-1_all.deb && ar rc ../order.deb debian-binary data.tar.* control.tar.*)
+check_status "upload of a package with the data archive first is rejected" 400 -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/order.deb" "$REPO_URL/pool/stable/main/"
+DUPLICATE_ROOT="$DEB_DIR/build/lat-test-lib-1.0.0-1-all"
+cp -r "$DUPLICATE_ROOT" "$DEB_DIR/build/duplicate"
+echo "Version: 9.9" >> "$DEB_DIR/build/duplicate/DEBIAN/control"
+dpkg-deb --nocheck --root-owner-group --build "$DEB_DIR/build/duplicate" "$DEB_DIR/duplicate.deb" > /dev/null 2>&1
+check_status "upload of a package with a duplicate control field is rejected" 400 -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/duplicate.deb" "$REPO_URL/pool/stable/main/"
+
+# Parallel uploads of the same package: one stores it, the others find the identical file
+build_deb lat-test-parallel 1.0-1 all
+for i in 1 2 3 4 5 6 7 8; do
+	curl -s -o /dev/null -w '%{http_code}\n' -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/lat-test-parallel_1.0-1_all.deb" "$REPO_URL/pool/stable/main/" > "$DEB_DIR/parallel-$i" &
+done
+wait
+PARALLEL="$(cat "$DEB_DIR"/parallel-* | sort | uniq -c | tr -s ' ' | tr '\n' ',')"
+check_equals "parallel identical uploads are stored once and accepted" " 7 200, 1 201," "$PARALLEL"
+
+# Conditional requests and indexes by hash, checked again after the next change
+INRELEASE_HEADERS="$(curl -sS -D - -o /dev/null -u "lat-reader:$READER_TOKEN" "$REPO_URL/dists/stable/InRelease" | tr -d '\r')"
+LAST_MODIFIED="$(grep -i '^Last-Modified:' <<< "$INRELEASE_HEADERS" | cut -d' ' -f2-)"
+ETAG="$(grep -i '^ETag:' <<< "$INRELEASE_HEADERS" | cut -d' ' -f2-)"
+check_status "unchanged InRelease is not modified since its date" 304 -u "lat-reader:$READER_TOKEN" -H "If-Modified-Since: $LAST_MODIFIED" "$REPO_URL/dists/stable/InRelease"
+check_status "an etag list with a weak match is not modified" 304 -u "lat-reader:$READER_TOKEN" -H "If-None-Match: \"other\", W/$ETAG" "$REPO_URL/dists/stable/InRelease"
+OLD_HASH="$(curl -sS -u "lat-reader:$READER_TOKEN" "$REPO_URL/dists/stable/Release" | sed -n '/^SHA256:/,/^SHA512:/p' | grep ' main/binary-arm64/Packages$' | awk '{print $1}')"
+OLD_BY_HASH="$REPO_URL/dists/stable/main/binary-arm64/by-hash/SHA256/$OLD_HASH"
+check_status "the arm64 index is served by hash" 200 -u "lat-reader:$READER_TOKEN" "$OLD_BY_HASH"
+
+# A repository with architecture independent packages only
+INDEP_URL="$ARTIFACTORY_URL/debian/debian-indep"
+api -o /dev/null -X DELETE "$ARTIFACTORY_URL/api/repositories/debian-indep"
+check_status "create debian repository debian-indep" 201 -u "$ADMIN_USER:$ADMIN_PASSWORD" -H 'Content-Type: application/json' \
+	-X POST "$ARTIFACTORY_URL/api/repositories" -d '{"name":"debian-indep","type":"debian"}'
+build_deb lat-test-indep 1.0-1 all
+check_status "upload an architecture independent package" 201 -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/lat-test-indep_1.0-1_all.deb" "$INDEP_URL/pool/stable/main/"
+check_contains "a repository with architecture independent packages only lists amd64" "main/binary-amd64/Packages" "$(curl -sS -u "lat-reader:$READER_TOKEN" "$INDEP_URL/dists/stable/Release")"
+
+APT_CONTAINER=""
 if command -v docker > /dev/null && [[ "$(uname -m)" == "x86_64" ]]; then
 	cat > "$DEB_DIR/install.sh" <<-EOF
 		set -e
+		mkdir -p /etc/apt/keyrings
 		cp /work/public.key /etc/apt/keyrings/lartifactory.asc
 		echo "deb [signed-by=/etc/apt/keyrings/lartifactory.asc] $REPO_URL stable main" > /etc/apt/sources.list.d/lartifactory.list
-		printf 'machine %s\nlogin lat-reader\npassword %s\n' "$REPO_URL" "$READER_TOKEN" > /etc/apt/auth.conf.d/lartifactory.conf
+		echo "deb [signed-by=/etc/apt/keyrings/lartifactory.asc] $INDEP_URL stable main" > /etc/apt/sources.list.d/lartifactory-indep.list
+		printf 'machine %s\nlogin lat-reader\npassword %s\nmachine %s\nlogin lat-reader\npassword %s\n' "$REPO_URL" "$READER_TOKEN" "$INDEP_URL" "$READER_TOKEN" > /etc/apt/auth.conf.d/lartifactory.conf
 		chmod 600 /etc/apt/auth.conf.d/lartifactory.conf
 		apt-get -o Acquire::http::Proxy=false update
-		apt-get -o Acquire::http::Proxy=false install -y --no-install-recommends lat-test-app
-		cat /usr/share/lat-test-app/version.txt /usr/share/lat-test-lib/version.txt
 	EOF
-	mkdir -p "$DEB_DIR/apt"
+	APT_CONTAINER="$(docker run -d --rm --network host -v "$DEB_DIR:/work:ro" debian:trixie-slim sleep 900)"
+	check "apt updates from the repositories" docker exec "$APT_CONTAINER" bash /work/install.sh
 	check "apt installs the package and its dependency from the repository" \
-		docker run --rm --network host -v "$DEB_DIR:/work:ro" debian:trixie-slim bash -c 'mkdir -p /etc/apt/keyrings && bash /work/install.sh && dpkg -s lat-test-lib | grep -q "Version: 1.1.0-1"'
+		docker exec "$APT_CONTAINER" bash -c 'apt-get -o Acquire::http::Proxy=false install -y --no-install-recommends lat-test-app && dpkg -s lat-test-lib | grep -q "Version: 1.1.0-1"'
+	check "apt installs a package of a repository with architecture independent packages only" \
+		docker exec "$APT_CONTAINER" apt-get -o Acquire::http::Proxy=false install -y --no-install-recommends lat-test-indep
 fi
 
 check_status "writer can not delete" 403 -u "lat-ci:$CI_TOKEN" -X DELETE "$REPO_URL/pool/stable/main/l/lat-test-app/lat-test-app_2.0.0-1_arm64.deb"
 check_status "admin deletes a package file" 204 -H "Authorization: Bearer $ADMIN_TOKEN" -X DELETE "$REPO_URL/pool/stable/main/l/lat-test-app/lat-test-app_2.0.0-1_arm64.deb"
-check_not_contains "deleted package is removed from the Release" "binary-arm64" "$(curl -sS -u "lat-reader:$READER_TOKEN" "$REPO_URL/dists/stable/Release")"
+check_not_contains "deleted package is removed from the index" "_arm64.deb" "$(curl -sS -u "lat-reader:$READER_TOKEN" "$REPO_URL/dists/stable/main/binary-arm64/Packages")"
+check_status "InRelease is modified since its date after a delete" 200 -u "lat-reader:$READER_TOKEN" -H "If-Modified-Since: $LAST_MODIFIED" "$REPO_URL/dists/stable/InRelease"
+check_status "the previous arm64 index is still served by hash" 200 -u "lat-reader:$READER_TOKEN" "$OLD_BY_HASH"
+check_status "admin deletes the newest library version with the management api" 204 -u "$ADMIN_USER:$ADMIN_PASSWORD" -X DELETE "$ARTIFACTORY_URL/api/repositories/debian-local/packages?package=lat-test-lib&version=1.1.0-1"
+if [[ -n "$APT_CONTAINER" ]]; then
+	check "apt sees the deleted version after an update" \
+		docker exec "$APT_CONTAINER" bash -c 'apt-get -o Acquire::http::Proxy=false update && apt-cache madison lat-test-lib | tee /dev/stderr | grep -q "1.0.0-1 | http" && ! apt-cache madison lat-test-lib | grep -q "1.1.0-1 | http"'
+	docker stop "$APT_CONTAINER" > /dev/null
+fi
 check_status "admin deletes a package version with the management api" 204 -u "$ADMIN_USER:$ADMIN_PASSWORD" -X DELETE "$ARTIFACTORY_URL/api/repositories/debian-local/packages?package=lat-test-lib&version=1.0.0-1"
 check_status "a distribution without packages is gone" 404 -u "lat-reader:$READER_TOKEN" "$REPO_URL/dists/testing/InRelease"
+
+# A redeploy of a version with an epoch replaces the file of the version without epoch, and that version with it
+check_status "admin allows redeploys" 200 -u "$ADMIN_USER:$ADMIN_PASSWORD" -H 'Content-Type: application/json' -X PATCH -d '{"allowRedeploy":true}' "$ARTIFACTORY_URL/api/repositories/debian-local"
+build_deb lat-test-epoch 1.0 amd64
+build_deb lat-test-epoch 1:1.0 amd64
+check_status "upload a version without epoch" 201 -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/lat-test-epoch_1.0_amd64.deb" "$REPO_URL/pool/stable/main/"
+check_status "redeploy the same file name with an epoch" 201 -u "lat-ci:$CI_TOKEN" -T "$DEB_DIR/lat-test-epoch_1:1.0_amd64.deb" "$REPO_URL/pool/stable/main/"
+EPOCH_PACKAGE="$(curl -sS -u "lat-reader:$READER_TOKEN" "$ARTIFACTORY_URL/api/repositories/debian-local/packages/lat-test-epoch")"
+check_contains "the package lists the version with epoch" '"1:1.0"' "$EPOCH_PACKAGE"
+check_not_contains "the replaced version without epoch is gone" '"version":"1.0"' "$EPOCH_PACKAGE"

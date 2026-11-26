@@ -30,7 +30,8 @@ public record ServerConfig(
 	int remoteMetadataTtlMinutes,
 	int auditRetentionDays,
 	@Nullable String debianSigningKey,
-	@Nullable String debianSigningPassphrase
+	@Nullable String debianSigningPassphrase,
+	@NonNull List<String> debianArchitectures
 ) {
 	
 	public ServerConfig {
@@ -72,6 +73,15 @@ public record ServerConfig(
 		requireAtLeast(EnvKeys.MAINTENANCE_INTERVAL, maintenanceIntervalMinutes, 1);
 		requireAtLeast(EnvKeys.REMOTE_METADATA_TTL, remoteMetadataTtlMinutes, 0);
 		requireAtLeast(EnvKeys.AUDIT_RETENTION_DAYS, auditRetentionDays, 0);
+		debianArchitectures = List.copyOf(Objects.requireNonNull(debianArchitectures, "Debian architectures must not be null"));
+		if (debianArchitectures.isEmpty()) {
+			throw new ConfigException(EnvKeys.DEBIAN_ARCHITECTURES + " must name at least one architecture");
+		}
+		for (String architecture : debianArchitectures) {
+			if (!architecture.matches("[a-z0-9][a-z0-9-]{0,31}") || "all".equals(architecture)) {
+				throw new ConfigException(EnvKeys.DEBIAN_ARCHITECTURES + " contains an invalid architecture: " + architecture);
+			}
+		}
 		if (baseUrl != null) {
 			baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
 		}
@@ -102,8 +112,14 @@ public record ServerConfig(
 			env.integer(EnvKeys.REMOTE_METADATA_TTL, 30),
 			env.integer(EnvKeys.AUDIT_RETENTION_DAYS, 365),
 			env.optional(EnvKeys.DEBIAN_SIGNING_KEY),
-			env.optional(EnvKeys.DEBIAN_SIGNING_PASSPHRASE)
+			env.optional(EnvKeys.DEBIAN_SIGNING_PASSPHRASE),
+			parseList(env.string(EnvKeys.DEBIAN_ARCHITECTURES, "amd64,arm64,armhf,i386,ppc64el,riscv64,s390x"))
 		);
+	}
+	
+	@NonNull
+	private static List<String> parseList(@NonNull String value) {
+		return Arrays.stream(value.split("[,\\s]+")).map(String::strip).filter(entry -> !entry.isEmpty()).distinct().toList();
 	}
 	
 	private static void requireAtLeast(@NonNull String key, int value, int min) {
